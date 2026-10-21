@@ -1,0 +1,22 @@
+[meta]
+name = "example"
+version = 1
+
+[[task]]
+id = "T-001"
+title = "Example shared setup"
+priority = 1
+deps = []
+write_scope = ["README.md"]
+acceptance = ["README updated"]
+merge_order = 1
+
+[[task]]
+id = "T-002"
+title = "Example feature A"
+priority = 2
+deps = ["T-001"]
+write_scope = ["src/a/**"]
+read_scope = ["src/common/**"]
+acceptance = ["feature A works"]
+merge_order = 2
