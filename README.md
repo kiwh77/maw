@@ -1,22 +1,30 @@
-# maw — Multi-Agent Worktree CLI
+# maw — Multi-Agent Worktree CLI (Go)
 
-命令行应用：在任意 git 工程中用蓝图管理多 agent 并行开发（worktree 隔离、范围检查、合并队列、看板）。
+单二进制命令行：在任意 git 工程中用蓝图管理多 agent 并行开发（worktree 隔离、范围检查、合并队列、看板）。
 
-设计文档见 [docs/DESIGN.md](docs/DESIGN.md)（v0.2）。
+设计对照见 [docs/DESIGN.md](docs/DESIGN.md)。Python 原型保留在 `legacy/python/`。
 
-## 安装
+## 安装（单二进制）
+
+需要 Go 1.22+：
 
 ```bash
 ./install.sh
-# 确保 ~/.local/bin 在 PATH 中
+# 安装到 ~/.local/bin/maw（CGO_ENABLED=0，可跨平台交叉编译）
 maw --version
 ```
 
-或：
+手动构建：
 
 ```bash
-export PYTHONPATH=/Users/wuhao/Documents/Projects/goal-agents/src
-python3 -m maw --help
+CGO_ENABLED=0 go build -o maw ./cmd/maw
+```
+
+交叉编译示例：
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o maw-linux-amd64 ./cmd/maw
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o maw-darwin-arm64 ./cmd/maw
 ```
 
 ## 快速上手
@@ -24,45 +32,39 @@ python3 -m maw --help
 ```bash
 cd /path/to/your-git-repo
 maw init
-# 编辑 .multiagent/blueprint.toml（或自备蓝图）
 maw plan apply .multiagent/blueprint.toml --yes
 
-# 各 worker 会话：
 export MAW_AGENT=w1
 maw next
-cd "$(maw next --json | python3 -c 'import sys,json; print(json.load(sys.stdin)["worktree"])')"
-# …实现 write_scope 内改动并 commit…
-maw progress -m "milestone"
+# 进入输出的 worktree，改 write_scope 内文件并 commit
 maw submit
 
-# 集成者：
 export MAW_AGENT=int
 maw merge --yes
-maw board   # 同时写入 .multiagent/board/index.html
+maw board   # → .multiagent/board/index.html
 ```
 
-## M1 命令
+## 命令
 
 | 命令 | 说明 |
 | --- | --- |
 | `maw init` | 状态库、协议段、hooks |
 | `maw plan apply / check` | 蓝图校验与落盘 |
 | `maw next` | 领取任务 + worktree |
-| `maw submit` | 范围检查 → 评审/合并队列 |
+| `maw submit` | 范围检查 → 合并队列 |
 | `maw merge --yes` | integrator 串行合入 |
 | `maw board` | 终端 + HTML 看板 |
 
-附属：`progress`、`doctor`、`review`、`block`、`task list/show/unblock`、`hook *`。
-
-全局：`--json`、`--dry-run`。
+附属：`progress`、`doctor`、`review`、`block`、`task`、`hook`。全局：`--json`、`--dry-run`、`-C`。
 
 ## 测试
 
 ```bash
-cd /Users/wuhao/Documents/Projects/goal-agents
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+go test ./...
 ```
 
-## 协议
+## 技术栈
 
-`maw init` 向 `AGENTS.md` / `CLAUDE.md` / `.cursor/rules/maw.mdc` 写入带版本标记的协议段，并安装 `pre-commit` / `pre-push` hooks。
+- Go + [cobra](https://github.com/spf13/cobra)
+- 纯 Go SQLite：[modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)（无 CGO）
+- TOML：pelletier/go-toml
