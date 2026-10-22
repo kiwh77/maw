@@ -8,15 +8,23 @@ maw 定位为本机多 Agent **任务中枢**。下列为已交付与规划能�
 - 全局状态库（`~/.maw`）与跨工程看板（`maw board` / SSE）
 - 多 IDE 协议注入（Cursor / Qoder / Trae / CodeBuddy 等）与 hooks
 
-## 规划中
+## 进行中 / 已部分交付
 
 ### 跨工程 Agent 状态汇聚
 
-Agent 在任意工程执行时，将进度、阻塞、心跳等状态接入本机中枢，与 maw 编排任务同一视图。
+- CLI：`maw status report`（也可 `POST http://127.0.0.1:7420/api/status`，仅 loopback）
+- 增量：`GET /api/feed?since=`
+- SSE：`/api/events` 除 `board-changed` 外推送 `event` 帧
 
-### 客户端状态栏实时通知
+### 桌面客户端（Tauri）
 
-通过协议或插件，把领取、进度、阻塞、合并等事件推送到编辑器 / 系统状态栏，减少盯看板成本。
+把 `maw board --serve` 同一套看板打成桌面壳，系统托盘做实时通知。见 `clients/desktop/`。
+
+## 规划中
+
+### 托盘通知细化
+
+按事件类型（progress / blocked / merged）区分通知文案与声音；多显示器窗口记忆。
 
 ## 非目标（近期）
 

@@ -15,6 +15,11 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Test
-        run: CGO_ENABLED=0 go test ./...
+        run: |
+          CGO_ENABLED=0 go test ./... -coverprofile=coverage.out
+          total=$(go tool cover -func=coverage.out | awk '/^total:/{print $3}' | tr -d '%')
+          echo "coverage=${total}%"
+          # Raise toward 50% as Wave1 test backlog lands; floor prevents regressions.
+          awk -v t="$total" 'BEGIN{exit !(t+0 >= 35)}'
       - name: Build
         run: CGO_ENABLED=0 go build -o maw ./cmd/maw

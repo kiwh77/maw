@@ -65,30 +65,56 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 		if addr == "" {
 			addr = "127.0.0.1:7420"
 		}
-		url, err := board.Serve(addr, func(projectID, agent, status string) (board.Snapshot, error) {
-			// URL 查询参数优先；否则用启动时的 CLI 默认筛选
-			if projectID == "" {
-				projectID = filters.Project
-			}
-			if agent == "" {
-				agent = filters.Agent
-			}
-			if status == "" {
-				status = filters.Status
-			}
-			return loadBoardSnapshot(gdb, projectID, agent, status, 4)
-		}, func(projectID, taskID string) (board.TaskDetail, error) {
-			return loadTaskDetail(gdb, projectID, taskID)
+		url, err := board.ServeWith(addr, board.ServeOpts{
+			Load: func(projectID, agent, status string) (board.Snapshot, error) {
+				if projectID == "" {
+					projectID = filters.Project
+				}
+				if agent == "" {
+					agent = filters.Agent
+				}
+				if status == "" {
+					status = filters.Status
+				}
+				return loadBoardSnapshot(gdb, projectID, agent, status, 4)
+			},
+			Detail: func(projectID, taskID string) (board.TaskDetail, error) {
+				return loadTaskDetail(gdb, projectID, taskID)
+			},
+			Status: func(rep board.StatusReport) (map[string]any, error) {
+				r, err := StatusReport(cwd, StatusReportInput{
+					ProjectID: rep.ProjectID,
+					Actor:     rep.Actor,
+					TaskID:    rep.TaskID,
+					Message:   rep.Message,
+					Phase:     rep.Phase,
+					Pct:       rep.Pct,
+					Client:    rep.Client,
+					Status:    rep.Status,
+				})
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any(r), nil
+			},
+			Feed: func(since int64, projectID, agent string) ([]*db.Event, error) {
+				return LoadEventFeed(gdb, since, projectID, agent)
+			},
 		})
 		if err != nil {
 			return nil, errx.Wrap("启动看板服务失败", "更换 --addr 或检查端口占用", err)
 		}
 		res["url"] = url
-		res["next"] = "浏览器打开 " + url + "（实时更新，3 秒同步兜底；可用工程/Agent/状态筛选）"
-		fmt.Println("全局看板服务已启动:", url)
+		res["next"] = "浏览器或 Tauri 桌面端打开 " + url + "（SSE 实时事件；可用工程/Agent/状态筛选）"
+		fmt.Println("本机中枢已启动:", url)
 		fmt.Println("数据源:", gdb)
 		fmt.Println("按 Ctrl+C 结束")
 		select {}
 	}
 	return res, nil
+}
+
+// Serve is an alias for Board(..., serve=true) — recommended hub entrypoint.
+func Serve(cwd, addr string, filters BoardFilters) (Result, error) {
+	return Board(cwd, true, addr, filters)
 }

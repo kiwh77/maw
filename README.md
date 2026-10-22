@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev/)
 
-**本机多 Agent 任务中枢**（Multi-Agent Workspace）。单二进制 CLI：编排并行开发、跨工程汇聚状态；规划中支持客户端状态栏实时通知。
+**本机多 Agent 任务中枢**（Multi-Agent Workspace）。单二进制 CLI：编排并行开发、跨工程汇聚状态；桌面端（Tauri）复用看板页并用系统托盘通知。
 
 ### 适用场景
 
@@ -18,9 +18,10 @@
 | 能力 | 状态 |
 | --- | --- |
 | 蓝图拆题、持久 worktree、领取 / 提交 / 合并、写盘范围检查 | 已交付 |
-| 全局状态库 + 跨工程看板（`maw board`） | 已交付 |
-| 跨工程 Agent 状态汇聚 | [规划](docs/ROADMAP.md) |
-| 客户端状态栏实时通知 | [规划](docs/ROADMAP.md) |
+| 全局状态库 + 跨工程看板（`maw board` / `maw serve`） | 已交付 |
+| 跨工程 Agent 状态注入（`maw status report` / `POST /api/status`） | 已交付 |
+| 富事件流（`/api/feed`、SSE `event` 帧） | 已交付 |
+| Tauri 桌面壳 + 托盘通知 | [进行中](clients/desktop/README.md) |
 
 ## 安装
 
@@ -78,8 +79,10 @@ CGO_ENABLED=0 go build -o maw ./cmd/maw
 Agent Skills（Cursor 等）：[skills/](skills/README.md)（`maw` / `maw-init` / `maw-task-list` / `maw-plan-push` / `maw-task-pull`）。
 
 ```bash
+maw serve                  # 推荐：本机中枢（等同 board --serve）
 maw board --serve          # 默认 http://127.0.0.1:7420/
-maw board --project <工程ID> --agent cursor-demo-1 --status in_progress
+maw status report -m "实现中" --phase code --pct 40
+# 或：curl -sX POST http://127.0.0.1:7420/api/status -d '{"actor":"cursor-demo-1","message":"hi"}'
 ```
 
 ![maw board --serve 全局任务看板](docs/images/board-serve.png)
@@ -115,14 +118,17 @@ maw board --serve     # http://127.0.0.1:7420/
 | `maw merge --yes` | 串行合入；保留 worktree、删题分支 |
 | `maw prune` | 清理残留（默认预览，`--yes` 删除） |
 | `maw board` | 终端摘要 + HTML |
-| `maw board --serve` | 本地 HTTP 全局看板 |
+| `maw board --serve` / `maw serve` | 本机中枢（看板 + 状态注入 + SSE） |
+| `maw status report` | 向中枢注入进度/心跳 |
 
 附属：`register`、`agents`、`progress`、`doctor`、`review`、`block`、`task`、`hook`。全局：`--json`、`--dry-run`、`-C`。
+
+桌面端（Tauri，复用看板页）：见 [clients/desktop/](clients/desktop/README.md)。
 
 ## 测试
 
 ```bash
-go test ./...
+CGO_ENABLED=0 go test ./...
 ```
 
 ## 贡献与安全

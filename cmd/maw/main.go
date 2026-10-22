@@ -254,25 +254,76 @@ func main() {
 	pruneCmd.Flags().Bool("yes", false, "确认删除（默认仅列出）")
 	root.AddCommand(pruneCmd)
 
+	boardFilters := func(cmd *cobra.Command) app.BoardFilters {
+		return app.BoardFilters{
+			Project: mustFlag(cmd, "project"),
+			Agent:   mustFlag(cmd, "agent"),
+			Status:  mustFlag(cmd, "status"),
+		}
+	}
 	boardCmd := &cobra.Command{
 		Use:   "board",
 		Short: "全局中文任务看板（跨工程；终端 + 动态 HTML）",
 		Run: func(cmd *cobra.Command, args []string) {
 			serve, _ := cmd.Flags().GetBool("serve")
 			addr, _ := cmd.Flags().GetString("addr")
-			printRes(app.Board(cwd, serve, addr, app.BoardFilters{
-				Project: mustFlag(cmd, "project"),
-				Agent:   mustFlag(cmd, "agent"),
-				Status:  mustFlag(cmd, "status"),
-			}))
+			printRes(app.Board(cwd, serve, addr, boardFilters(cmd)))
 		},
 	}
-	boardCmd.Flags().Bool("serve", false, "启动本地 HTTP 服务，看板每 3 秒自动刷新")
-	boardCmd.Flags().String("addr", "127.0.0.1:7420", "看板服务监听地址")
+	boardCmd.Flags().Bool("serve", false, "启动本机中枢 HTTP（看板 + 状态注入 + SSE）")
+	boardCmd.Flags().String("addr", "127.0.0.1:7420", "监听地址（仅建议 loopback）")
 	boardCmd.Flags().String("project", "", "按工程 ID 筛选（默认全部）")
 	boardCmd.Flags().String("agent", "", "按 Agent 名筛选（默认全部）")
 	boardCmd.Flags().String("status", "", "按任务状态筛选（默认全部）")
 	root.AddCommand(boardCmd)
+
+	serveCmd := &cobra.Command{
+		Use:   "serve",
+		Short: "启动本机中枢（等同 maw board --serve）",
+		Run: func(cmd *cobra.Command, args []string) {
+			addr, _ := cmd.Flags().GetString("addr")
+			printRes(app.Serve(cwd, addr, boardFilters(cmd)))
+		},
+	}
+	serveCmd.Flags().String("addr", "127.0.0.1:7420", "监听地址")
+	serveCmd.Flags().String("project", "", "默认工程筛选")
+	serveCmd.Flags().String("agent", "", "默认 Agent 筛选")
+	serveCmd.Flags().String("status", "", "默认状态筛选")
+	root.AddCommand(serveCmd)
+
+	statusCmd := &cobra.Command{Use: "status", Short: "向本机中枢注入 Agent 状态"}
+	statusReportCmd := &cobra.Command{
+		Use:   "report",
+		Short: "上报进度/心跳（也可 POST /api/status）",
+		Run: func(cmd *cobra.Command, args []string) {
+			msg, _ := cmd.Flags().GetString("message")
+			task, _ := cmd.Flags().GetString("task")
+			phase, _ := cmd.Flags().GetString("phase")
+			client, _ := cmd.Flags().GetString("client")
+			agent, _ := cmd.Flags().GetString("agent")
+			project, _ := cmd.Flags().GetString("project")
+			st, _ := cmd.Flags().GetString("status")
+			var pctPtr *int
+			if cmd.Flags().Changed("pct") {
+				p, _ := cmd.Flags().GetInt("pct")
+				pctPtr = &p
+			}
+			printRes(app.StatusReport(cwd, app.StatusReportInput{
+				ProjectID: project, Actor: agent, TaskID: task,
+				Message: msg, Phase: phase, Pct: pctPtr, Client: client, Status: st,
+			}))
+		},
+	}
+	statusReportCmd.Flags().StringP("message", "m", "", "进度说明")
+	statusReportCmd.Flags().String("task", "", "关联任务 ID（可选）")
+	statusReportCmd.Flags().String("phase", "", "阶段标签（可选）")
+	statusReportCmd.Flags().Int("pct", 0, "进度百分比（可选）")
+	statusReportCmd.Flags().String("client", "", "来源客户端（如 cursor）")
+	statusReportCmd.Flags().String("agent", "", "Agent 名（默认 MAW_AGENT）")
+	statusReportCmd.Flags().String("project", "", "工程 ID（默认当前仓库）")
+	statusReportCmd.Flags().String("status", "", "Agent 状态 idle|working")
+	statusCmd.AddCommand(statusReportCmd)
+	root.AddCommand(statusCmd)
 	root.AddCommand(&cobra.Command{Use: "doctor", Run: func(cmd *cobra.Command, args []string) { printRes(app.Doctor(cwd)) }})
 
 	blockCmd := &cobra.Command{

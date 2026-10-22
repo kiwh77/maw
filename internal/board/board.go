@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -285,75 +284,7 @@ type TaskDetail struct {
 // TaskDetailFunc 按工程/任务 ID 加载详情与日志
 type TaskDetailFunc func(projectID, taskID string) (TaskDetail, error)
 
-// newHandler serves the read-only board, snapshots, details and SSE invalidations.
+// newHandler serves board, snapshots, details and SSE (compat wrapper).
 func newHandler(load LoadFunc, detail TaskDetailFunc) http.Handler {
-	mux := http.NewServeMux()
-	events := newEventHub(load, 500*time.Millisecond)
-	mux.Handle("/api/events", events.handler(15*time.Second))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write([]byte(PageHTML()))
-	})
-	mux.HandleFunc("/api/board", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		snap, err := load(q.Get("project"), q.Get("agent"), q.Get("status"))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(snap)
-	})
-	mux.HandleFunc("/api/task", func(w http.ResponseWriter, r *http.Request) {
-		if detail == nil {
-			http.Error(w, "task detail unavailable", http.StatusNotImplemented)
-			return
-		}
-		q := r.URL.Query()
-		taskID := q.Get("id")
-		if taskID == "" {
-			http.Error(w, "missing id", http.StatusBadRequest)
-			return
-		}
-		d, err := detail(q.Get("project"), taskID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if d.Task == nil {
-			http.Error(w, "task not found", http.StatusNotFound)
-			return
-		}
-		d.OK = true
-		if d.Events == nil {
-			d.Events = []*db.Event{}
-		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(d)
-	})
-	mux.HandleFunc("/snapshot.json", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/api/board?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
-	})
-
-	return mux
-}
-
-// Serve 启动只读看板 HTTP 服务（动态读全局库）。
-func Serve(addr string, load LoadFunc, detail TaskDetailFunc) (string, error) {
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return "", err
-	}
-	url := "http://" + ln.Addr().String() + "/"
-	go func() {
-		_ = http.Serve(ln, newHandler(load, detail))
-	}()
-	return url, nil
+	return newHandlerOpts(ServeOpts{Load: load, Detail: detail})
 }

@@ -598,6 +598,44 @@ func scanTaskWithName(row interface{ Scan(dest ...any) error }) (*Task, error) {
 	return &t, nil
 }
 
+// ListEventsSince 返回 id > since 的全局/筛选事件（按 id 升序）；limit<=0 默认 200。
+// projectID / actor 为空表示不限。
+func ListEventsSince(tx *sql.Tx, since int64, projectID, actor string, limit int) ([]*Event, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	q := `SELECT id, ts, COALESCE(project_id,''), actor, type, COALESCE(task_id,''), data_json
+		FROM events WHERE id > ?`
+	args := []any{since}
+	if projectID != "" {
+		q += ` AND project_id = ?`
+		args = append(args, projectID)
+	}
+	if actor != "" {
+		q += ` AND actor = ?`
+		args = append(args, actor)
+	}
+	q += ` ORDER BY id ASC LIMIT ?`
+	args = append(args, limit)
+	rows, err := tx.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Event
+	for rows.Next() {
+		var e Event
+		var data string
+		if err := rows.Scan(&e.ID, &e.TS, &e.ProjectID, &e.Actor, &e.Type, &e.TaskID, &data); err != nil {
+			return nil, err
+		}
+		e.Data = map[string]any{}
+		_ = json.Unmarshal([]byte(data), &e.Data)
+		out = append(out, &e)
+	}
+	return out, rows.Err()
+}
+
 // ListEventsByTask 返回某任务的事件日志（按时间正序）；limit<=0 默认 200
 func ListEventsByTask(tx *sql.Tx, projectID, taskID string, limit int) ([]*Event, error) {
 	if limit <= 0 {

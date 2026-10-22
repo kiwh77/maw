@@ -43,12 +43,12 @@ func TestEventHubBroadcastsAndStopsWhenLastClientLeaves(t *testing.T) {
 	hub := newEventHub(func(_, _, _ string) (Snapshot, error) {
 		calls.Add(1)
 		return Snapshot{Total: int(version.Load())}, nil
-	}, 5*time.Millisecond)
+	}, nil, 5*time.Millisecond)
 	one, leaveOne := hub.subscribe()
 	two, leaveTwo := hub.subscribe()
 	defer leaveOne()
 	defer leaveTwo()
-	for _, updates := range []<-chan struct{}{one, two} {
+	for _, updates := range []<-chan hubUpdate{one, two} {
 		select {
 		case <-updates:
 		case <-time.After(time.Second):
@@ -56,7 +56,7 @@ func TestEventHubBroadcastsAndStopsWhenLastClientLeaves(t *testing.T) {
 		}
 	}
 	version.Store(1)
-	for _, updates := range []<-chan struct{}{one, two} {
+	for _, updates := range []<-chan hubUpdate{one, two} {
 		select {
 		case <-updates:
 		case <-time.After(time.Second):
@@ -92,7 +92,7 @@ func TestEventHubRecoversFromLoadFailure(t *testing.T) {
 			return Snapshot{}, errors.New("temporary DB error")
 		}
 		return Snapshot{}, nil
-	}, time.Millisecond)
+	}, nil, time.Millisecond)
 	updates, leave := hub.subscribe()
 	defer leave()
 	select {
@@ -124,7 +124,7 @@ func (w *streamRecorder) Flush() {
 }
 
 func TestEventStreamReadyHeartbeatAndCancellation(t *testing.T) {
-	hub := newEventHub(func(_, _, _ string) (Snapshot, error) { return Snapshot{}, nil }, time.Hour)
+	hub := newEventHub(func(_, _, _ string) (Snapshot, error) { return Snapshot{}, nil }, nil, time.Hour)
 	handler := hub.handler(5 * time.Millisecond)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -171,7 +171,7 @@ heartbeatLoop:
 }
 
 func TestEventStreamRejectsOtherMethods(t *testing.T) {
-	hub := newEventHub(nil, time.Second)
+	hub := newEventHub(nil, nil, time.Second)
 	w := httptest.NewRecorder()
 	hub.handler(time.Second).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/events", nil))
 	if w.Code != http.StatusMethodNotAllowed {
@@ -180,7 +180,7 @@ func TestEventStreamRejectsOtherMethods(t *testing.T) {
 }
 
 func TestEventHubDoesNotNotifyForClockOnlyChanges(t *testing.T) {
-	hub := newEventHub(func(_, _, _ string) (Snapshot, error) { return Snapshot{UpdatedAt: time.Now().String()}, nil }, time.Millisecond)
+	hub := newEventHub(func(_, _, _ string) (Snapshot, error) { return Snapshot{UpdatedAt: time.Now().String()}, nil }, nil, time.Millisecond)
 	updates, leave := hub.subscribe()
 	defer leave()
 	select {

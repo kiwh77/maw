@@ -19,3 +19,5 @@ output/
 *.db
 .idea/
 .vscode/
+clients/desktop/src-tauri/target/
+coverage.out
