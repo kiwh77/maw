@@ -30,9 +30,16 @@ cargo tauri build
 
 ## 目录
 
+- `brand/` — 图标母版（1024、透明版、状态栏 Template）
+- `src-tauri/icons/` — 打包用 `icns` / `ico` / PNG + 托盘图标
 - `src-tauri/` — Rust / Tauri 壳（窗口、托盘、拉起 `maw serve`）
 - 前端：不自建业务 UI，直接导航到本机中枢 URL
 
+## 图标
+
+已接入 `brand/maw-icon-1024.png` → `src-tauri/icons/`，并在 `tauri.conf.json` 的 `bundle.icon` 与托盘中引用。  
+文档站可用：[docs/images/maw-icon.png](../../docs/images/maw-icon.png)。
+
 ## 状态
 
-MVP 骨架已落地；托盘通知与自动拉起 `maw` 的细节可按平台继续打磨。
+图标与托盘资源已接入；`cargo tauri build` 前需本机安装 Tauri CLI。

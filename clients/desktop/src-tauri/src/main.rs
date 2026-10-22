@@ -6,6 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent,
@@ -75,7 +76,12 @@ fn main() {
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
+            // Color tray mark; macOS template variants live beside it as tray-template*.png.
+            let tray_icon =
+                Image::from_bytes(include_bytes!("../icons/tray-color.png")).expect("tray icon");
+
             let _tray = TrayIconBuilder::new()
+                .icon(tray_icon)
                 .menu(&menu)
                 .tooltip("maw")
                 .on_menu_event(|app, event| match event.id.as_ref() {
