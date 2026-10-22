@@ -6,6 +6,11 @@
 
 **本机多 Agent 任务中枢**（Multi-Agent Workspace）。单二进制 CLI：编排并行开发、跨工程汇聚状态；规划中支持客户端状态栏实时通知。
 
+### 适用场景
+
+1. **多 Agent 并行领题执行** — 规划好任务清单后，在多个 Agent 会话中分别领取并落地；兼容 Codex、Cursor、WorkBuddy、Qoder、Trae 等主流客户端。
+2. **本机 Agent 任务看板** — 作为本机统一看板，即时查看各 Agent 的领取、进行中与完成状态，跨工程一眼掌握进度。
+
 设计见 [docs/DESIGN.md](docs/DESIGN.md)，路线图见 [docs/ROADMAP.md](docs/ROADMAP.md)。Python 原型保留在 `legacy/python/`。
 
 ## 能力概览
@@ -58,9 +63,11 @@ CGO_ENABLED=0 go build -o maw ./cmd/maw
 Agent Skills（Cursor 等）：[skills/](skills/README.md)（`maw` / `maw-init` / `maw-task-list` / `maw-plan-push` / `maw-task-pull`）。
 
 ```bash
-maw board --serve
+maw board --serve          # 默认 http://127.0.0.1:7420/
 maw board --project <工程ID> --agent cursor-demo-1 --status in_progress
 ```
+
+![maw board --serve 全局任务看板](docs/images/board-serve.png)
 
 ## 快速上手
 
