@@ -6,8 +6,8 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/errx"
 )
 
 type File struct {

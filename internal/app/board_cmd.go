@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/wuhao/maw/internal/board"
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/errx"
-	"github.com/wuhao/maw/internal/home"
+	"github.com/kiwh77/maw/internal/board"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 // BoardFilters 看板筛选条件（空字符串表示不限）

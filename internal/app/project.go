@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/wuhao/maw/internal/config"
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/home"
+	"github.com/kiwh77/maw/internal/config"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 type projectMetaFile struct {

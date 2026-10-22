@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wuhao/maw/internal/db"
+	"github.com/kiwh77/maw/internal/db"
 )
 
 func TestSnapshotFingerprintIgnoresClockButDetectsState(t *testing.T) {

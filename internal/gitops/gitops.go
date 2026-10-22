@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wuhao/maw/internal/errx"
-	"github.com/wuhao/maw/internal/home"
+	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 const MergeEnv = "MAW_INTERNAL_MERGE"

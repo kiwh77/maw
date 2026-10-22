@@ -4,7 +4,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/wuhao/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/errx"
 )
 
 func norm(p string) string {

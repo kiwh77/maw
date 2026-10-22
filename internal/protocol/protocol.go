@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/wuhao/maw/internal/version"
+	"github.com/kiwh77/maw/internal/version"
 )
 
 var blockRE = regexp.MustCompile(`(?s)<!--\s*maw:begin\s+v(\d+)\s*-->.*?<!--\s*maw:end\s*-->`)

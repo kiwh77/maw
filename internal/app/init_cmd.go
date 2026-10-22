@@ -6,13 +6,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/wuhao/maw/internal/blueprint"
-	"github.com/wuhao/maw/internal/config"
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/home"
-	"github.com/wuhao/maw/internal/hooks"
-	"github.com/wuhao/maw/internal/protocol"
-	"github.com/wuhao/maw/internal/version"
+	"github.com/kiwh77/maw/internal/blueprint"
+	"github.com/kiwh77/maw/internal/config"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/hooks"
+	"github.com/kiwh77/maw/internal/protocol"
+	"github.com/kiwh77/maw/internal/version"
 )
 
 func Init(cwd string, dryRun, upgrade bool) (Result, error) {

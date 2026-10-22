@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wuhao/maw/internal/home"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 const preCommit = `#!/bin/sh

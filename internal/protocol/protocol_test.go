@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wuhao/maw/internal/protocol"
+	"github.com/kiwh77/maw/internal/protocol"
 )
 
 func TestInstallFilesAlwaysWritesAgentsFallback(t *testing.T) {

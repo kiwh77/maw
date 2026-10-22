@@ -1,4 +1,4 @@
-module github.com/wuhao/maw
+module github.com/kiwh77/maw
 
 go 1.26.1
 

@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wuhao/maw/internal/config"
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/errx"
-	"github.com/wuhao/maw/internal/home"
+	"github.com/kiwh77/maw/internal/config"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 func Resolve(cwd, explicit string) (string, error) {

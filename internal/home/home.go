@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wuhao/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/errx"
 )
 
 const (

@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wuhao/maw/internal/board"
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/errx"
-	"github.com/wuhao/maw/internal/home"
-	"github.com/wuhao/maw/internal/identity"
-	"github.com/wuhao/maw/internal/machine"
-	"github.com/wuhao/maw/internal/schedule"
+	"github.com/kiwh77/maw/internal/board"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/identity"
+	"github.com/kiwh77/maw/internal/machine"
+	"github.com/kiwh77/maw/internal/schedule"
 )
 
 type Result map[string]any

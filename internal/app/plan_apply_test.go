@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wuhao/maw/internal/config"
-	"github.com/wuhao/maw/internal/db"
+	"github.com/kiwh77/maw/internal/config"
+	"github.com/kiwh77/maw/internal/db"
 )
 
 // TestPlanApplyPreservesHistory：增量 apply 不得抹掉 done / in_progress。

@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/wuhao/maw/internal/app"
-	"github.com/wuhao/maw/internal/errx"
-	"github.com/wuhao/maw/internal/version"
+	"github.com/kiwh77/maw/internal/app"
+	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/version"
 )
 
 func mustFlag(cmd *cobra.Command, name string) string {

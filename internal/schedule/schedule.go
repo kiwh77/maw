@@ -10,9 +10,9 @@ package schedule
 import (
 	"strings"
 
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/machine"
-	"github.com/wuhao/maw/internal/scope"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/machine"
+	"github.com/kiwh77/maw/internal/scope"
 )
 
 // Incomplete 尚未终态完成（仍占写盘序位）。

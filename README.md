@@ -1,6 +1,6 @@
 # maw
 
-[![CI](https://github.com/wuhao/maw/actions/workflows/ci.yml/badge.svg)](https://github.com/wuhao/maw/actions/workflows/ci.yml)
+[![CI](https://github.com/kiwh77/maw/actions/workflows/ci.yml/badge.svg)](https://github.com/kiwh77/maw/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev/)
 
@@ -22,7 +22,7 @@
 需要 **Go 1.26+**（与 `go.mod` 一致）：
 
 ```bash
-git clone https://github.com/wuhao/maw.git
+git clone https://github.com/kiwh77/maw.git
 cd maw
 ./install.sh
 # 安装到 ~/.local/bin/maw（CGO_ENABLED=0）
@@ -32,7 +32,7 @@ maw --version   # 0.4.0+
 或：
 
 ```bash
-go install github.com/wuhao/maw/cmd/maw@latest
+go install github.com/kiwh77/maw/cmd/maw@latest
 ```
 
 手动构建：

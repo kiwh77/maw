@@ -4,14 +4,14 @@ import (
 	"database/sql"
 	"path/filepath"
 
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/errx"
-	"github.com/wuhao/maw/internal/gitops"
-	"github.com/wuhao/maw/internal/home"
-	"github.com/wuhao/maw/internal/identity"
-	"github.com/wuhao/maw/internal/machine"
-	"github.com/wuhao/maw/internal/schedule"
-	"github.com/wuhao/maw/internal/scope"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/gitops"
+	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/identity"
+	"github.com/kiwh77/maw/internal/machine"
+	"github.com/kiwh77/maw/internal/schedule"
+	"github.com/kiwh77/maw/internal/scope"
 )
 
 func Next(cwd, agentFlag string, dryRun bool) (Result, error) {

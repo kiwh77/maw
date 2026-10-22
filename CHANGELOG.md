@@ -6,7 +6,7 @@
 
 ### Changed
 
-- 公开品牌与 Go module 统一为 `github.com/wuhao/maw`（原 `goal-agents`）
+- 公开品牌与 Go module 统一为 `github.com/kiwh77/maw`（原 `goal-agents`）
 - 产品定位调整为「本机多 Agent 任务中枢」；README / ROADMAP 对齐后续状态汇聚与状态栏能力
 - 协议与文档示例 Agent 名改为中性 `cursor-demo-1`
 

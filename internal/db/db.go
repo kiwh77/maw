@@ -13,7 +13,7 @@ import (
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"github.com/wuhao/maw/internal/version"
+	"github.com/kiwh77/maw/internal/version"
 )
 
 const schema = `

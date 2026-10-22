@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/machine"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/machine"
 )
 
 // expireStaleAgents marks agents offline when LastSeen exceeds heartbeat_ttl_sec,

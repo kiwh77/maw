@@ -3,7 +3,7 @@ package schedule
 import (
 	"testing"
 
-	"github.com/wuhao/maw/internal/db"
+	"github.com/kiwh77/maw/internal/db"
 )
 
 func TestPickNextReadyByPriorityAndScope(t *testing.T) {

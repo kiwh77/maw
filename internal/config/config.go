@@ -8,8 +8,8 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/wuhao/maw/internal/errx"
-	"github.com/wuhao/maw/internal/home"
+	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 var mainBranchLine = regexp.MustCompile(`(?m)^(\s*main_branch\s*=\s*)"[^"]*"`)

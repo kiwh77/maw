@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/gitops"
-	"github.com/wuhao/maw/internal/home"
-	"github.com/wuhao/maw/internal/machine"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/gitops"
+	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/machine"
 )
 
 // Prune lists or removes leftover worktrees and agent/* branches.

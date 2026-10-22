@@ -5,7 +5,7 @@
 ## 开发
 
 ```bash
-git clone https://github.com/wuhao/maw.git
+git clone https://github.com/kiwh77/maw.git
 cd maw
 CGO_ENABLED=0 go test ./...
 CGO_ENABLED=0 go build -o maw ./cmd/maw

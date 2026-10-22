@@ -1,6 +1,6 @@
 package machine
 
-import "github.com/wuhao/maw/internal/errx"
+import "github.com/kiwh77/maw/internal/errx"
 
 var transitions = map[string]map[string]bool{
 	"backlog":     {"ready": true, "cancelled": true, "blocked": true},

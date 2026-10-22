@@ -5,12 +5,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/wuhao/maw/internal/db"
-	"github.com/wuhao/maw/internal/errx"
-	"github.com/wuhao/maw/internal/gitops"
-	"github.com/wuhao/maw/internal/home"
-	"github.com/wuhao/maw/internal/identity"
-	"github.com/wuhao/maw/internal/machine"
+	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/gitops"
+	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/identity"
+	"github.com/kiwh77/maw/internal/machine"
 )
 
 func Merge(cwd string, yes, dryRun bool) (Result, error) {

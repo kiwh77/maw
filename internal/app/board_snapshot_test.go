@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/wuhao/maw/internal/db"
+	"github.com/kiwh77/maw/internal/db"
 )
 
 func TestBoardSnapshotTracksEventOnlyChanges(t *testing.T) {
