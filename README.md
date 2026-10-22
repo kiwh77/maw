@@ -54,7 +54,8 @@ CGO_ENABLED=0 go build -o maw ./cmd/maw
 - **统一 Agent 名（0.3.8）**：`{应用}-{工程}-{序号}`（例 `cursor-demo-1`）；可用 `MAW_APP` 覆盖
 - **每 Agent 持久 worktree（0.4.0）**：`.worktrees/{agent}` 跨题复用；残留用 `maw prune`
 
-蓝图规范：[docs/TASK-SPEC.md](docs/TASK-SPEC.md)，示例：[templates/blueprint.example.toml](templates/blueprint.example.toml)。
+蓝图规范：[docs/TASK-SPEC.md](docs/TASK-SPEC.md)，示例：[templates/blueprint.example.toml](templates/blueprint.example.toml)。  
+Agent Skills（Cursor 等）：[skills/](skills/README.md)（`maw` / `maw-init` / `maw-task-list` / `maw-plan-push` / `maw-task-pull`）。
 
 ```bash
 maw board --serve
