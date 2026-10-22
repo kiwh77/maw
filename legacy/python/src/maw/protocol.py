@@ -16,8 +16,9 @@ PROTOCOL_BODY = f"""\
 2. 只修改任务卡 write_scope 内的文件；需要越界时运行 `maw request-change`。
 3. 里程碑运行 `maw progress`，完成运行 `maw submit`，无法继续运行 `maw block`。
 4. 换人或中断前运行 `maw handoff`，交接包必须自包含。
-5. 禁止自行 merge、rebase 主干或 push 主干，合并只由 `maw merge` 执行。
-6. 出错时先读 maw 输出里的 Next 提示，不要绕过。
+5. 完成 submit 后可自行执行 `maw merge --yes` 合入；禁止直接用 git merge/rebase/push 主干。
+6. 合入后若仍有 ready 任务，继续 `maw next` 领取并执行下一题，循环直至无题可领或用户叫停。
+7. 出错时先读 maw 输出里的 Next 提示，不要绕过。
 """
 
 SEGMENT = f"{BEGIN}\n{PROTOCOL_BODY}{END}\n"

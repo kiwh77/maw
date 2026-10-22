@@ -1,7 +1,7 @@
 package version
 
 const (
-	Version         = "0.2.0"
-	ProtocolVersion = 1
-	SchemaVersion   = 1
+	Version         = "0.4.0"
+	ProtocolVersion = 7
+	SchemaVersion   = 3
 )

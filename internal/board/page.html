@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>maw 全局任务看板</title>
+<meta name="color-scheme" content="dark light"/>
+<script id="theme-init">
+const THEMES = ["system", "light", "dark"];
+function readTheme() {
+  try {
+    const value = localStorage.getItem("maw-theme");
+    return THEMES.includes(value) ? value : "system";
+  } catch (_) { return "system"; }
+}
+function setTheme(value) {
+  const theme = THEMES.includes(value) ? value : "system";
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("maw-theme", theme); } catch (_) {}
+}
+// Theme bootstrap: apply before the first paint, without persisting a default.
+document.documentElement.dataset.theme = readTheme();
+</script>
+
+<style>
+/* maw / Workbench — tokens documented in docs/BOARD_DESIGN.md */
+:root {
+  color-scheme: dark;
+  --bg: #141618; --panel: #191c1f; --card: #202427; --hover: #272c30;
+  --line: #2d3338; --line-strong: #414a51; --text: #e6eaed; --muted: #9ba5ad;
+  --accent: #9cdbb0; --accent-soft: #243b2d; --warn: #e5bc78; --danger: #ed9797; --ok: #9cdbb0;
+  --selection: #375a43; --brand-border: #4b6353; --offline: #68747c; --faint: #7d8992;
+  --accent-ink: #14271b; --accent-hover: #b6e9c5; --card-hover: #252a2e;
+  --card-hover-border: #55616a; --scrim: #0007;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --radius: 6px; --ease: cubic-bezier(.2,.8,.2,1);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f7f8f9; --panel: #eef1f3; --card: #ffffff; --hover: #e4e9ec;
+  --line: #dce1e5; --line-strong: #c1cbd2; --text: #20282f; --muted: #5b6871;
+  --accent: #267044; --accent-soft: #e0eee4; --warn: #8a601f; --danger: #b53e45; --ok: #267044;
+  --selection: #cbe6d4; --brand-border: #a1bfa9; --offline: #89959d; --faint: #6b7882;
+  --accent-ink: #ffffff; --accent-hover: #1f603d; --card-hover: #f8faf9;
+  --card-hover-border: #9baaaf; --scrim: #17232e38;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+  color-scheme: light;
+  --bg: #f7f8f9; --panel: #eef1f3; --card: #ffffff; --hover: #e4e9ec;
+  --line: #dce1e5; --line-strong: #c1cbd2; --text: #20282f; --muted: #5b6871;
+  --accent: #267044; --accent-soft: #e0eee4; --warn: #8a601f; --danger: #b53e45; --ok: #267044;
+  --selection: #cbe6d4; --brand-border: #a1bfa9; --offline: #89959d; --faint: #6b7882;
+  --accent-ink: #ffffff; --accent-hover: #1f603d; --card-hover: #f8faf9;
+  --card-hover-border: #9baaaf; --scrim: #17232e38;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font: 13px/1.5 var(--sans); }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+button, select, input { color: var(--text); }
+button { border: 0; background: none; }
+button:disabled { cursor: default; opacity: .5; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+[hidden] { display: none !important; }
+::selection { background: var(--selection); }
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.app { height: 100%; display: grid; grid-template-columns: 204px minmax(0,1fr); }
+.sidebar { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; padding: 25px 14px 14px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 27px; }
+.brand-mark { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid var(--brand-border); border-radius: 5px; color: var(--accent); font: 18px var(--mono); }
+.brand-name { font: 700 23px/1 var(--mono); letter-spacing: -1px; }
+.brand-sub { color: var(--muted); font: 9px var(--mono); letter-spacing: 1.5px; margin-top: 6px; }
+.section-label { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 10px; font-weight: 500; letter-spacing: 1px; padding: 0 9px; margin: 8px 0 10px; }
+.section-label span { font: 10px var(--mono); letter-spacing: 0; }
+.project-nav { min-height: 76px; overflow-y: auto; flex: 1; }
+.nav-item { width: 100%; display: flex; align-items: center; gap: 9px; text-align: left; border-radius: var(--radius); padding: 9px; margin: 2px 0; color: var(--muted); }
+.nav-item:hover { background: var(--hover); color: var(--text); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); }
+.nav-icon { font: 14px var(--mono); flex: 0 0 16px; }
+.nav-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-rail { border-top: 1px solid var(--line); padding-top: 15px; margin-top: 20px; max-height: 42%; display: flex; flex-direction: column; min-height: 0; }
+.agents-scroll { overflow-y: auto; min-height: 0; }
+.agent-chip { padding: 9px; }
+.agent-top { display: flex; gap: 7px; align-items: center; }
+.agent-chip .id { font: 12px var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.agent-chip .agent-state { margin-left: auto; font-size: 10px; white-space: nowrap; color: var(--muted); }
+.agent-chip .meta { padding-left: 13px; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--offline); flex-shrink: 0; }
+.agent-dot.st-working { background: var(--accent); }
+.sidebar-foot { border-top: 1px solid var(--line); margin-top: 18px; padding: 14px 8px 0; color: var(--muted); font: 10px var(--mono); }
+.sidebar-foot span { color: var(--accent); margin-right: 5px; }
+.workspace { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.topbar { height: 62px; flex-shrink: 0; padding: 0 28px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.topbar-tools { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+select.theme-select { font-size: 10px; height: 28px; max-width: 100px; padding-top: 3px; padding-bottom: 3px; }
+.breadcrumb { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.breadcrumb .dim { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.breadcrumb .slash { color: var(--faint); }
+.breadcrumb strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub { color: var(--muted); font: 10px var(--mono); white-space: nowrap; display: flex; gap: 9px; align-items: center; }
+.live { display: inline-flex; gap: 6px; align-items: center; color: var(--accent); font: 10px var(--mono); }
+.live.err { color: var(--danger); }
+.dot { width: 6px; height: 6px; background: currentColor; border-radius: 50%; }
+.content { padding: 18px 28px 0; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.page-heading { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-bottom: 12px; flex-shrink: 0; }
+.eyebrow { font: 10px var(--mono); letter-spacing: 1.5px; color: var(--muted); margin-bottom: 3px; }
+h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.7px; }
+.page-description { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+.join-button { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); border-radius: var(--radius); padding: 7px 10px; font-size: 11px; font-weight: 600; white-space: nowrap; transition: background .15s; }
+.join-button:hover { background: var(--accent-hover); }
+.join-button .symbol { margin-right: 6px; font: 12px var(--mono); }
+.stats { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0; margin-bottom: 10px; flex-shrink: 0; }
+.stat { padding: 0 14px; border-left: 1px solid var(--line); min-width: 0; }
+.stat:first-child { border-left: 0; padding-left: 0; }
+.stat-label { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+.stat-value { font: 18px/1.2 var(--mono); letter-spacing: -.5px; }
+.stat-value small { font: 10px var(--mono); color: var(--muted); letter-spacing: 0; margin-left: 6px; }
+.stat-value.accent { color: var(--accent); }
+.stat-value.danger { color: var(--danger); }
+.bar-wrap { height: 2px; background: var(--line); width: 100%; max-width: 120px; margin-top: 5px; overflow: hidden; }
+.bar { display: block; height: 100%; background: var(--accent); transition: width .3s var(--ease); }
+.stat-note { display: none; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 0 0 8px; flex-shrink: 0; flex-wrap: wrap; }
+.filters { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+select, .search-box, .quiet-button { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+select { max-width: 180px; padding: 6px 25px 6px 9px; font-size: 11px; height: 32px; }
+select:hover, .quiet-button:hover { border-color: var(--line-strong); }
+.quiet-button { color: var(--muted); padding: 6px 9px; font-size: 11px; height: 32px; }
+.search-box { display: flex; align-items: center; gap: 8px; padding: 0 9px; height: 32px; color: var(--muted); width: 220px; }
+.search-box:focus-within { border-color: var(--accent); }
+.search-box input { border: none; outline: none; background: none; width: 100%; min-width: 0; font-size: 11px; }
+.search-box kbd { font: 10px var(--mono); border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 4px; }
+.toolbar-right { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; margin-left: auto; }
+.board-meta-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; font-size: 10px; color: var(--muted); }
+.view-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel); flex-shrink: 0; }
+.view-toggle button { padding: 5px 10px; font-size: 11px; color: var(--muted); height: 32px; border-right: 1px solid var(--line); }
+.view-toggle button:last-child { border-right: 0; }
+.view-toggle button:hover { color: var(--text); background: var(--hover); }
+.view-toggle button.active { color: var(--accent); background: var(--accent-soft); }
+.board { display: flex; gap: 12px; flex: 1; min-height: 0; overflow-x: auto; padding-bottom: 16px; }
+.topo { flex: 1; min-height: 0; overflow: auto; padding-bottom: 16px; border-top: 1px solid var(--line); }
+.topo-empty { color: var(--muted); font-size: 11px; padding: 28px 4px; }
+.topo-band { margin-bottom: 18px; }
+.topo-band:last-child { margin-bottom: 0; }
+.topo-band-label { display: flex; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--muted); padding: 12px 2px 10px; }
+.topo-band-label .count { font-size: 10px; color: var(--muted); background: var(--panel); padding: 1px 5px; border-radius: 3px; }
+.topo-canvas { position: relative; min-width: 100%; }
+.topo-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.topo-edges path { fill: none; stroke: var(--line-strong); stroke-width: 1.25; }
+.topo-edges path.cross { stroke-dasharray: 4 3; opacity: .75; }
+.topo-edges marker path { fill: var(--line-strong); }
+.topo-node { position: absolute; width: 200px; height: 98px; overflow: hidden; border: 1px solid var(--line); background: var(--card); border-radius: var(--radius); padding: 10px 11px; transition: border-color .15s, background .15s; }
+.topo-node.clickable { cursor: pointer; }
+.topo-node.clickable:hover { border-color: var(--card-hover-border); background: var(--card-hover); }
+.topo-node.active { border-color: var(--accent); }
+.topo-node.stub { border-style: dashed; background: transparent; color: var(--muted); }
+.topo-node .id { font: 10px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.topo-node .task-title { margin: 7px 0 8px; font-size: 12px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.topo-node .topo-meta { display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--muted); font-size: 10px; }
+.topo-node .topo-meta .owner { max-width: 90px; }
+.topo-node .topo-deps { margin-top: 8px; font: 9px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+.topo-legend { display: flex; gap: 14px; flex-wrap: wrap; font: 10px var(--mono); color: var(--muted); padding: 0 2px 8px; }
+.topo-legend i { display: inline-block; width: 18px; height: 0; border-top: 1.5px solid var(--line-strong); vertical-align: middle; margin-right: 6px; }
+.topo-legend i.cross { border-top-style: dashed; }
+.col { flex: 1 0 212px; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.col h3 { margin: 0; padding: 12px 2px; border-top: 2px solid var(--line-strong); display: flex; align-items: center; font-size: 12px; font-weight: 500; gap: 7px; }
+.col[data-lane="running"] h3 { border-color: var(--accent); }
+.col[data-lane="attention"] h3 { border-color: var(--danger); }
+.lane-index { color: var(--faint); font: 10px var(--mono); margin-right: 2px; }
+.col h3 .count { font: 10px var(--mono); color: var(--muted); background: var(--panel); padding: 1px 5px; border-radius: 3px; }
+.col h3 .lane-symbol { margin-left: auto; color: var(--muted); font: 12px var(--mono); }
+.col-body { overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; padding: 2px 2px 10px; }
+.card { border: 1px solid var(--line); background: var(--card); border-radius: var(--radius); padding: 12px; margin-bottom: 8px; transition: border-color .15s, background .15s, transform .15s var(--ease); }
+.card.clickable { cursor: pointer; position: relative; }
+.card.clickable:hover { border-color: var(--card-hover-border); background: var(--card-hover); transform: translateY(-1px); }
+.card.clickable.active { border-color: var(--accent); }
+.card-top { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.card .id { font: 10px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.card .task-title { margin: 0 0 11px; font-size: 12px; font-weight: 500; line-height: 1.65; overflow-wrap: anywhere; }
+.card-project { font: 9px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 10px; }
+.card-project::before { content: "⌁"; margin-right: 6px; color: var(--faint); }
+.card-bottom { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 10px; gap: 5px; }
+.owner { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.owner::before { content: "@"; color: var(--faint); margin-right: 4px; }
+.priority { font: 9px var(--mono); white-space: nowrap; }
+.task-reason { color: var(--danger); font-size: 10px; line-height: 1.6; margin: 8px 0; overflow-wrap: anywhere; }
+.actions { display: flex; gap: 8px; margin-top: 11px; padding-top: 9px; border-top: 1px solid var(--line); }
+button.copy { border: 1px solid var(--line); border-radius: 4px; padding: 4px 7px; font-size: 10px; color: var(--muted); transition: color .15s, border-color .15s; }
+button.copy:hover { border-color: var(--accent); color: var(--accent); }
+button.copy.primary { color: var(--accent); }
+button.copy.ok { color: var(--ok); }
+.card .actions button { border: none; padding: 0; text-align: left; }
+.card .actions button:last-child { margin-left: auto; }
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; color: var(--muted); white-space: nowrap; }
+.badge::before { content: ""; width: 5px; height: 5px; background: currentColor; border-radius: 50%; }
+.badge.warn { color: var(--warn); }
+.badge.danger { color: var(--danger); }
+.badge.ok { color: var(--ok); }
+.empty { color: var(--muted); font-size: 11px; margin: 8px 0; }
+.lane-empty { border: 1px dashed var(--line); padding: 23px 10px; text-align: center; border-radius: var(--radius); color: var(--muted); font-size: 10px; }
+.lane-empty span { display: block; font: 17px var(--mono); color: var(--faint); margin-bottom: 8px; }
+.hint-center { border-top: 1px solid var(--line); padding: 12px 0; font-size: 11px; flex-shrink: 0; }
+.hint-next { display: flex; gap: 10px; align-items: baseline; }
+.hint-next b { color: var(--accent); font: 10px var(--mono); white-space: nowrap; }
+.hint-next span { overflow-wrap: anywhere; }
+.hint-risks { color: var(--danger); font-size: 10px; max-height: 70px; overflow: auto; margin-top: 6px; }
+.hint-risks.empty { display: none; }
+.meta { color: var(--muted); margin-top: 4px; }
+.drawer-mask { position: fixed; inset: 0; z-index: 40; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.drawer-mask.open { opacity: 1; pointer-events: auto; }
+.drawer { position: fixed; right: 0; top: 0; height: 100%; width: min(500px, 94vw); z-index: 50; background: var(--panel); border-left: 1px solid var(--line-strong); transform: translateX(100%); transition: transform .22s var(--ease); display: flex; flex-direction: column; }
+.drawer.open { transform: translateX(0); }
+.drawer-head { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; padding: 24px; border-bottom: 1px solid var(--line); }
+.drawer-head h2 { font-size: 18px; line-height: 1.5; margin: 8px 0 0; font-weight: 500; overflow-wrap: anywhere; }
+.subid { color: var(--accent); font: 11px var(--mono); }
+.drawer-close { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 4px; font-size: 20px; flex-shrink: 0; }
+.drawer-close:hover { background: var(--hover); }
+.drawer-body { flex: 1; min-height: 0; overflow: auto; padding: 22px 24px; }
+.drawer-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 25px; }
+.drawer-section { border-top: 1px solid var(--line); padding-top: 16px; margin-bottom: 22px; }
+.sec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.sec-head h3, .drawer-section > h3 { font-size: 11px; font-weight: 500; color: var(--muted); margin: 0 0 10px; }
+.sec-head h3 { margin: 0; }
+.kv { display: grid; grid-template-columns: 80px minmax(0,1fr); gap: 10px; font-size: 12px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+code, .kv dd, .list-plain { font-family: var(--mono); }
+.list-plain { padding-left: 18px; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.prompt-box, .cmd-box { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; font: 11px/1.8 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+.timeline { padding: 0; margin: 0; list-style: none; }
+.timeline li { border-left: 1px solid var(--line-strong); padding: 0 0 20px 16px; font-size: 12px; position: relative; }
+.timeline li::before { content: ""; width: 5px; height: 5px; background: var(--accent); border-radius: 50%; position: absolute; left: -3px; top: 6px; }
+.timeline .ts { font: 10px var(--mono); color: var(--muted); margin-bottom: 5px; }
+.ev-type { color: var(--accent); margin-right: 8px; }
+.ev-actor { color: var(--muted); font: 10px var(--mono); }
+.ev-msg { margin-top: 5px; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: no-preference) { .content { animation: enter .3s var(--ease); } @keyframes enter { from { opacity: 0; transform: translateY(5px); } } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+@media (min-width: 1500px) { .col { flex-basis: 235px; } .app { grid-template-columns: 220px minmax(0,1fr); } }
+@media (max-width: 1100px) { .app { grid-template-columns: 178px minmax(0,1fr); } .content { padding: 22px 20px 0; } .topbar { padding-left: 20px; padding-right: 20px; } .sub time { display: none; } .stat { padding: 0 15px; } .col { flex-basis: 178px; } .board { gap: 10px; } .card { padding: 10px; } }
+@media (max-width: 700px) {
+  .app { grid-template-columns: minmax(0,1fr); } .sidebar { display: none; }
+  .content { padding: 20px 16px 0; } .topbar { height: 48px; padding: 0 16px; }
+  .breadcrumb .dim, .breadcrumb .slash { display: none; }
+  .page-heading { margin-bottom: 10px; align-items: flex-start; } h1 { font-size: 20px; }
+  .page-description { max-width: 190px; font-size: 10px; } .join-button { padding: 7px; font-size: 10px; } .join-button .symbol { display: none; }
+  .stat { padding: 0 8px; } .stat-value { font-size: 15px; } .stat-value small { font-size: 9px; margin-left: 4px; }
+  .toolbar { align-items: stretch; } .filters { width: 100%; } .filters select { flex: 1; min-width: 0; max-width: none; width: 70px; }
+  .toolbar-right { width: 100%; margin-left: 0; } .search-box { width: 100%; flex: 1; }
+  .col { flex-basis: 255px; }
+  .hint-center { font-size: 10px; } .hint-next { gap: 7px; } .hint-next span { max-height: 48px; overflow: auto; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app-shell">
+  <aside class="sidebar" aria-label="工程与 Agent">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">›_</span><div><div class="brand-name">maw<span style="color:var(--accent)">.</span></div><div class="brand-sub">AGENT WORKBENCH</div></div></div>
+    <div class="section-label">工作空间 <span id="projects-count">00</span></div>
+    <nav class="project-nav" id="project-nav" aria-label="工程导航"></nav>
+    <section class="agents-rail" aria-label="执行中 Agent">
+      <div class="section-label">AGENTS <span id="agents-count">0</span></div>
+      <div class="agents-scroll" id="agents"><p class="empty">正在加载…</p></div>
+    </section>
+    <div class="sidebar-foot"><span>⌘</span> multi-agent / worktree</div>
+  </aside>
+  <main class="workspace">
+    <header class="topbar">
+      <div class="breadcrumb"><span class="dim">工作空间</span><span class="slash">/</span><strong id="workspace-name">全部工程</strong></div>
+      <div class="topbar-tools"><div class="sub" id="subtitle" role="status">正在连接…</div><select id="theme-select" class="theme-select" aria-label="主题" title="主题：默认跟随系统外观"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div>
+    </header>
+    <div class="content">
+      <div class="page-heading">
+        <div><div class="eyebrow">OPERATIONS / BOARD</div><h1>任务看板</h1><p class="page-description">跟踪任务流转，协调每一个 Agent。</p></div>
+        <button type="button" id="f-copy-join" class="join-button"><span class="symbol" aria-hidden="true">＋</span>复制工程接入提示词</button>
+      </div>
+      <section class="stats" id="stats" aria-label="当前筛选范围任务统计"></section>
+      <div class="toolbar">
+        <div class="filters" id="filters">
+          <select id="f-project" aria-label="工程"><option value="">全部工程</option></select>
+          <select id="f-agent" aria-label="Agent"><option value="">全部 Agent</option></select>
+          <select id="f-status" aria-label="状态"><option value="">全部状态</option></select>
+          <button type="button" id="f-reset" class="quiet-button" title="重置所有筛选">重置</button>
+        </div>
+        <div class="toolbar-right">
+          <div class="board-meta-left">
+            <div class="view-toggle" id="view-toggle" role="group" aria-label="视图切换">
+              <button type="button" id="view-board" data-view="board" class="active" aria-pressed="true">看板</button>
+              <button type="button" id="view-topo" data-view="topo" aria-pressed="false">依赖拓扑</button>
+            </div>
+            <span id="board-count">正在加载任务…</span>
+          </div>
+          <label class="search-box"><span aria-hidden="true">⌕</span><input type="search" id="task-search" aria-label="搜索任务" placeholder="搜索任务、编号、负责人…"/><kbd aria-hidden="true">/</kbd></label>
+        </div>
+      </div>
+      <div class="board" id="columns" aria-label="任务流程"></div>
+      <div class="topo" id="topology" aria-label="任务依赖拓扑" hidden></div>
+      <div class="hint-center" id="hint-center"><div class="hint-next" id="next"><b>NEXT</b><span>正在读取调度建议…</span></div><div class="hint-risks empty" id="risks"></div></div>
+    </div>
+  </main>
+</div>
+<div class="drawer-mask" id="drawer-mask" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="d-title" aria-hidden="true" inert>
+  <div class="drawer-head"><div><div class="subid" id="d-id"></div><h2 id="d-title"></h2></div><button type="button" class="drawer-close" id="d-close" aria-label="关闭详情">×</button></div>
+  <div class="drawer-body" id="drawer-body"></div>
+</aside>
+
+<script id="board-app">
+const COLUMNS = [
+  ["backlog","待排期"],["ready","可领取"],["claimed","已领取"],["in_progress","进行中"],
+  ["self_check","自检中"],["in_review","评审中"],["merging","合并中"],["conflict","冲突"],
+  ["blocked","阻塞"],["done","已完成"],["cancelled","已取消"]
+];
+
+const LANES = [
+  { id: "queued", label: "待处理", statuses: ["backlog", "ready"], symbol: "≡", empty: "等待新的任务" },
+  { id: "running", label: "执行中", statuses: ["claimed", "in_progress", "self_check"], symbol: "⌁", empty: "暂无执行中的任务" },
+  { id: "integrating", label: "评审与合并", statuses: ["in_review", "merging"], symbol: "⑂", empty: "等待提交评审" },
+  { id: "attention", label: "需处理", statuses: ["conflict", "blocked"], symbol: "!", empty: "暂无阻塞或冲突" },
+  { id: "finished", label: "已结束", statuses: ["done", "cancelled"], symbol: "✓", empty: "完成的任务会出现在这里" }
+];
+const VIEWS = ["board", "topo"];
+const TOPO_NODE_W = 200;
+const TOPO_NODE_H = 98;
+const TOPO_GAP_X = 72;
+const TOPO_GAP_Y = 22;
+const TOPO_PAD = 20;
+
+function readView() {
+  try {
+    const value = localStorage.getItem("maw-board-view");
+    return VIEWS.includes(value) ? value : "board";
+  } catch (_) { return "board"; }
+}
+function setView(value) {
+  boardView = VIEWS.includes(value) ? value : "board";
+  try { localStorage.setItem("maw-board-view", boardView); } catch (_) {}
+  document.getElementById("view-board").classList.toggle("active", boardView === "board");
+  document.getElementById("view-topo").classList.toggle("active", boardView === "topo");
+  document.getElementById("view-board").setAttribute("aria-pressed", boardView === "board" ? "true" : "false");
+  document.getElementById("view-topo").setAttribute("aria-pressed", boardView === "topo" ? "true" : "false");
+  document.getElementById("columns").hidden = boardView !== "board";
+  document.getElementById("topology").hidden = boardView !== "topo";
+  if (lastSnap) renderWorkspace(lastSnap);
+}
+
+let searchTerm = "";
+let boardView = "board";
+let renderedBoardHTML = "";
+let renderedTopoHTML = "";
+let snapshotRequest = 0;
+let eventStream = null;
+let sseConnected = false;
+let snapshotHealthy = true;
+let syncRunning = false;
+let syncPending = false;
+let detailRequest = 0;
+let drawerReturnFocus = null;
+let closeTimer;
+const filters = { project: "", agent: "", status: "" };
+let agentOptions = [];
+let projectOptions = [];
+let lastSnap = null;
+let selectedTid = null;
+let selectedPid = null;
+let drawerEvents = [];
+let drawerLoading = false;
+let writingProjectHash = false;
+
+/** 从 URL #锚点读取工程 ID（刷新后恢复选中）。 */
+function readProjectHash() {
+  try {
+    if (typeof location === "undefined" || !location) return "";
+    return decodeURIComponent((location.hash || "").replace(/^#/, ""));
+  } catch (_) {
+    return "";
+  }
+}
+
+/** 将当前工程写入 #锚点；全部工程时清除锚点。用 replaceState 避免污染历史。 */
+function writeProjectHash(projectId) {
+  const id = projectId || "";
+  if (readProjectHash() === id) return;
+  if (typeof location === "undefined" || !location) return;
+  const url = id
+    ? location.pathname + location.search + "#" + encodeURIComponent(id)
+    : location.pathname + location.search;
+  writingProjectHash = true;
+  try {
+    if (typeof history !== "undefined" && history.replaceState) {
+      history.replaceState(null, "", url);
+    } else {
+      location.hash = id;
+    }
+  } catch (_) {
+    try { location.hash = id; } catch (__) {}
+  }
+  writingProjectHash = false;
+}
+
+function setProjectFilter(projectId, { syncHash = true } = {}) {
+  filters.project = projectId || "";
+  filters._inited = true;
+  if (syncHash) writeProjectHash(filters.project);
+}
+
+const EVENT_LABEL = {
+  task_created: "创建任务",
+  claimed: "领取任务",
+  status_changed: "状态变更",
+  progress: "进度里程碑",
+  agent_registered: "Agent 注册",
+  agent_unregistered: "Agent 注销",
+  review_auto_approved: "自动通过评审",
+  review_result: "评审结果",
+  gate_failed: "门禁失败",
+  merged: "已合并",
+  plan_applied: "应用蓝图"
+};
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+/** 统一为 YYYY-MM-DD HH:mm:ss（本地时区）；无法解析则原样返回。 */
+function fmtTime(v) {
+  if (v == null || v === "") return "";
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  const p = n => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+    " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+}
+
+function statusLabel(st) {
+  for (const [k, lab] of COLUMNS) if (k === st) return lab;
+  return st || "—";
+}
+
+function findTask(tid, pid) {
+  const list = lastSnap?.tasks || [];
+  if (pid) {
+    const hit = list.find(x => x.id === tid && x.project_id === pid);
+    return hit || null;
+  }
+  return list.find(x => x.id === tid) || null;
+}
+
+function findProject(projectId) {
+  const list = lastSnap?.projects || [];
+  if (projectId) {
+    const hit = list.find(p => p.id === projectId);
+    if (hit) return hit;
+  }
+  if (filters.project) {
+    const hit = list.find(p => p.id === filters.project);
+    if (hit) return hit;
+  }
+  return list[0] || null;
+}
+
+function listBullets(arr, empty) {
+  if (!arr || !arr.length) return '<p class="empty">' + esc(empty || "无") + '</p>';
+  return '<ul class="list-plain">' + arr.map(x => '<li>' + esc(x) + '</li>').join("") + '</ul>';
+}
+
+function statusBadge(st) {
+  let cls = "badge";
+  if (st === "blocked" || st === "conflict") cls += " danger";
+  else if (st === "done") cls += " ok";
+  else if (st === "in_progress" || st === "claimed") cls += " warn";
+  return '<span class="' + cls + '">' + esc(statusLabel(st)) + '</span>';
+}
+
+function formatEventData(ev) {
+  const d = ev.data || {};
+  if (ev.type === "progress" && d.message) return String(d.message);
+  if (ev.type === "status_changed") {
+    const parts = [];
+    if (d.to) parts.push("→ " + statusLabel(d.to) + " (" + d.to + ")");
+    if (d.reason) parts.push(String(d.reason));
+    if (d.files && d.files.length) parts.push("文件 " + d.files.length + " 个");
+    return parts.join(" · ") || "";
+  }
+  if (ev.type === "review_result") {
+    return (d.result || "") + (d.message ? "：" + d.message : "");
+  }
+  if (ev.type === "gate_failed" && d.error) return String(d.error);
+  const keys = Object.keys(d);
+  if (!keys.length) return "";
+  try { return JSON.stringify(d); } catch (_) { return ""; }
+}
+
+function fmtBullet(arr, empty) {
+  if (!arr || !arr.length) return empty || "- （无）";
+  return arr.map(x => "- " + x).join("\n");
+}
+
+function takenAgentNames() {
+  const seen = new Set();
+  (lastSnap?.agents || []).forEach(a => { if (a.id) seen.add(a.id); });
+  (lastSnap?.tasks || []).forEach(t => { if (t.owner) seen.add(t.owner); });
+  return [...seen].sort();
+}
+
+function buildTaskPrompt(t) {
+  const p = findProject(t.project_id) || {};
+  const projName = t.project_name || p.name || t.project_id || "未知工程";
+  const projPath = p.path || "（未知路径，请在看板「工程」中确认）";
+  const mainBranch = p.main_branch || "main";
+  const taken = takenAgentNames();
+  const lines = [];
+  lines.push("你是接入 maw（Multi-Agent Worktree CLI）的执行 Agent。请严格按下列工程与任务信息连接 maw 并完成工作，不要跳过协议步骤。");
+  lines.push("");
+  lines.push("## 工程信息");
+  lines.push("- 名称：" + projName);
+  lines.push("- 工程 ID：" + (t.project_id || p.id || "—"));
+  lines.push("- 本地路径：" + projPath);
+  lines.push("- 主干分支：" + mainBranch);
+  lines.push("");
+  lines.push("## 目标任务");
+  lines.push("- 任务 ID：" + t.id);
+  lines.push("- 标题：" + (t.title || "—"));
+  lines.push("- 状态：" + statusLabel(t.status) + "（" + (t.status || "—") + "）");
+  lines.push("- 优先级：" + (t.priority ?? "—") + " · merge_order：" + (t.merge_order ?? "—"));
+  lines.push("- 依赖：" + ((t.deps && t.deps.length) ? t.deps.join(", ") : "无"));
+  if (t.owner) lines.push("- 当前负责人：" + t.owner);
+  if (t.worktree) lines.push("- Worktree（相对仓库）：" + t.worktree);
+  if (t.branch) lines.push("- 任务分支：" + t.branch);
+  if (t.blocked_reason) lines.push("- 阻塞原因：" + t.blocked_reason);
+  lines.push("- 可写范围 write_scope（只改这些）：");
+  lines.push(fmtBullet(t.write_scope, "- （空；先运行 maw task show " + t.id + " 确认）"));
+  lines.push("- 只读范围 read_scope：");
+  lines.push(fmtBullet(t.read_scope, "- （无）"));
+  lines.push("- 验收标准 acceptance：");
+  lines.push(fmtBullet(t.acceptance, "- （无；以 worktree 内任务卡为准）"));
+  lines.push("");
+  lines.push("## 接入与执行步骤");
+  lines.push("1. 终端进入工程目录：");
+  lines.push("   cd " + projPath);
+  if (t.status === "in_progress" || t.status === "claimed" || t.status === "self_check" || t.status === "conflict") {
+    lines.push("2. 若你接续同一负责人，复用其 Agent 名；否则另选看板未占用的唯一名。");
+    if (t.owner) lines.push("   当前负责人：" + t.owner + (t.worktree ? "；worktree：" + t.worktree : ""));
+    lines.push("   export MAW_AGENT=<唯一名>");
+    lines.push("3. 若任务已有 worktree：直接进入该目录继续改代码；需要重新绑定可再执行 maw next（同名 agent 幂等）。");
+    lines.push("   " + (t.worktree ? ("cd " + projPath.replace(/\\/g,"/") + "/" + t.worktree) : "maw next"));
+    lines.push("4. 目标任务保持为 " + t.id + "；勿改其他 agent 的 worktree。");
+  } else {
+    lines.push("2. 设定本会话唯一 Agent 名（勿与已注册冲突" + (taken.length ? "；已占用：" + taken.join(", ") : "") + "）：");
+    lines.push("   export MAW_AGENT=<唯一名>");
+    lines.push("3. 注册并领取下一道 ready 任务（按 priority / merge_order）：");
+    lines.push("   maw register && maw next");
+    lines.push("   或：maw next --agent <唯一名>");
+    lines.push("4. 核对输出的任务 ID。期望领取：" + t.id + "（" + (t.title || "") + "）。");
+    lines.push("   - 若正是该任务：进入输出的 worktree 目录工作。");
+    lines.push("   - 若领到其他任务：以实际领到的任务为准继续（队列按优先级）；或查看看板后再调度，勿改他人 worktree。");
+  }
+  lines.push("5. 只在 maw 创建的 worktree 中修改；只改 write_scope；越界前运行 maw request-change。");
+  lines.push("6. 里程碑：maw progress -m \"说明\"；完成：maw submit；阻塞：maw block（按 CLI 提示附原因）。");
+  lines.push("7. 完成 submit 后可自行合入：maw merge --yes；禁止直接 git merge / rebase / push 主干。");
+  lines.push("8. 合入后若仍有 ready 任务，继续 maw next 领取并执行下一题，循环直至无题可领或用户叫停。");
+  lines.push("9. 全局看板：maw board --serve（默认 http://127.0.0.1:7420/）。");
+  lines.push("");
+  lines.push("## 协议红线");
+  lines.push("- 状态库在本机 ~/.maw/maw.db；本仓库 .multiagent/ 仅存配置与蓝图。");
+  lines.push("- 换人或中断前：maw handoff；本会话无更多可领任务时再 maw unregister。");
+  lines.push("- 出错时先读 maw 输出的「下一步」提示，不要绕过。");
+  lines.push("- 开始前建议：maw task show " + t.id);
+  return lines.join("\n");
+}
+
+function buildProjectJoinPrompt(projectId) {
+  const p = findProject(projectId);
+  if (!p) {
+    return "当前看板尚无已接入工程。请先在目标 git 仓库内运行：maw init && maw plan apply .multiagent/blueprint.toml --yes";
+  }
+  const taken = takenAgentNames();
+  const ready = (lastSnap?.tasks || []).filter(t => t.status === "ready" && (!projectId || t.project_id === p.id));
+  const lines = [];
+  lines.push("你是接入 maw（Multi-Agent Worktree CLI）的执行 Agent。请连接下列工程，领取并完成下一道可领取（ready）任务。");
+  lines.push("");
+  lines.push("## 工程信息");
+  lines.push("- 名称：" + (p.name || "—"));
+  lines.push("- 工程 ID：" + (p.id || "—"));
+  lines.push("- 本地路径：" + (p.path || "—"));
+  lines.push("- 主干分支：" + (p.main_branch || "main"));
+  lines.push("");
+  lines.push("## 当前可领取任务（供参考，以 maw next 实际领取为准）");
+  if (ready.length) {
+    ready.slice(0, 8).forEach(t => {
+      lines.push("- " + t.id + "：" + (t.title || "") + "（priority=" + (t.priority ?? "?") + "）");
+    });
+    if (ready.length > 8) lines.push("- …共 " + ready.length + " 道");
+  } else {
+    lines.push("- （当前筛选下无 ready；先看看板或等待依赖完成）");
+  }
+  lines.push("");
+  lines.push("## 接入与执行步骤");
+  lines.push("1. cd " + (p.path || "<工程路径>"));
+  lines.push("2. export MAW_AGENT=<唯一名>" + (taken.length ? "  # 已占用：" + taken.join(", ") : ""));
+  lines.push("3. maw register && maw next");
+  lines.push("4. 进入输出的 worktree，只改该任务 write_scope；maw progress / maw submit；完成后可自行 maw merge --yes。");
+  lines.push("5. 合入后若仍有 ready，继续 maw next 领下一题并执行，循环直至无题可领。");
+  lines.push("6. 看板：maw board --serve");
+  lines.push("");
+  lines.push("## 协议红线");
+  lines.push("- 状态库 ~/.maw/maw.db；只在 maw worktree 内工作；合入用 maw merge --yes（可自行执行）。");
+  lines.push("- 出错先读 maw「下一步」提示。");
+  return lines.join("\n");
+}
+
+async function copyText(btn, text, okLabel) {
+  const prev = btn.innerHTML;
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = okLabel || "已复制";
+    btn.classList.add("ok");
+    setTimeout(() => { btn.innerHTML = prev; btn.classList.remove("ok"); }, 2500);
+  } catch (_) {
+    btn.textContent = "复制失败";
+    setTimeout(() => { btn.innerHTML = prev; }, 1400);
+  }
+}
+
+function syncSelectionHighlight() {
+  document.querySelectorAll(".card.clickable, .topo-node.clickable").forEach(el => {
+    el.classList.toggle("active", !!selectedTid && el.dataset.tid === selectedTid && el.dataset.pid === (selectedPid || ""));
+  });
+}
+
+function closeDrawer() {
+  selectedTid = null;
+  selectedPid = null;
+  detailRequest++;
+  drawerEvents = [];
+  const mask = document.getElementById("drawer-mask");
+  const drawer = document.getElementById("drawer");
+  mask.classList.remove("open");
+  drawer.classList.remove("open");
+  drawer.setAttribute("aria-hidden", "true");
+  drawer.inert = true;
+  document.getElementById("app-shell").inert = false;
+  clearTimeout(closeTimer);
+  closeTimer = setTimeout(() => { mask.hidden = true; }, 220);
+  syncSelectionHighlight();
+  const replacement = [...document.querySelectorAll(".card.clickable, .topo-node.clickable")].find(el =>
+    el.dataset.tid === drawerReturnFocus?.tid && el.dataset.pid === drawerReturnFocus?.pid);
+  (replacement || document.getElementById("task-search")).focus({ preventScroll: true });
+}
+
+async function refreshTaskDetail(tid, pid) {
+  const request = ++detailRequest;
+  try {
+    const q = new URLSearchParams({ id: tid, t: Date.now() });
+    if (pid) q.set("project", pid);
+    const res = await fetch("/api/task?" + q, { cache: "no-store" });
+    if (!res.ok) throw new Error("详情不可用");
+    const d = await res.json();
+    if (request !== detailRequest || selectedTid !== tid || selectedPid !== pid) return;
+    drawerEvents = d.events || [];
+    if (d.task && lastSnap) {
+      const idx = (lastSnap.tasks || []).findIndex(x => x.id === tid && (x.project_id || "") === pid);
+      if (idx >= 0) lastSnap.tasks[idx] = { ...lastSnap.tasks[idx], ...d.task };
+    }
+  } catch (_) {
+    if (request !== detailRequest) return;
+    drawerEvents = [];
+  }
+  if (request !== detailRequest || selectedTid !== tid || selectedPid !== pid) return;
+  drawerLoading = false;
+  const body = document.getElementById("drawer-body");
+  const scroll = body.scrollTop;
+  const focusedID = document.activeElement?.id;
+  renderDrawerBody();
+  body.scrollTop = scroll;
+  if (focusedID) document.getElementById(focusedID)?.focus({ preventScroll: true });
+}
+
+function openDrawer(tid, pid) {
+  selectedTid = tid;
+  selectedPid = pid || "";
+  drawerReturnFocus = { tid, pid: selectedPid };
+  drawerEvents = [];
+  drawerLoading = true;
+  const mask = document.getElementById("drawer-mask");
+  const drawer = document.getElementById("drawer");
+  clearTimeout(closeTimer);
+  mask.hidden = false;
+  drawer.inert = false;
+  document.getElementById("app-shell").inert = true;
+  requestAnimationFrame(() => {
+    mask.classList.add("open");
+    drawer.classList.add("open");
+  });
+  drawer.setAttribute("aria-hidden", "false");
+  syncSelectionHighlight();
+  renderDrawerBody();
+  document.getElementById("drawer-body").scrollTop = 0;
+  document.getElementById("d-close").focus();
+  refreshTaskDetail(tid, selectedPid);
+}
+
+function secCopy(title, btnId, label) {
+  return '<div class="sec-head"><h3>' + title + '</h3>' +
+    '<button type="button" class="copy primary" id="' + btnId + '">' + label + '</button></div>';
+}
+
+function renderDrawerBody() {
+  const t = findTask(selectedTid, selectedPid);
+  if (!t) {
+    document.getElementById("d-id").textContent = "";
+    document.getElementById("d-title").textContent = "任务不存在或已筛选掉";
+    document.getElementById("drawer-body").innerHTML = '<p class="empty">当前筛选下找不到该任务</p>';
+    return;
+  }
+  selectedPid = t.project_id || selectedPid;
+  const p = findProject(t.project_id) || {};
+  const cmd = "maw task show " + t.id;
+  const prompt = buildTaskPrompt(t);
+  const cdWt = t.worktree
+    ? "cd " + ((p.path || "<工程路径>").replace(/\\/g, "/") + "/" + t.worktree)
+    : "";
+  document.getElementById("d-id").textContent = t.id;
+  document.getElementById("d-title").textContent = t.title || "（无标题）";
+
+  let logsHtml;
+  if (drawerLoading) {
+    logsHtml = '<p class="empty">正在加载日志…</p>';
+  } else if (drawerEvents.length) {
+    logsHtml = '<ul class="timeline">' + drawerEvents.map(ev => {
+      const lab = EVENT_LABEL[ev.type] || ev.type;
+      const msg = formatEventData(ev);
+      return '<li><div class="ts">' + esc(fmtTime(ev.ts)) + '</div>' +
+        '<div><span class="ev-type">' + esc(lab) + '</span>' +
+        '<span class="ev-actor">' + esc(ev.actor || "") + '</span></div>' +
+        (msg ? '<div class="ev-msg">' + esc(msg) + '</div>' : "") +
+        '</li>';
+    }).join("") + '</ul>';
+  } else {
+    logsHtml = '<p class="empty">暂无任务日志（需 <code>maw board --serve</code>）</p>';
+  }
+
+  const agent = (lastSnap?.agents || []).find(a =>
+    a.task_id === t.id && (!t.project_id || a.project_id === t.project_id)
+  );
+
+  document.getElementById("drawer-body").innerHTML =
+    '<div class="drawer-actions">' +
+      '<button type="button" class="copy primary" id="d-copy-prompt-top">复制接入提示词</button>' +
+      '<button type="button" class="copy" id="d-copy-cmd-top">复制查看命令</button>' +
+      (cdWt ? '<button type="button" class="copy" id="d-copy-wt">复制进入 worktree</button>' : "") +
+    '</div>' +
+    '<div class="drawer-section"><h3>基本信息</h3><dl class="kv">' +
+      '<dt>状态</dt><dd>' + statusBadge(t.status) + '<code style="font-size:.68rem;color:var(--muted)">' + esc(t.status) + '</code></dd>' +
+      '<dt>优先级</dt><dd>' + esc(t.priority ?? "—") + ' · merge_order ' + esc(t.merge_order ?? "—") + '</dd>' +
+      '<dt>负责人</dt><dd>' + esc(t.owner || "未分配") + '</dd>' +
+      '<dt>依赖</dt><dd>' + esc((t.deps && t.deps.length) ? t.deps.join(", ") : "无") + '</dd>' +
+      '<dt>尝试次数</dt><dd>' + esc(t.attempts ?? 0) + ' · 修订 ' + esc(t.revision ?? 0) + '</dd>' +
+      '<dt>心跳</dt><dd>' + esc(fmtTime(t.heartbeat) || "—") + '</dd>' +
+      (t.blocked_reason ? '<dt>阻塞原因</dt><dd>' + esc(t.blocked_reason) + '</dd>' : "") +
+    '</dl></div>' +
+    '<div class="drawer-section"><h3>执行节点</h3><dl class="kv">' +
+      '<dt>工程</dt><dd>' + esc(t.project_name || p.name || "—") + '</dd>' +
+      '<dt>工程路径</dt><dd>' + esc(p.path || "—") + '</dd>' +
+      '<dt>Worktree</dt><dd>' + esc(t.worktree || "—") + '</dd>' +
+      '<dt>分支</dt><dd>' + esc(t.branch || "—") + '</dd>' +
+      '<dt>Agent</dt><dd>' + esc(agent ? (agent.id + " · " + (agent.status || "") + " · " + (fmtTime(agent.last_seen) || "")) : (t.owner || "—")) + '</dd>' +
+    '</dl></div>' +
+    '<div class="drawer-section"><h3>write_scope</h3>' + listBullets(t.write_scope, "空") + '</div>' +
+    '<div class="drawer-section"><h3>read_scope</h3>' + listBullets(t.read_scope, "无") + '</div>' +
+    '<div class="drawer-section"><h3>acceptance</h3>' + listBullets(t.acceptance, "无") + '</div>' +
+    '<div class="drawer-section">' + secCopy("查看命令", "d-copy-cmd", "一键复制") +
+      '<div class="cmd-box">' + esc(cmd) + '</div></div>' +
+    '<div class="drawer-section">' + secCopy("接入提示词", "d-copy-prompt", "一键复制") +
+      '<div class="prompt-box" id="d-prompt">' + esc(prompt) + '</div></div>' +
+    '<div class="drawer-section"><h3>任务日志</h3>' + logsHtml + '</div>';
+
+  const bind = (id, text, ok) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.onclick = async (e) => { e.stopPropagation(); await copyText(el, text, ok); };
+  };
+  bind("d-copy-prompt-top", prompt, "已复制提示词");
+  bind("d-copy-prompt", prompt, "已复制提示词");
+  bind("d-copy-cmd-top", cmd, "已复制");
+  bind("d-copy-cmd", cmd, "已复制");
+  bind("d-copy-wt", cdWt, "已复制");
+
+  document.querySelectorAll(".card.clickable").forEach(el => {
+    const on = el.dataset.tid === t.id && (!selectedPid || el.dataset.pid === selectedPid);
+    el.classList.toggle("active", on);
+  });
+}
+
+function qs() {
+  const p = new URLSearchParams();
+  if (filters.project) p.set("project", filters.project);
+  if (filters.agent) p.set("agent", filters.agent);
+  if (filters.status) p.set("status", filters.status);
+  p.set("t", Date.now());
+  return p.toString();
+}
+
+async function loadSnapshot() {
+  const q = qs();
+  const urls = ["/api/board?" + q, "./snapshot.json?" + q];
+  let lastErr;
+  for (const u of urls) {
+    try {
+      const res = await fetch(u, { cache: "no-store" });
+      if (!res.ok) throw new Error(res.status + " " + res.statusText);
+      return await res.json();
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("无法加载看板数据");
+}
+
+function fillSelect(el, items, valueKey, labelKey, current, allLabel) {
+  const cur = current || "";
+  const html = '<option value="">' + esc(allLabel) + '</option>' +
+    items.map(it => {
+      const v = it[valueKey] || "";
+      const lab = it[labelKey] || v;
+      return '<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>'+esc(lab)+'</option>';
+    }).join("");
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
+
+function syncFilterControls(s) {
+  projectOptions = s.projects || [];
+  const agents = s.agents || [];
+  const seen = new Set(agentOptions.map(a => a.id));
+  agents.forEach(a => {
+    if (!seen.has(a.id)) { seen.add(a.id); agentOptions.push({id: a.id, label: a.id}); }
+  });
+  (s.tasks || []).forEach(t => {
+    if (t.owner && !seen.has(t.owner)) {
+      seen.add(t.owner);
+      agentOptions.push({id: t.owner, label: t.owner});
+    }
+  });
+  agentOptions.sort((a,b) => a.id.localeCompare(b.id));
+  fillSelect(document.getElementById("f-project"), projectOptions, "id", "name", filters.project, "全部工程");
+  fillSelect(document.getElementById("f-agent"), agentOptions, "id", "label", filters.agent, "全部 Agent");
+  document.getElementById("f-status").value = filters.status || "";
+}
+
+function visibleTasks(s) {
+  const query = searchTerm.trim().toLocaleLowerCase();
+  return (s.tasks || []).filter(t =>
+    (!filters.project || t.project_id === filters.project) &&
+    (!filters.agent || t.owner === filters.agent) &&
+    (!filters.status || t.status === filters.status) &&
+    (!query || [t.id, t.title, t.owner, t.project_name, t.project_id].join(" ").toLocaleLowerCase().includes(query)));
+}
+
+/** 同工程内分层：依赖在左，依赖方在右；缺失依赖以虚线 stub 占位。 */
+function layoutTopoBands(tasks) {
+  const groups = new Map();
+  for (const t of tasks) {
+    const pid = t.project_id || "";
+    if (!groups.has(pid)) groups.set(pid, []);
+    groups.get(pid).push(t);
+  }
+  const bands = [];
+  for (const [pid, group] of groups) {
+    const byId = new Map(group.map(t => [t.id, t]));
+    const stubs = new Set();
+    for (const t of group) {
+      for (const d of (t.deps || [])) if (d && !byId.has(d)) stubs.add(d);
+    }
+    const level = new Map();
+    const walk = (id, stack) => {
+      if (level.has(id)) return level.get(id);
+      if (stack.has(id)) return 0;
+      stack.add(id);
+      const task = byId.get(id);
+      let L = 0;
+      if (task) {
+        for (const d of (task.deps || [])) {
+          if (!d) continue;
+          L = Math.max(L, (byId.has(d) || stubs.has(d) ? walk(d, stack) : -1) + 1);
+        }
+      }
+      level.set(id, L);
+      stack.delete(id);
+      return L;
+    };
+    for (const id of stubs) walk(id, new Set());
+    for (const t of group) walk(t.id, new Set());
+    const layers = [];
+    for (const [id, L] of level) {
+      if (!layers[L]) layers[L] = [];
+      layers[L].push(id);
+    }
+    for (const layer of layers) {
+      if (!layer) continue;
+      layer.sort((a, b) => {
+        const ta = byId.get(a), tb = byId.get(b);
+        const pa = ta?.priority ?? 1e9, pb = tb?.priority ?? 1e9;
+        if (pa !== pb) return pa - pb;
+        return a.localeCompare(b);
+      });
+    }
+    const positions = new Map();
+    let width = TOPO_PAD * 2, height = TOPO_PAD * 2;
+    layers.forEach((layer, li) => {
+      if (!layer) return;
+      layer.forEach((id, ri) => {
+        const x = TOPO_PAD + li * (TOPO_NODE_W + TOPO_GAP_X);
+        const y = TOPO_PAD + ri * (TOPO_NODE_H + TOPO_GAP_Y);
+        positions.set(id, { x, y, stub: !byId.has(id) });
+        width = Math.max(width, x + TOPO_NODE_W + TOPO_PAD);
+        height = Math.max(height, y + TOPO_NODE_H + TOPO_PAD);
+      });
+    });
+    const edges = [];
+    for (const t of group) {
+      for (const d of (t.deps || [])) {
+        if (!d || !positions.has(d) || !positions.has(t.id)) continue;
+        edges.push({ from: d, to: t.id, cross: !byId.has(d) });
+      }
+    }
+    const edgeCount = edges.length;
+    const indeg = new Map(), outdeg = new Map();
+    for (const e of edges) {
+      outdeg.set(e.from, (outdeg.get(e.from) || 0) + 1);
+      indeg.set(e.to, (indeg.get(e.to) || 0) + 1);
+    }
+    bands.push({
+      pid,
+      name: group[0]?.project_name || pid || "未知工程",
+      tasks: group,
+      byId,
+      positions,
+      edges,
+      edgeCount,
+      indeg,
+      outdeg,
+      width,
+      height,
+    });
+  }
+  bands.sort((a, b) => a.name.localeCompare(b.name, "zh"));
+  return bands;
+}
+
+function topoEdgePath(from, to) {
+  const x1 = from.x + TOPO_NODE_W;
+  const y1 = from.y + TOPO_NODE_H / 2;
+  const x2 = to.x;
+  const y2 = to.y + TOPO_NODE_H / 2;
+  const mx = (x1 + x2) / 2;
+  return "M " + x1 + " " + y1 + " C " + mx + " " + y1 + ", " + mx + " " + y2 + ", " + x2 + " " + y2;
+}
+
+function renderTopoNode(t, pos, indeg, outdeg) {
+  const active = selectedTid === t.id && selectedPid === (t.project_id || "");
+  const deps = t.deps || [];
+  const inN = indeg.get(t.id) || 0;
+  const outN = outdeg.get(t.id) || 0;
+  return '<article class="topo-node clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(t.id)+'" data-pid="'+esc(t.project_id||'')+'" style="left:'+pos.x+'px;top:'+pos.y+'px" aria-label="'+esc(t.id+' '+t.title+'，'+statusLabel(t.status))+'">'+
+    '<div class="card-top"><span class="id">'+esc(t.id)+'</span>'+statusBadge(t.status)+'</div>'+
+    '<h4 class="task-title">'+esc(t.title || "（无标题）")+'</h4>'+
+    '<div class="topo-meta">'+
+      '<span class="owner">'+esc(t.owner || "未分配")+'</span>'+
+      '<span class="priority" title="调度优先级，数值越小越优先">P'+esc(t.priority ?? "—")+'</span>'+
+      '<span title="入度 / 出度">←'+inN+' · '+outN+'→</span>'+
+    '</div>'+
+    (deps.length ? '<div class="topo-deps">deps: '+esc(deps.join(", "))+'</div>' : '')+
+  '</article>';
+}
+
+function renderTopology(s) {
+  const tasks = visibleTasks(s);
+  const root = document.getElementById("topology");
+  const scrollLeft = root.scrollLeft, scrollTop = root.scrollTop;
+  const oldFocus = document.activeElement?.closest(".topo-node.clickable");
+  const bands = layoutTopoBands(tasks);
+  const edgeTotal = bands.reduce((n, b) => n + b.edgeCount, 0);
+  let html;
+  if (!tasks.length) {
+    html = '<p class="topo-empty">'+(searchTerm || filters.status || filters.agent ? "当前筛选下没有可展示的任务" : "暂无任务，应用蓝图后可查看依赖拓扑")+'</p>';
+  } else {
+    html = '<div class="topo-legend"><span><i></i>依赖方向：前置 → 后续</span><span><i class="cross"></i>虚线：当前视图外的依赖</span></div>' + bands.map(band => {
+      const markerId = "topo-arrow-" + esc(band.pid || "all").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const paths = band.edges.map(e => {
+        const a = band.positions.get(e.from), b = band.positions.get(e.to);
+        if (!a || !b) return "";
+        return '<path class="'+(e.cross ? "cross" : "")+'" d="'+topoEdgePath(a, b)+'" marker-end="url(#'+markerId+')"/>';
+      }).join("");
+      const nodes = [...band.positions.entries()].map(([id, pos]) => {
+        const t = band.byId.get(id);
+        if (pos.stub || !t) {
+          return '<article class="topo-node stub" style="left:'+pos.x+'px;top:'+pos.y+'px" aria-label="缺失依赖 '+esc(id)+'"><div class="id">'+esc(id)+'</div><h4 class="task-title">筛选外 / 历史依赖</h4><div class="topo-meta"><span>不在当前视图</span></div></article>';
+        }
+        return renderTopoNode(t, pos, band.indeg, band.outdeg);
+      }).join("");
+      return '<section class="topo-band" data-project="'+esc(band.pid)+'">'+
+        '<div class="topo-band-label"><span>'+esc(band.name)+'</span><span class="count">'+band.tasks.length+' 任务 · '+band.edgeCount+' 边</span></div>'+
+        '<div class="topo-canvas" style="width:'+band.width+'px;height:'+band.height+'px">'+
+          '<svg class="topo-edges" viewBox="0 0 '+band.width+' '+band.height+'" width="'+band.width+'" height="'+band.height+'" aria-hidden="true">'+
+            '<defs><marker id="'+markerId+'" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>'+
+            paths+
+          '</svg>'+
+          nodes+
+        '</div></section>';
+    }).join("");
+  }
+  if (renderedTopoHTML !== html) {
+    renderedTopoHTML = html;
+    root.innerHTML = html;
+    root.scrollLeft = scrollLeft;
+    root.scrollTop = scrollTop;
+    if (oldFocus && !selectedTid) {
+      const replacement = [...root.querySelectorAll(".topo-node.clickable")].find(el => el.dataset.tid === oldFocus.dataset.tid && el.dataset.pid === oldFocus.dataset.pid);
+      replacement?.focus({ preventScroll: true });
+    }
+  }
+  const bandNote = bands.length > 1 ? " · " + bands.length + " 个工程" : "";
+  document.getElementById("board-count").textContent = searchTerm
+    ? tasks.length + " 个匹配任务 / " + (s.total || 0) + " 个任务 · " + edgeTotal + " 条依赖"
+    : tasks.length + " 个任务 · " + edgeTotal + " 条依赖" + bandNote;
+}
+
+function renderBoard(s) {
+  const tasks = visibleTasks(s);
+  const root = document.getElementById("columns");
+  const scrolls = new Map([...root.querySelectorAll(".col")].map(el => [el.dataset.lane, el.querySelector(".col-body").scrollTop]));
+  const oldFocus = document.activeElement?.closest(".card");
+  const focusedAction = document.activeElement?.dataset.action;
+  const lanes = LANES.filter(lane => lane.id !== "attention" || tasks.some(t => lane.statuses.includes(t.status)) || lane.statuses.includes(filters.status));
+  // Unknown future statuses stay visible instead of silently dropping tasks.
+  if (tasks.some(t => !COLUMNS.some(([status]) => status === t.status))) {
+    lanes.push({ id: "other", label: "其他状态", statuses: [...new Set(tasks.map(t => t.status))].filter(status => !COLUMNS.some(([key]) => key === status)), symbol: "?", empty: "暂无任务" });
+  }
+  const html = lanes.map((lane, i) => {
+    const items = tasks.filter(t => lane.statuses.includes(t.status));
+    const cards = items.map(t => {
+      const active = selectedTid === t.id && selectedPid === (t.project_id || "");
+      return '<article class="card clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(t.id)+'" data-pid="'+esc(t.project_id||'')+'" aria-label="'+esc(t.id+' '+t.title+'，'+statusLabel(t.status))+'">'+
+        '<div class="card-top"><span class="id">'+esc(t.id)+'</span>'+statusBadge(t.status)+'</div>'+
+        '<h4 class="task-title">'+esc(t.title)+'</h4>'+
+        '<div class="card-project">'+esc(t.project_name || t.project_id || "未知工程")+'</div>'+
+        (t.blocked_reason ? '<div class="task-reason">'+esc(t.blocked_reason)+'</div>' : '')+
+        '<div class="card-bottom"><span class="owner">'+esc(t.owner || "未分配")+'</span><span class="priority" title="调度优先级，数值越小越优先">P'+esc(t.priority ?? "—")+'</span></div>'+
+        '<div class="actions"><button type="button" class="copy primary" data-action="prompt" aria-label="'+esc('复制 '+t.id+' 接入提示词')+'">接入提示词 ↗</button><button type="button" class="copy" data-action="command" aria-label="'+esc('复制 '+t.id+' 查看命令')+'">⌘ 命令</button></div></article>';
+    }).join("");
+    return '<section class="col" data-lane="'+lane.id+'" aria-label="'+lane.label+'"><h3><span class="lane-index">'+String(i+1).padStart(2,"0")+'</span>'+lane.label+'<span class="count">'+items.length+'</span><span class="lane-symbol" aria-hidden="true">'+lane.symbol+'</span></h3><div class="col-body">'+(cards || '<div class="lane-empty"><span aria-hidden="true">'+lane.symbol+'</span>'+lane.empty+'</div>')+'</div></section>';
+  }).join("");
+  // Unchanged polls must not replace focused controls or reset column scrolling.
+  if (renderedBoardHTML !== html) {
+    renderedBoardHTML = html;
+    root.innerHTML = html;
+    root.querySelectorAll(".col").forEach(el => { el.querySelector(".col-body").scrollTop = scrolls.get(el.dataset.lane) || 0; });
+    if (oldFocus && !selectedTid) {
+      const replacement = [...root.querySelectorAll(".card")].find(el => el.dataset.tid === oldFocus.dataset.tid && el.dataset.pid === oldFocus.dataset.pid);
+      (focusedAction ? replacement?.querySelector('[data-action="'+focusedAction+'"]') : replacement)?.focus({ preventScroll: true });
+    }
+  }
+  document.getElementById("board-count").textContent = searchTerm ? tasks.length + " 个匹配任务 / " + (s.total || 0) + " 个任务" : tasks.length + " 个任务 · " + lanes.length + " 个阶段";
+}
+
+function renderWorkspace(s) {
+  if (boardView === "topo") renderTopology(s);
+  else renderBoard(s);
+}
+
+function render(s) {
+  lastSnap = s;
+  if (!filters._inited) {
+    // 优先 URL #工程ID，其次服务端筛选参数
+    filters.project = readProjectHash() || s.filter_project || "";
+    filters.agent = s.filter_agent || "";
+    filters.status = s.filter_status || "";
+    filters._inited = true;
+    if (filters.project) writeProjectHash(filters.project);
+  }
+  syncFilterControls(s);
+  const pct = Math.max(0, Math.min(100, Number(s.percent) || 0));
+  const projects = s.projects || [];
+  const selectedProject = projects.find(p => p.id === filters.project);
+  document.getElementById("workspace-name").textContent = selectedProject?.name || "全部工程";
+  document.getElementById("projects-count").textContent = String(projects.length).padStart(2, "0");
+  snapshotHealthy = true;
+  updateSyncStatus();
+  const attention = (s.tasks || []).filter(t => ["blocked", "conflict"].includes(t.status)).length;
+  const stat = (label, value, title, extra = "", cls = "") =>
+    '<div class="stat" title="'+esc(title)+'"><div class="stat-label">'+label+'</div><div class="stat-value '+cls+'">'+value+'</div>'+extra+'</div>';
+  document.getElementById("stats").innerHTML =
+    stat("完成进度", pct+'<small>% · '+esc(s.done || 0)+' / '+esc(s.total || 0)+'</small>', "完成进度",
+      '<div class="bar-wrap" role="progressbar" aria-label="完成进度" aria-valuenow="'+pct+'" aria-valuemin="0" aria-valuemax="100"><span class="bar" style="width:'+pct+'%"></span></div>', "accent")+
+    stat("执行与流转", esc(s.active || 0), "含自检、评审与合并")+
+    stat("可领取", esc(s.counts?.ready || 0), "依赖已就绪")+
+    stat("需处理", attention, "阻塞 / 合并冲突", "", attention ? "danger" : "");
+  const nextText = s.next_hint || "暂无调度建议";
+  document.getElementById("next").innerHTML = '<b>NEXT →</b><span>'+esc(nextText)+'</span>';
+  const risks = s.risks || [];
+  const riskEl = document.getElementById("risks");
+  riskEl.className = "hint-risks" + (risks.length ? "" : " empty");
+  riskEl.textContent = risks.join("；");
+  const navHTML = [{id: "", name: "全部工程"}, ...projects].map(p => '<button type="button" class="nav-item'+(filters.project === p.id ? ' active' : '')+'" data-project="'+esc(p.id)+'"'+(filters.project === p.id ? ' aria-current="page"' : '')+' title="'+esc(p.path || p.name)+'"><span class="nav-icon" aria-hidden="true">'+(p.id ? '⌁' : '▦')+'</span><span class="nav-name">'+esc(p.name)+'</span></button>').join("");
+  const nav = document.getElementById("project-nav");
+  if (nav.innerHTML !== navHTML) nav.innerHTML = navHTML;
+  // 侧栏只展示执行中 Agent（不展示 idle / offline）
+  const agents = (s.agents || []).filter(a => a.status === "working");
+  document.getElementById("agents-count").textContent = String(agents.length).padStart(2,"0");
+  document.getElementById("agents").innerHTML = agents.length ? agents.map(a =>
+    '<div class="agent-chip" title="'+esc([a.project_name || a.project_id, a.id, a.task_id || "无任务", fmtTime(a.last_seen)].join(' / '))+'"><div class="agent-top"><span class="agent-dot st-working"></span><span class="id">'+esc(a.id)+'</span><span class="agent-state">执行中</span></div><div class="meta">'+esc(a.task_id || "无任务")+' · '+esc(a.project_name || a.project_id)+'</div></div>'
+  ).join("") : '<p class="empty" style="padding:0 9px">暂无执行中 Agent</p>';
+  document.getElementById("f-copy-join").disabled = !projects.length;
+  document.getElementById("f-copy-join").title = selectedProject ? "复制 " + selectedProject.name + " 接入提示词" : projects.length > 1 ? "请先选择一个工程" : "复制工程接入提示词";
+  renderWorkspace(s);
+  if (selectedTid && !findTask(selectedTid, selectedPid)) closeDrawer();
+}
+
+function applyFiltersFromUI() {
+  setProjectFilter(document.getElementById("f-project").value || "");
+  filters.agent = document.getElementById("f-agent").value || "";
+  filters.status = document.getElementById("f-status").value || "";
+  tick();
+}
+
+document.getElementById("f-reset").onclick = () => {
+  setProjectFilter("");
+  filters.agent = ""; filters.status = "";
+  searchTerm = "";
+  document.getElementById("task-search").value = "";
+  tick();
+};
+["f-project","f-agent","f-status"].forEach(id => {
+  document.getElementById(id).addEventListener("change", applyFiltersFromUI);
+});
+document.getElementById("f-copy-join").onclick = async () => {
+  const btn = document.getElementById("f-copy-join");
+  if (!filters.project && projectOptions.length > 1) {
+    document.getElementById("f-project").focus();
+    btn.textContent = "请先选择工程";
+    setTimeout(() => { btn.textContent = "复制工程接入提示词"; }, 2000);
+    return;
+  }
+  await copyText(btn, buildProjectJoinPrompt(filters.project || ""), "已复制提示词");
+};
+document.getElementById("d-close").onclick = closeDrawer;
+document.getElementById("drawer-mask").onclick = closeDrawer;
+document.getElementById("f-status").innerHTML += COLUMNS.map(([key, label]) => '<option value="'+key+'">'+label+'</option>').join("");
+document.getElementById("task-search").addEventListener("input", e => {
+  searchTerm = e.target.value;
+  if (lastSnap) renderWorkspace(lastSnap);
+});
+document.getElementById("project-nav").addEventListener("click", e => {
+  const button = e.target.closest("[data-project]");
+  if (!button) return;
+  setProjectFilter(button.dataset.project);
+  tick();
+});
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("hashchange", () => {
+    if (writingProjectHash) return;
+    const id = readProjectHash();
+    if (id === (filters.project || "")) return;
+    setProjectFilter(id, { syncHash: false });
+    tick();
+  });
+}
+document.getElementById("view-toggle").addEventListener("click", e => {
+  const button = e.target.closest ? e.target.closest("[data-view]") : null;
+  if (!button || button.dataset.view === boardView) return;
+  setView(button.dataset.view);
+});
+document.getElementById("columns").addEventListener("click", async e => {
+  const card = e.target.closest(".card");
+  if (!card) return;
+  const btn = e.target.closest("button[data-action]");
+  if (btn) {
+    const t = findTask(card.dataset.tid, card.dataset.pid);
+    if (t) await copyText(btn, btn.dataset.action === "prompt" ? buildTaskPrompt(t) : "maw task show " + t.id, "已复制");
+  } else openDrawer(card.dataset.tid, card.dataset.pid);
+});
+document.getElementById("columns").addEventListener("keydown", e => {
+  if (e.target.matches(".card") && ["Enter", " "].includes(e.key)) {
+    e.preventDefault();
+    openDrawer(e.target.dataset.tid, e.target.dataset.pid);
+  }
+});
+document.getElementById("topology").addEventListener("click", e => {
+  const node = e.target.closest(".topo-node.clickable");
+  if (node) openDrawer(node.dataset.tid, node.dataset.pid);
+});
+document.getElementById("topology").addEventListener("keydown", e => {
+  if (e.target.matches(".topo-node.clickable") && ["Enter", " "].includes(e.key)) {
+    e.preventDefault();
+    openDrawer(e.target.dataset.tid, e.target.dataset.pid);
+  }
+});
+document.addEventListener("keydown", e => {
+  if (selectedTid) {
+    if (e.key === "Escape") closeDrawer();
+    if (e.key === "Tab") {
+      const controls = [...document.getElementById("drawer").querySelectorAll('button, [href], input, select, textarea, [tabindex="0"]')].filter(el => !el.disabled);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+    }
+  } else if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest("input, select, textarea, [contenteditable]")) {
+    e.preventDefault();
+    document.getElementById("task-search").focus();
+  }
+});
+
+async function tick() {
+  const request = ++snapshotRequest;
+  try {
+    const s = await loadSnapshot();
+    if (request !== snapshotRequest) return;
+    render(s);
+    if (selectedTid) refreshTaskDetail(selectedTid, selectedPid);
+  } catch (e) {
+    if (request !== snapshotRequest) return;
+    snapshotHealthy = false;
+    updateSyncStatus(String(e.message || e));
+    if (!lastSnap) {
+      document.getElementById("board-count").textContent = "未能加载任务";
+      document.getElementById("next").innerHTML = '<b>OFFLINE</b><span>请确认 maw board --serve 正在运行，然后等待自动重连。</span>';
+    }
+  }
+}
+function updateSyncStatus(error = "") {
+  const subtitle = document.getElementById("subtitle");
+  const label = !snapshotHealthy ? "同步失败" : sseConnected ? "实时" : "3s 同步";
+  subtitle.innerHTML = '<span class="live'+(!snapshotHealthy ? ' err' : '')+'"><span class="dot"></span>'+label+'</span>' + (lastSnap ? '<time>'+esc(fmtTime(lastSnap.updated_at))+'</time>' : '');
+  subtitle.title = error || (sseConnected ? "实时更新已连接，每 3 秒同步兜底" : "每 3 秒同步，实时连接会自动重试");
+}
+
+async function syncBoard() {
+  if (syncRunning) { syncPending = true; return; }
+  syncRunning = true;
+  try {
+    do {
+      syncPending = false;
+      await tick();
+    } while (syncPending);
+  } finally { syncRunning = false; }
+}
+
+function connectEvents() {
+  if (typeof EventSource === "undefined" || eventStream) return;
+  try { eventStream = new EventSource("/api/events"); } catch (_) { return; }
+  eventStream.onopen = () => { sseConnected = true; updateSyncStatus(); };
+  // Every reconnect refreshes current state, including changes during disconnection.
+  eventStream.addEventListener("ready", () => syncBoard());
+  eventStream.addEventListener("board-changed", () => syncBoard());
+  eventStream.onerror = () => {
+    sseConnected = false;
+    updateSyncStatus();
+    // EventSource reconnects automatically; the independent polling loop stays active.
+  };
+}
+
+// Bootstrap stays separate so the inline application can be exercised without a server.
+const themeSelect = document.getElementById("theme-select");
+themeSelect.value = readTheme();
+themeSelect.addEventListener("change", e => setTheme(e.target.value));
+boardView = readView();
+document.getElementById("view-board").classList.toggle("active", boardView === "board");
+document.getElementById("view-topo").classList.toggle("active", boardView === "topo");
+document.getElementById("view-board").setAttribute("aria-pressed", boardView === "board" ? "true" : "false");
+document.getElementById("view-topo").setAttribute("aria-pressed", boardView === "topo" ? "true" : "false");
+document.getElementById("columns").hidden = boardView !== "board";
+document.getElementById("topology").hidden = boardView !== "topo";
+// 首屏请求前从 #锚点恢复工程，避免刷新后先拉全部再切换
+{
+  const hashProject = readProjectHash();
+  if (hashProject) setProjectFilter(hashProject, { syncHash: false });
+}
+syncBoard();
+connectEvents();
+setInterval(syncBoard, 3000);
+</script>
+</body>
+</html>

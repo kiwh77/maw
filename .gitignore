@@ -12,3 +12,10 @@ build/
 /maw
 /maw-*
 *.exe
+
+# Local / generated (do not publish)
+output/
+.workbuddy/
+*.db
+.idea/
+.vscode/

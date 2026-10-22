@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wuhao/goal-agents/internal/config"
-	"github.com/wuhao/goal-agents/internal/db"
-	"github.com/wuhao/goal-agents/internal/errx"
-	"github.com/wuhao/goal-agents/internal/home"
+	"github.com/wuhao/maw/internal/config"
+	"github.com/wuhao/maw/internal/db"
+	"github.com/wuhao/maw/internal/errx"
+	"github.com/wuhao/maw/internal/home"
 )
 
 func Resolve(cwd, explicit string) (string, error) {
@@ -32,7 +32,8 @@ func Resolve(cwd, explicit string) (string, error) {
 			return s, nil
 		}
 	}
-	return "", errx.New("cannot determine caller identity", "export MAW_AGENT=w1 (or integrator), or run `maw next` first")
+	return "", errx.New("cannot determine caller identity",
+		"export MAW_AGENT=<应用-工程-序号>（如 cursor-demo-1），或直接 `maw register` / `maw next` 自动分配")
 }
 
 func Role(agent string, cfg *config.Config) string {

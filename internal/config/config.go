@@ -3,13 +3,16 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/wuhao/goal-agents/internal/errx"
-	"github.com/wuhao/goal-agents/internal/home"
+	"github.com/wuhao/maw/internal/errx"
+	"github.com/wuhao/maw/internal/home"
 )
+
+var mainBranchLine = regexp.MustCompile(`(?m)^(\s*main_branch\s*=\s*)"[^"]*"`)
 
 type Config struct {
 	Project   Project   `toml:"project"`
@@ -66,9 +69,7 @@ func Load(path string) (*Config, error) {
 	if c.Project.MainBranch == "" {
 		c.Project.MainBranch = "main"
 	}
-	if c.Project.MaxParallel == 0 {
-		c.Project.MaxParallel = 4
-	}
+	// max_parallel：看板参考值；0 表示不展示建议槽位。领取不再受此限制。
 	if c.Identity.Integrator == "" {
 		c.Identity.Integrator = "int"
 	}
@@ -133,6 +134,39 @@ func DetectMainBranch(repo string) string {
 	return "main"
 }
 
+// SetMainBranch 行级改写 config.toml 的 main_branch，保留其余内容与注释。
+func SetMainBranch(path, branch string) error {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return errx.New("main_branch is empty", "set meta.main_branch in the blueprint")
+	}
+	if strings.ContainsAny(branch, " \t\n\"") {
+		return errx.New("invalid main_branch: "+branch, "use a single git branch name without spaces or quotes")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return errx.New("config not found: "+path, "run `maw init`")
+	}
+	text := string(b)
+	repl := `${1}"` + branch + `"`
+	if mainBranchLine.MatchString(text) {
+		text = mainBranchLine.ReplaceAllString(text, repl)
+	} else {
+		// 无该行时插到 [project] 段首行之后
+		proj := regexp.MustCompile(`(?m)^\[project\]\s*$`)
+		loc := proj.FindStringIndex(text)
+		if loc == nil {
+			return errx.New("config missing [project] section", "restore config.toml or run `maw init --upgrade`")
+		}
+		insert := "\nmain_branch = \"" + branch + "\""
+		text = text[:loc[1]] + insert + text[loc[1]:]
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return errx.Wrap("write config.toml failed", "check permissions on .multiagent/", err)
+	}
+	return nil
+}
+
 func RenderDefault(repo string) string {
 	gates := DetectGates(repo)
 	var gateLit string
@@ -147,9 +181,10 @@ func RenderDefault(repo string) string {
 	}
 	main := DetectMainBranch(repo)
 	return `[project]
+# init 探测占位；正式主干在任务清单 / 蓝图 [meta] main_branch，由 plan apply 同步
 main_branch = "` + main + `"
 merge_strategy = "squash"
-max_parallel = 4
+max_parallel = 0
 blueprint = ".multiagent/blueprint.toml"
 
 [approvals]
@@ -170,7 +205,8 @@ heartbeat_ttl_sec = 900
 mode = "manual"
 
 [identity]
-workers = ["w1", "w2", "w3"]
+# Worker 名推荐动态注册：{应用}-{工程}-{序号}，如 cursor-demo-1
+workers = []
 reviewers = ["r1"]
 integrator = "int"
 `

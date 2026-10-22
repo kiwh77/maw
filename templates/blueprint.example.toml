@@ -1,22 +1,67 @@
+# 标准任务卡示例（TASK-SPEC v1，见 docs/TASK-SPEC.md）
+# 要点：title 是「可交付结果」；acceptance 必须可判定；verify 用独立命令；
+#       read_scope 写全（maw 会把它们渲染进 TASK.md）。
+# 兼容写法（解析层支持 goal/not_doing 之前）：
+#   goal      → acceptance 第 1 条，前缀「现状：…目标：…」
+#   not_doing → acceptance 末条，前缀「不要：」
+
 [meta]
 name = "example"
 version = 1
+# 本波合入 / worktree 基线；plan apply 时同步进 config.toml
+main_branch = "main"
 
+# 共享文件：声明后同一时刻只允许一个任务改（lockfile、路由表、i18n 等）
+[[shared_files]]
+path = "web/package-lock.json"
+owner_task = "T-002"
+
+# ── T-001：入口题。每波至少留 2 个无 deps 的入口题，否则并行度被锁死
 [[task]]
 id = "T-001"
-title = "Example shared setup"
+title = "建立示例工程的最小可运行骨架"
 priority = 1
-deps = []
-write_scope = ["README.md"]
-acceptance = ["README updated"]
 merge_order = 1
+deps = []
+write_scope = ["README.md", "src/main/**"]
+read_scope = ["docs/architecture/overview.md"]
+acceptance = [
+  "现状：仓库无入口，任何改动都无法验证。目标：`make run` 能起服务并响应健康检查。",
+  "`curl -sf localhost:8080/healthz` 返回 200 且 body 为 ok。",
+  "不要：不引入数据库，不做鉴权。",
+  "Verify: make build && (make run & sleep 1; curl -sf localhost:8080/healthz)",
+]
 
+# ── T-002：功能题。依赖 T-001，写盘与 T-003 不重叠
 [[task]]
 id = "T-002"
-title = "Example feature A"
+title = "实现示例功能的 HTTP 接口"
 priority = 2
-deps = ["T-001"]
-write_scope = ["src/a/**"]
-read_scope = ["src/common/**"]
-acceptance = ["feature A works"]
 merge_order = 2
+deps = ["T-001"]
+write_scope = ["src/feature/**", "tests/test_feature.py"]
+read_scope = ["docs/contracts/feature.md", "src/main/router.go"]
+acceptance = [
+  "`POST /api/feature` 合法入参返回 201 并落库；非法入参返回 422 且不落库。",
+  "未携带 token 时返回 401。",
+  "不要：不改动 T-001 的 healthz 路由签名。",
+  "Verify: uv run --locked pytest tests/test_feature.py -q",
+]
+
+# ── T-003：后续题。与 T-002 同目录靠 priority 串行，无需拆多波 apply
+[[task]]
+id = "T-003"
+title = "为示例功能补齐失败路径回归"
+priority = 3
+merge_order = 3
+deps = ["T-002"]
+write_scope = ["tests/test_feature_failures.py"]
+read_scope = ["tests/test_feature.py"]
+acceptance = [
+  "覆盖 401/422/500 三类失败路径，且断言失败信息可定位到具体分支。",
+  "Verify: uv run --locked pytest tests/test_feature_failures.py -q",
+]
+
+# 拆题基线（实测）：单题 200–1500 行 / 1–6 文件 / 单模块内。
+# 超过 20 文件、跨 3 个以上模块、或需要两种以上验证手段 → 拆题。
+# 依赖链深度建议 ≤ 8，每波至少 2 个无 deps 入口题。

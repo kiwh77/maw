@@ -4,7 +4,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/wuhao/goal-agents/internal/errx"
+	"github.com/wuhao/maw/internal/errx"
 )
 
 func norm(p string) string {
@@ -73,13 +73,18 @@ func PathInScope(file string, patterns []string) bool {
 	return false
 }
 
-func AssertFilesInScope(files, patterns []string, taskID string) error {
+func OutOfScopeFiles(files, patterns []string) []string {
 	var bad []string
 	for _, f := range files {
 		if !PathInScope(f, patterns) {
 			bad = append(bad, f)
 		}
 	}
+	return bad
+}
+
+func AssertFilesInScope(files, patterns []string, taskID string) error {
+	bad := OutOfScopeFiles(files, patterns)
 	if len(bad) == 0 {
 		return nil
 	}

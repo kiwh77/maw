@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wuhao/goal-agents/internal/home"
+	"github.com/wuhao/maw/internal/home"
 )
 
 const preCommit = `#!/bin/sh

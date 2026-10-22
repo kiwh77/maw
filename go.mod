@@ -1,4 +1,4 @@
-module github.com/wuhao/goal-agents
+module github.com/wuhao/maw
 
 go 1.26.1
 
