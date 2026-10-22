@@ -24,6 +24,21 @@
 
 ## 安装
 
+### 预编译包（推荐）
+
+从 [Releases](https://github.com/kiwh77/maw/releases) 下载对应平台的 `maw_*` 压缩包，解压后放到 `PATH` 即可：
+
+```bash
+# 示例：macOS Apple Silicon
+tar -xzf maw_0.4.0_darwin_arm64.tar.gz
+install -m 755 maw_0.4.0_darwin_arm64 ~/.local/bin/maw
+maw --version
+```
+
+校验：同目录下载 `checksums.txt`，用 `sha256sum -c`（或 `shasum -a 256 -c`）核对。
+
+### 从源码安装
+
 需要 **Go 1.26+**（与 `go.mod` 一致）：
 
 ```bash
