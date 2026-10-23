@@ -10,8 +10,8 @@ import (
 
 	"github.com/kiwh77/maw/internal/board"
 	"github.com/kiwh77/maw/internal/db"
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/machine"
 	"github.com/kiwh77/maw/internal/schedule"
@@ -222,11 +222,11 @@ func inferTaskID(cwd string) (string, error) {
 	}
 	b, err := os.ReadFile(filepath.Join(root, ".maw", "task.json"))
 	if err != nil {
-		return "", errx.New("无法从 worktree 推断任务", "先 cd 到 maw next 创建的目录，或传 --task")
+		return "", i18n.E("err.infer_task", "next.cd_or_task")
 	}
 	var t db.Task
 	if err := json.Unmarshal(b, &t); err != nil || t.ID == "" {
-		return "", errx.New("无效的 .maw/task.json", "重新执行 maw next")
+		return "", i18n.E("err.bad_task_json", "next.rerun_next")
 	}
 	return t.ID, nil
 }

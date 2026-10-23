@@ -9,9 +9,9 @@ import (
 	"github.com/kiwh77/maw/internal/blueprint"
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/gitops"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/machine"
 )
@@ -24,11 +24,11 @@ func PlanCheck(path, cwd string) (Result, error) {
 	errs := blueprint.Validate(f)
 	warns := blueprint.ValidateLint(f)
 	parallel := blueprint.ParallelWidth(f)
-	next := "修复蓝图错误"
+	next := i18n.T("plan.next_fix")
 	if len(errs) == 0 {
 		next = "maw plan apply " + path + " --yes"
 		if len(warns) > 0 {
-			next = "有告警但仍可 apply；建议按 TASK-SPEC 收紧后: maw plan apply " + path + " --yes"
+			next = i18n.T("plan.next_warn", path)
 		}
 	}
 	return Result{
@@ -57,7 +57,7 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 		return nil, err
 	}
 	if errs := blueprint.Validate(f); len(errs) > 0 {
-		return nil, errx.New("蓝图校验失败:\n- "+strings.Join(errs, "\n- "), "修复依赖环或必填字段后重试")
+		return nil, i18n.E("err.plan_check_fail", "next.fix_deps", strings.Join(errs, "\n- "))
 	}
 	mainBranch := strings.TrimSpace(f.Meta.MainBranch)
 	if mainBranch != "" {
@@ -78,11 +78,11 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 			"ok": true, "dry_run": true, "reset": reset,
 			"tasks": tasks, "project_id": pc.ID(),
 			"main_branch": effectiveMain,
-			"note": "默认增量合并；加 --reset 才会清空历史任务；meta.main_branch 非空时会同步 config",
+			"note":        i18n.T("plan.note_incremental"),
 		}, nil
 	}
 	if pc.Config.Approvals.Plan == "manual" && !yes {
-		return nil, errx.New("plan apply 需要确认", "复查任务后加 --yes")
+		return nil, i18n.E("err.plan_need_yes", "next.add_yes")
 	}
 	if mainBranch != "" {
 		cfgPath := home.ConfigPath(pc.LocalHome)
@@ -228,11 +228,11 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 	html, _ := refreshBoard(pc)
 	return Result{
 		"ok": true, "project_id": pc.ID(), "project_name": pc.Project.Name,
-		"reset": reset,
+		"reset":       reset,
 		"main_branch": pc.Config.Project.MainBranch,
-		"created": created, "updated": updated, "preserved": preserved, "removed": removed,
+		"created":     created, "updated": updated, "preserved": preserved, "removed": removed,
 		"tasks": out, "board": html,
-		"next": "maw register && maw next  # 自动分配 {应用}-{工程}-{序号}，或 export MAW_AGENT=cursor-<工程slug>-1",
+		"next": i18n.T("next.after_apply"),
 	}, nil
 }
 

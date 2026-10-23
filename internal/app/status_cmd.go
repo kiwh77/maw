@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/kiwh77/maw/internal/db"
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
 )
 
@@ -36,7 +36,7 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 	if projectID == "" {
 		pc, err := resolveProject(cwd)
 		if err != nil {
-			return nil, errx.New("无法解析工程", "在已 maw init 的仓库内执行，或传 --project")
+			return nil, i18n.E("err.resolve_project", "next.init_or_project")
 		}
 		projectID = pc.ID()
 	}
@@ -86,7 +86,7 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 			return e
 		}
 		if p == nil {
-			return errx.New("工程不存在: "+projectID, "先在该仓库运行 maw init")
+			return i18n.E("err.project_missing", "next.run_init", projectID)
 		}
 		existing, _ := db.GetAgent(tx, projectID, actor)
 		a := &db.Agent{
@@ -138,7 +138,7 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 	return Result{
 		"ok": true, "project_id": projectID, "agent": actor,
 		"task_id": in.TaskID, "event_id": eventID, "event_type": eventType,
-		"next": "maw board --serve 或桌面客户端可看到更新",
+		"next": i18n.T("next.status_visible"),
 	}, nil
 }
 

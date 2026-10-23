@@ -4,7 +4,7 @@ import (
 	"database/sql"
 
 	"github.com/kiwh77/maw/internal/db"
-	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
 )
 
@@ -37,7 +37,7 @@ func TaskShow(cwd, id string) (Result, error) {
 		return nil, err
 	}
 	if t == nil {
-		return nil, errx.New("unknown task "+id, "maw task list")
+		return nil, i18n.E("err.unknown_task", "next.task_list", id)
 	}
 	return Result{"ok": true, "task": t, "project_id": pc.ID()}, nil
 }
@@ -60,7 +60,7 @@ func Block(cwd, message, taskID string) (Result, error) {
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
 		if err != nil || t == nil {
-			return errx.New("unknown task "+taskID, "")
+			return i18n.E("err.unknown_task", "", taskID)
 		}
 		if err := identity.RequireOwner(who, t); err != nil {
 			return err
@@ -77,7 +77,7 @@ func Block(cwd, message, taskID string) (Result, error) {
 		return nil, err
 	}
 	_, _ = refreshBoard(pc)
-	return Result{"ok": true, "task_id": taskID, "project_id": pc.ID(), "next": "maw task unblock " + taskID}, nil
+	return Result{"ok": true, "task_id": taskID, "project_id": pc.ID(), "next": i18n.T("next.task_unblock", taskID)}, nil
 }
 
 func Unblock(cwd, taskID string) (Result, error) {
@@ -89,7 +89,7 @@ func Unblock(cwd, taskID string) (Result, error) {
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
 		if err != nil || t == nil {
-			return errx.New("unknown task "+taskID, "")
+			return i18n.E("err.unknown_task", "", taskID)
 		}
 		prev = t.PrevStatus
 		if prev == "" {

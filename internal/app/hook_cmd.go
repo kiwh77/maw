@@ -9,9 +9,9 @@ import (
 
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/gitops"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/scope"
 )
@@ -31,7 +31,7 @@ func HookPreCommit(cwd string) (Result, error) {
 			if cfg, err := config.Load(home.ConfigPath(h)); err == nil {
 				main := cfg.Project.MainBranch
 				if br, _ := gitops.CurrentBranch(root); br == main {
-					return nil, errx.New("commits on trunk branch "+main+" are blocked by maw hook", "run `maw next` and work in the task worktree")
+					return nil, i18n.E("err.hook_trunk", "next.use_worktree", main)
 				}
 			}
 		}
@@ -59,7 +59,7 @@ func HookPreCommit(cwd string) (Result, error) {
 		}
 	}
 	if len(bad) > 0 {
-		return nil, errx.New("pre-commit: out of write_scope: "+strings.Join(bad, ", "), "maw request-change or unstage those files")
+		return nil, i18n.E("err.precommit_scope", "next.request_change", strings.Join(bad, ", "))
 	}
 	return Result{"ok": true, "checked": files}, nil
 }
@@ -82,12 +82,12 @@ func HookPrePush(cwd string, stdin io.Reader) (Result, error) {
 		}
 		remoteRef := parts[2]
 		if remoteRef == "refs/heads/"+main || strings.HasSuffix(remoteRef, "/"+main) {
-			return nil, errx.New("pre-push: refusing to push "+remoteRef, "only maw merge updates "+main+"; push agent/* branches only")
+			return nil, i18n.EN("err.prepush_ref", []any{remoteRef}, "next.only_merge_trunk", main)
 		}
 		if strings.HasPrefix(remoteRef, "refs/heads/") && !strings.HasPrefix(remoteRef, "refs/heads/agent/") {
 			who, _ := identity.Resolve(cwd, "")
 			if identity.Role(who, cfg) != "integrator" {
-				return nil, errx.New("pre-push: only agent/* branches allowed, got "+remoteRef, "push refs/heads/agent/<worker>/<task>")
+				return nil, i18n.E("err.prepush_branch", "next.push_agent", remoteRef)
 			}
 		}
 	}

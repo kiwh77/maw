@@ -1,6 +1,6 @@
 package machine
 
-import "github.com/kiwh77/maw/internal/errx"
+import "github.com/kiwh77/maw/internal/i18n"
 
 var transitions = map[string]map[string]bool{
 	"backlog":     {"ready": true, "cancelled": true, "blocked": true},
@@ -35,10 +35,10 @@ func AssertTransition(src, dst string) error {
 		return nil
 	}
 	if src == dst {
-		return errx.New("illegal status transition "+src+" -> "+dst, "run `maw board` to inspect task status")
+		return i18n.E("err.bad_transition", "next.inspect_board", src, dst)
 	}
 	if m := transitions[src]; m != nil && m[dst] {
 		return nil
 	}
-	return errx.New("illegal status transition "+src+" -> "+dst, "run `maw board` to inspect task status")
+	return i18n.E("err.bad_transition", "next.inspect_board", src, dst)
 }

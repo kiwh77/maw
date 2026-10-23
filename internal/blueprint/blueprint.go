@@ -7,13 +7,13 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/kiwh77/maw/internal/db"
-	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/i18n"
 )
 
 type File struct {
-	Meta        Meta          `toml:"meta"`
-	Tasks       []TaskSpec    `toml:"task"`
-	SharedFiles []SharedFile  `toml:"shared_files"`
+	Meta        Meta           `toml:"meta"`
+	Tasks       []TaskSpec     `toml:"task"`
+	SharedFiles []SharedFile   `toml:"shared_files"`
 	Gates       map[string]any `toml:"gates"`
 }
 
@@ -75,11 +75,11 @@ merge_order = 2
 func Load(path string) (*File, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, errx.New("blueprint not found: "+path, "pass a blueprint.toml path")
+		return nil, i18n.E("err.blueprint_missing", "next.blueprint_path", path)
 	}
 	var f File
 	if err := toml.Unmarshal(b, &f); err != nil {
-		return nil, errx.Wrap("invalid blueprint", "fix TOML syntax", err)
+		return nil, i18n.EW("err.blueprint_invalid", "next.fix_toml", err)
 	}
 	return &f, nil
 }

@@ -1,8 +1,10 @@
 # Contributing
 
-感谢贡献 maw。
+> Languages: **English** | [简体中文](CONTRIBUTING.zh-CN.md)
 
-## 开发
+Thanks for contributing to maw.
+
+## Development
 
 ```bash
 git clone https://github.com/kiwh77/maw.git
@@ -11,16 +13,16 @@ CGO_ENABLED=0 go test ./...
 CGO_ENABLED=0 go build -o maw ./cmd/maw
 ```
 
-- 需要 Go 版本与根目录 `go.mod` 一致
-- 只改与问题相关的代码；大范围重构请先开 Issue 讨论
-- 公开文档放在 `docs/`；不要提交本机诊断笔记、`.workbuddy/`、`output/`
+- Use the Go version from root `go.mod`
+- Keep changes scoped to the problem; open an Issue before large refactors
+- Public docs live under `docs/`; do not commit local diagnosis notes, `.workbuddy/`, or `output/`
 
-## Pull Request
+## Pull requests
 
-1. Fork 并基于 `main` 开分支
-2. 保证 `go test ./...` 通过
-3. PR 说明动机与验证方式（可用仓库 PR 模板）
+1. Fork and branch from `main`
+2. Ensure `go test ./...` passes
+3. Describe motivation and how you verified (PR template welcome)
 
-## 行为准则
+## Code of conduct
 
-参与本项目即表示同意遵守 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
+By participating you agree to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

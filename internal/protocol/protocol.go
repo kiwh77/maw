@@ -7,14 +7,31 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/version"
 )
 
 var blockRE = regexp.MustCompile(`(?s)<!--\s*maw:begin\s+v(\d+)\s*-->.*?<!--\s*maw:end\s*-->`)
 
+// Segment returns the protocol block for the active locale (MAW_LANG / LANG).
 func Segment() string {
+	return SegmentLang(i18n.Resolve())
+}
+
+// SegmentLang returns the protocol block for an explicit language.
+func SegmentLang(lang i18n.Lang) string {
 	begin := "<!-- maw:begin v" + strconv.Itoa(version.ProtocolVersion) + " -->"
-	body := `## 多 Agent 协议（由 maw 管理，请勿手改）
+	var body string
+	if lang == i18n.Zh {
+		body = segmentZh()
+	} else {
+		body = segmentEn()
+	}
+	return begin + "\n" + body + "<!-- maw:end -->\n"
+}
+
+func segmentZh() string {
+	return `## 多 Agent 协议（由 maw 管理，请勿手改）
 1. 状态库在本机全局 ` + "`~/.maw/maw.db`" + `；本目录 ` + "`.multiagent/`" + ` 仅存配置与蓝图。多工程共用同一看板。
 2. 先设定身份并注册：Worker 名统一为 ` + "`{应用}-{工程}-{序号}`" + `（工程名去连字符小写，例 ` + "`cursor-demo-1`" + `）。` + "`export MAW_AGENT=<名>`" + ` 后 ` + "`maw register`" + `；未指定时 ` + "`maw register`" + ` / ` + "`maw next`" + ` 会按当前应用自动分配。应用可用 ` + "`MAW_APP`" + ` 覆盖。
 3. 运行 ` + "`maw next`" + ` 领取任务，只在该 Agent 的持久 worktree（` + "`.worktrees/{agent}`" + `）中工作；maw 会记录你正在执行哪道题。
@@ -26,7 +43,21 @@ func Segment() string {
 9. 全局看板：` + "`maw board --serve`" + `，可按工程/Agent/状态筛选；残留可用 ` + "`maw prune`" + ` 清理。
 10. 出错时先读 maw 输出里的「下一步」提示，不要绕过。
 `
-	return begin + "\n" + body + "<!-- maw:end -->\n"
+}
+
+func segmentEn() string {
+	return `## Multi-agent protocol (managed by maw; do not edit by hand)
+1. Global state lives in ` + "`~/.maw/maw.db`" + `; this repo's ` + "`.multiagent/`" + ` holds config and blueprints only. One board covers all projects.
+2. Set identity and register: worker names are ` + "`{app}-{project}-{n}`" + ` (project slug lowercased without hyphens, e.g. ` + "`cursor-demo-1`" + `). ` + "`export MAW_AGENT=<name>`" + ` then ` + "`maw register`" + `; if unset, ` + "`maw register`" + ` / ` + "`maw next`" + ` auto-assign for the current app. Override the app with ` + "`MAW_APP`" + `.
+3. Run ` + "`maw next`" + ` to claim a task; work only in that agent's persistent worktree (` + "`.worktrees/{agent}`" + `). maw records which task you hold.
+4. Edit only files inside the task ` + "`write_scope`" + `; to go outside it run ` + "`maw request-change`" + `.
+5. Milestones: ` + "`maw progress`" + `. Non-orchestrated progress can use ` + "`maw status report`" + ` into the local hub. Finish with ` + "`maw submit`" + `; if stuck run ` + "`maw block`" + `.
+6. Before handoff or interrupt run ` + "`maw handoff`" + `; when this session has no more claimable tasks run ` + "`maw unregister`" + `.
+7. After submit you may ` + "`maw merge --yes`" + `; a successful merge keeps the agent worktree and only deletes the task branch. Do not git merge/rebase/push trunk yourself.
+8. After merge, if ready tasks remain, keep calling ` + "`maw next`" + ` (same tree reset to trunk tip, new task branch) until none left or the user stops you.
+9. Global board: ` + "`maw board --serve`" + ` with project/Agent/status filters; prune leftovers with ` + "`maw prune`" + `.
+10. On errors, read maw's Next hint first; do not bypass it.
+`
 }
 
 func Upsert(path string) (string, error) {
@@ -58,7 +89,7 @@ func Upsert(path string) (string, error) {
 	return "updated", os.WriteFile(path, []byte(newText), 0o644)
 }
 
-// UpsertWithFrontmatter 写入带 YAML frontmatter 的规则文件（Cursor/Qoder/Trae 等）
+// UpsertWithFrontmatter writes a rule file with YAML frontmatter (Cursor/Qoder/Trae, …).
 func UpsertWithFrontmatter(path, frontmatter string) (string, error) {
 	body := Segment()
 	content := frontmatter + "\n" + body
@@ -74,7 +105,6 @@ func UpsertWithFrontmatter(path, frontmatter string) (string, error) {
 	}
 	text := string(b)
 	if !blockRE.MatchString(text) {
-		// 保留原 frontmatter/正文，追加协议段
 		if text != "" && !strings.HasSuffix(text, "\n") {
 			text += "\n"
 		}
@@ -104,7 +134,6 @@ func ReadVersion(path string) (int, bool) {
 }
 
 func installToolRule(repo string, d Detected) (rel string, status string, err error) {
-	seg := Segment()
 	switch d.ID {
 	case "cursor":
 		rel = ".cursor/rules/maw.mdc"
@@ -119,12 +148,10 @@ func installToolRule(repo string, d Detected) (rel string, status string, err er
 		fm := "---\nalwaysApply: true\ndescription: maw multi-agent protocol\n---\n"
 		status, err = UpsertWithFrontmatter(filepath.Join(repo, rel), fm)
 	case "codebuddy":
-		// IDE 侧常见 RULE.mdc 目录结构；CLI 也读 .md
 		rel = ".codebuddy/rules/maw/RULE.mdc"
 		fm := "---\ndescription: maw multi-agent protocol\nalwaysApply: true\n---\n"
 		status, err = UpsertWithFrontmatter(filepath.Join(repo, rel), fm)
 		if err == nil {
-			// 同步一份纯 md，兼容 CLI 记忆加载
 			_, _ = UpsertWithFrontmatter(filepath.Join(repo, ".codebuddy/rules/maw.md"), fm)
 		}
 	case "claude":
@@ -134,21 +161,20 @@ func installToolRule(repo string, d Detected) (rel string, status string, err er
 		rel = ".windsurf/rules/maw.md"
 		fm := "---\ntrigger: always_on\nalwaysApply: true\n---\n"
 		status, err = UpsertWithFrontmatter(filepath.Join(repo, rel), fm)
-		_ = seg
 	default:
 		return "", "", nil
 	}
 	return rel, status, err
 }
 
-// InstallResult init 协议安装结果
+// InstallResult is the outcome of protocol installation on init.
 type InstallResult struct {
 	Files    map[string]string `json:"files"`
-	Detected map[string]string `json:"detected"` // tool -> reasons
-	Fallback string            `json:"fallback"` // 始终写入的兜底
+	Detected map[string]string `json:"detected"`
+	Fallback string            `json:"fallback"`
 }
 
-// InstallFiles 检测工程/本机 Agent，写入对应规则；AGENTS.md 始终作为兜底。
+// InstallFiles detects agent tools and writes rules; AGENTS.md is always the fallback.
 func InstallFiles(repo string) (InstallResult, error) {
 	out := InstallResult{
 		Files:    map[string]string{},

@@ -9,6 +9,7 @@ import (
 	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/gitops"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/machine"
 )
@@ -24,7 +25,7 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 	}
 	// 任意已识别 Agent 均可合入；仍须走 maw merge，不可直接改主干
 	if pc.Config.Approvals.Merge == "manual" && !yes {
-		return nil, errx.New("merge requires confirmation", "run `maw merge --yes`")
+		return nil, i18n.E("err.merge_need_yes", "next.merge_yes")
 	}
 	if err := gitops.AssertWorkingTreeClean(pc.Repo); err != nil {
 		return nil, err
@@ -46,7 +47,7 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 		return nil, err
 	}
 	if len(queue) == 0 {
-		return nil, errx.New("merge queue empty", "wait for submit/review")
+		return nil, i18n.E("err.merge_empty", "next.wait_submit")
 	}
 	for i := 0; i < len(queue); i++ {
 		for j := i + 1; j < len(queue); j++ {

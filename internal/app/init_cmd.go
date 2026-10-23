@@ -11,6 +11,7 @@ import (
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/hooks"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/protocol"
 	"github.com/kiwh77/maw/internal/version"
 )
@@ -95,7 +96,7 @@ func Init(cwd string, dryRun, upgrade bool) (Result, error) {
 			"worker 勿直接推主干",
 		},
 		"doctor": doc,
-		"next":   "拆任务清单并在蓝图 [meta] 指定 main_branch 后 `maw plan apply .multiagent/blueprint.toml --yes`；全局看板 `maw board --serve`",
+		"next":   i18n.T("next.after_init"),
 	}, nil
 }
 
@@ -108,10 +109,10 @@ func Doctor(cwd string) (Result, error) {
 	issues := []string{}
 	ok := true
 	if err != nil {
-		return Result{"ok": false, "issues": []string{"工程未 init"}, "next": "maw init"}, nil
+		return Result{"ok": false, "issues": []string{i18n.T("issue.not_init")}, "next": i18n.T("next.maw_init")}, nil
 	}
 	if st, err := os.Stat(h); err != nil || !st.IsDir() {
-		return Result{"ok": false, "issues": []string{"工程未 init"}, "next": "maw init"}, nil
+		return Result{"ok": false, "issues": []string{i18n.T("issue.not_init")}, "next": i18n.T("next.maw_init")}, nil
 	}
 	gdb, err := home.GlobalDBPath()
 	if err != nil {

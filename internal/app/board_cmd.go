@@ -6,8 +6,8 @@ import (
 
 	"github.com/kiwh77/maw/internal/board"
 	"github.com/kiwh77/maw/internal/db"
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 )
 
 // BoardFilters 看板筛选条件（空字符串表示不限）
@@ -59,7 +59,7 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 		},
 		"global_db": gdb,
 		"snapshot":  filepath.Join(gdir, "board", "snapshot.json"),
-		"next":      "打开 HTML，或执行 maw board --serve 获得实时刷新地址（可筛选工程/Agent/状态）",
+		"next":      i18n.T("next.open_html"),
 	}
 	if serve {
 		if addr == "" {
@@ -102,13 +102,13 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 			},
 		})
 		if err != nil {
-			return nil, errx.Wrap("启动看板服务失败", "更换 --addr 或检查端口占用", err)
+			return nil, i18n.EW("err.board_serve", "next.change_addr", err)
 		}
 		res["url"] = url
-		res["next"] = "浏览器或 Tauri 桌面端打开 " + url + "（SSE 实时事件；可用工程/Agent/状态筛选）"
-		fmt.Println("本机中枢已启动:", url)
-		fmt.Println("数据源:", gdb)
-		fmt.Println("按 Ctrl+C 结束")
+		res["next"] = i18n.T("board.next_url", url)
+		fmt.Println(i18n.T("board.hub_started"), url)
+		fmt.Println(i18n.T("board.data_source"), gdb)
+		fmt.Println(i18n.T("board.ctrl_c"))
 		select {}
 	}
 	return res, nil

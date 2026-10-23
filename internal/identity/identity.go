@@ -7,8 +7,8 @@ import (
 
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 )
 
 func Resolve(cwd, explicit string) (string, error) {
@@ -32,8 +32,7 @@ func Resolve(cwd, explicit string) (string, error) {
 			return s, nil
 		}
 	}
-	return "", errx.New("cannot determine caller identity",
-		"export MAW_AGENT=<应用-工程-序号>（如 cursor-demo-1），或直接 `maw register` / `maw next` 自动分配")
+	return "", i18n.E("err.no_identity", "next.set_agent")
 }
 
 func Role(agent string, cfg *config.Config) string {
@@ -50,14 +49,14 @@ func Role(agent string, cfg *config.Config) string {
 
 func RequireIntegrator(agent string, cfg *config.Config) error {
 	if Role(agent, cfg) != "integrator" {
-		return errx.New("agent "+agent+" is not integrator; merge denied", "export MAW_AGENT="+cfg.Identity.Integrator)
+		return i18n.EN("err.not_integrator", []any{agent}, "next.export_integrator", cfg.Identity.Integrator)
 	}
 	return nil
 }
 
 func RequireOwner(agent string, t *db.Task) error {
 	if t.Owner != "" && t.Owner != agent {
-		return errx.New("task "+t.ID+" is owned by "+t.Owner+", not "+agent, "use the owning agent identity")
+		return i18n.E("err.owner_mismatch", "next.use_owner", t.ID, t.Owner, agent)
 	}
 	return nil
 }

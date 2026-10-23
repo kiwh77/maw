@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/i18n"
 )
 
 const (
@@ -47,7 +47,7 @@ func RepoRoot(cwd string) (string, error) {
 	}
 	common, err := Git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
-		return "", errx.New("not inside a git repository", "cd into a git repo, then run `maw init`")
+		return "", i18n.E("err.not_git_repo", "next.cd_init")
 	}
 	if filepath.Base(common) == ".git" {
 		return filepath.Dir(common), nil
@@ -85,7 +85,7 @@ func RequireHome(cwd string) (string, error) {
 		return "", err
 	}
 	if st, err := os.Stat(h); err != nil || !st.IsDir() {
-		return "", errx.New("工程未接入 maw（"+h+" 不存在）", "在仓库根目录运行 `maw init`")
+		return "", i18n.E("err.project_not_wired", "next.run_init_root", h)
 	}
 	return h, nil
 }
@@ -124,7 +124,7 @@ func LegacyLocalDBPath(home string) string {
 func WorktreeRoot(cwd string) (string, error) {
 	top, err := Git(cwd, "rev-parse", "--path-format=absolute", "--show-toplevel")
 	if err != nil {
-		return "", errx.New("not inside a git worktree", "run from a git checkout")
+		return "", i18n.E("err.not_worktree", "next.run_from_checkout")
 	}
 	return top, nil
 }

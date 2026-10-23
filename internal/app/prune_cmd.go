@@ -129,15 +129,15 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 	}
 
 	return Result{
-		"ok":               true,
-		"dry_run":          preview,
-		"project_id":       pc.ID(),
-		"worktrees":        removeWTs,
-		"branches":         removeBranches,
+		"ok":                true,
+		"dry_run":           preview,
+		"project_id":        pc.ID(),
+		"worktrees":         removeWTs,
+		"branches":          removeBranches,
 		"removed_worktrees": removedWT,
-		"removed_branches": removedBranches,
-		"kept_worktrees":   len(protectedWT),
-		"next":             next,
+		"removed_branches":  removedBranches,
+		"kept_worktrees":    len(protectedWT),
+		"next":              next,
 	}, nil
 }
 

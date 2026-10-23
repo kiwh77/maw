@@ -8,8 +8,8 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 )
 
 var mainBranchLine = regexp.MustCompile(`(?m)^(\s*main_branch\s*=\s*)"[^"]*"`)
@@ -60,11 +60,11 @@ type Identity struct {
 func Load(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, errx.New("config not found: "+path, "run `maw init`")
+		return nil, i18n.E("err.config_missing", "next.run_init", path)
 	}
 	var c Config
 	if err := toml.Unmarshal(b, &c); err != nil {
-		return nil, errx.Wrap("invalid config.toml", "fix TOML syntax", err)
+		return nil, i18n.EW("err.config_invalid", "next.fix_toml", err)
 	}
 	if c.Project.MainBranch == "" {
 		c.Project.MainBranch = "main"
@@ -138,14 +138,14 @@ func DetectMainBranch(repo string) string {
 func SetMainBranch(path, branch string) error {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
-		return errx.New("main_branch is empty", "set meta.main_branch in the blueprint")
+		return i18n.E("err.main_branch_empty", "next.set_main_branch")
 	}
 	if strings.ContainsAny(branch, " \t\n\"") {
-		return errx.New("invalid main_branch: "+branch, "use a single git branch name without spaces or quotes")
+		return i18n.E("err.main_branch_invalid", "next.branch_name", branch)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return errx.New("config not found: "+path, "run `maw init`")
+		return i18n.E("err.config_missing", "next.run_init", path)
 	}
 	text := string(b)
 	repl := `${1}"` + branch + `"`
@@ -156,13 +156,13 @@ func SetMainBranch(path, branch string) error {
 		proj := regexp.MustCompile(`(?m)^\[project\]\s*$`)
 		loc := proj.FindStringIndex(text)
 		if loc == nil {
-			return errx.New("config missing [project] section", "restore config.toml or run `maw init --upgrade`")
+			return i18n.E("err.config_no_project", "next.restore_config")
 		}
 		insert := "\nmain_branch = \"" + branch + "\""
 		text = text[:loc[1]] + insert + text[loc[1]:]
 	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-		return errx.Wrap("write config.toml failed", "check permissions on .multiagent/", err)
+		return i18n.EW("err.write_config", "next.check_perms", err)
 	}
 	return nil
 }

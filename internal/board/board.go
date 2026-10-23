@@ -11,22 +11,8 @@ import (
 	"time"
 
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/i18n"
 )
-
-// StatusLabel 状态码 → 中文
-var StatusLabel = map[string]string{
-	"backlog":     "待排期",
-	"ready":       "可领取",
-	"claimed":     "已领取",
-	"in_progress": "进行中",
-	"self_check":  "自检中",
-	"in_review":   "评审中",
-	"merging":     "合并中",
-	"conflict":    "冲突",
-	"blocked":     "阻塞",
-	"done":        "已完成",
-	"cancelled":   "已取消",
-}
 
 // Snapshot 看板数据（供 HTML 轮询 / API）
 type Snapshot struct {
@@ -138,31 +124,31 @@ func RenderTerminal(s Snapshot) string {
 	}
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", 12-filled)
 	var b strings.Builder
-	title := "全局进度"
+	title := i18n.T("term.global_progress")
 	if s.FilterProject != "" {
-		title = "工程进度"
+		title = i18n.T("term.project_progress")
 	}
-	fmt.Fprintf(&b, "%s %s %d/%d（%d%%）  并行 %d  阻塞 %d\n",
-		title, bar, s.Done, s.Total, s.Percent, s.Active, s.Blocked)
+	fmt.Fprintf(&b, "%s %s %d/%d (%d%%)  %s %d  %s %d\n",
+		title, bar, s.Done, s.Total, s.Percent, i18n.T("term.parallel"), s.Active, i18n.T("term.blocked_n"), s.Blocked)
 	if len(s.Projects) > 0 {
-		fmt.Fprintf(&b, "已接入工程 %d", len(s.Projects))
+		fmt.Fprintf(&b, i18n.T("term.projects_wired"), len(s.Projects))
 		if s.FilterProject != "" || s.FilterAgent != "" || s.FilterStatus != "" {
-			fmt.Fprintf(&b, "  筛选：")
+			b.WriteString(i18n.T("term.filter"))
 			parts := []string{}
 			if s.FilterProject != "" {
-				parts = append(parts, "工程="+s.FilterProject)
+				parts = append(parts, fmt.Sprintf(i18n.T("term.filter_project"), s.FilterProject))
 			}
 			if s.FilterAgent != "" {
-				parts = append(parts, "Agent="+s.FilterAgent)
+				parts = append(parts, fmt.Sprintf(i18n.T("term.filter_agent"), s.FilterAgent))
 			}
 			if s.FilterStatus != "" {
-				parts = append(parts, "状态="+s.FilterStatus)
+				parts = append(parts, fmt.Sprintf(i18n.T("term.filter_status"), s.FilterStatus))
 			}
 			b.WriteString(strings.Join(parts, " "))
 		}
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "更新于 %s\n\n", s.UpdatedAt)
+	fmt.Fprintf(&b, i18n.T("term.updated_at")+"\n\n", s.UpdatedAt)
 	activeAgents := make([]*db.Agent, 0, len(agents))
 	for _, a := range agents {
 		if a != nil && a.Status != "idle" {
@@ -170,23 +156,23 @@ func RenderTerminal(s Snapshot) string {
 		}
 	}
 	if len(activeAgents) > 0 {
-		b.WriteString("【执行中 Agent】\n")
+		fmt.Fprintf(&b, "【%s】\n", i18n.T("term.active_agents"))
 		for _, a := range activeAgents {
 			task := a.TaskID
 			if task == "" {
-				task = "无"
+				task = i18n.T("term.none")
 			}
 			proj := a.ProjectName
 			if proj == "" {
 				proj = a.ProjectID
 			}
-			st := agentStatusZH(a.Status)
-			fmt.Fprintf(&b, "  [%s] %s  [%s]  任务=%s  最近活动=%s\n", proj, a.ID, st, task, a.LastSeen)
+			st := agentStatusLabel(a.Status)
+			fmt.Fprintf(&b, "  [%s] %s  [%s]  %s=%s  %s=%s\n", proj, a.ID, st, i18n.T("term.task"), task, i18n.T("term.last_seen"), a.LastSeen)
 		}
 		b.WriteString("\n")
 	}
 	for _, key := range []string{"ready", "in_progress", "in_review", "merging", "done"} {
-		label := StatusLabel[key]
+		label := i18n.StatusLabel(key)
 		items := by[key]
 		if len(items) == 0 {
 			continue
@@ -195,7 +181,7 @@ func RenderTerminal(s Snapshot) string {
 		for _, t := range items {
 			owner := t.Owner
 			if owner == "" {
-				owner = "未分配"
+				owner = i18n.T("term.unassigned")
 			}
 			proj := t.ProjectName
 			if proj == "" {
@@ -205,30 +191,26 @@ func RenderTerminal(s Snapshot) string {
 		}
 	}
 	if len(by["blocked"]) > 0 {
-		b.WriteString("【阻塞】\n")
+		fmt.Fprintf(&b, "【%s】\n", i18n.T("term.blocked"))
 		for _, t := range by["blocked"] {
 			fmt.Fprintf(&b, "  %s（%s）\n", t.ID, t.BlockedReason)
 		}
 	}
 	if len(by["conflict"]) > 0 {
-		b.WriteString("【冲突】\n")
+		fmt.Fprintf(&b, "【%s】\n", i18n.T("term.conflict"))
 		for _, t := range by["conflict"] {
-			fmt.Fprintf(&b, "  %s — 修复后重新提交\n", t.ID)
+			fmt.Fprintf(&b, i18n.T("term.conflict_fix")+"\n", t.ID)
 		}
 	}
 	_ = maxParallel
-	fmt.Fprintf(&b, "\n下一步：%s\n", s.NextHint)
+	fmt.Fprintf(&b, "\n"+i18n.T("term.next")+"\n", s.NextHint)
 	return b.String()
 }
 
-func agentStatusZH(s string) string {
+func agentStatusLabel(s string) string {
 	switch s {
-	case "working":
-		return "执行中"
-	case "idle":
-		return "空闲"
-	case "offline":
-		return "离线"
+	case "working", "idle", "offline":
+		return i18n.T("agent." + s)
 	default:
 		return s
 	}

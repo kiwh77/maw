@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 )
 
 const MergeEnv = "MAW_INTERNAL_MERGE"
@@ -24,7 +24,7 @@ func EnsureBranchBase(repo, mainBranch string) (string, error) {
 			return ref, nil
 		}
 	}
-	return "", errx.New("trunk branch "+mainBranch+" not found", "create the branch or set meta.main_branch / project.main_branch")
+	return "", i18n.E("err.trunk_missing", "next.create_trunk", mainBranch)
 }
 
 func CreateWorktree(repo, worktree, branch, base string) error {
@@ -38,7 +38,7 @@ func CreateWorktree(repo, worktree, branch, base string) error {
 		return nil
 	}
 	if _, err := home.Git(repo, "worktree", "add", worktree, branch); err != nil {
-		return errx.New("failed to create worktree: "+err.Error(), "run `git worktree list` and clean stale entries")
+		return i18n.E("err.worktree_create", "next.worktree_list", err.Error())
 	}
 	return nil
 }
@@ -57,10 +57,10 @@ func EnsureAgentWorktree(repo, worktree, branch, base string) error {
 	// Best-effort refresh of remote tips; ignore failure (offline / no remote).
 	_, _ = home.Git(repo, "fetch", "--all", "--prune")
 	if out, err := home.Git(worktree, "reset", "--hard", base); err != nil {
-		return errx.New("failed to reset agent worktree to "+base+": "+out, "inspect dirty state in "+worktree)
+		return i18n.EN("err.worktree_reset", []any{base, out}, "next.inspect_dirty", worktree)
 	}
 	if out, err := home.Git(worktree, "checkout", "-B", branch, base); err != nil {
-		return errx.New("failed to recreate branch "+branch+": "+out, "run `git worktree list` and clean stale branches")
+		return i18n.E("err.branch_recreate", "next.clean_branches", branch, out)
 	}
 	return nil
 }
@@ -96,7 +96,7 @@ func DetachWorktree(worktree string) error {
 		return nil
 	}
 	if out, err := home.Git(worktree, "checkout", "--detach"); err != nil {
-		return errx.New("failed to detach worktree: "+out, "cd "+worktree+" and checkout another ref before deleting the branch")
+		return i18n.EN("err.detach_failed", []any{out}, "next.checkout_other", worktree)
 	}
 	return nil
 }
@@ -159,25 +159,25 @@ func ChangedFiles(cwd, mainBranch string) ([]string, error) {
 
 func SquashMerge(repo, branch, mainBranch, message string) error {
 	if _, err := home.Git(repo, "checkout", mainBranch); err != nil {
-		return errx.Wrap("checkout main failed", "ensure main worktree is clean", err)
+		return i18n.EW("err.checkout_main", "next.clean_main", err)
 	}
 	if out, err := home.Git(repo, "merge", "--squash", branch); err != nil {
 		_, _ = home.Git(repo, "merge", "--abort")
-		return errx.New("squash merge conflict for "+branch+": "+out, "inspect conflict files; maw will create a conflict task")
+		return i18n.E("err.squash_conflict", "next.inspect_conflict", branch, out)
 	}
 	cmd := exec.Command("git", "diff", "--cached", "--quiet")
 	cmd.Dir = repo
 	if err := cmd.Run(); err == nil {
 		// squash 不留 MERGE_HEAD；清掉可能的空暂存即可
 		_, _ = home.Git(repo, "reset", "--mixed", "HEAD")
-		return errx.New("squash merge produced no changes for "+branch, "ensure the task branch has commits vs main; empty merge is rejected")
+		return i18n.E("err.squash_empty", "next.ensure_commits", branch)
 	}
 	c := exec.Command("git", "commit", "-m", message)
 	c.Dir = repo
 	c.Env = append(os.Environ(), MergeEnv+"=1")
 	out, err := c.CombinedOutput()
 	if err != nil {
-		return errx.New("merge commit failed: "+string(out), "inspect git status on main")
+		return i18n.E("err.merge_commit", "next.inspect_main", string(out))
 	}
 	return nil
 }
@@ -191,7 +191,7 @@ func AssertWorkingTreeClean(cwd string) error {
 	cmd.Dir = cwd
 	rawOut, err := cmd.Output()
 	if err != nil {
-		return errx.Wrap("git status failed", "inspect "+cwd, err)
+		return i18n.EWN("err.git_status", nil, "next.inspect_cwd", err, cwd)
 	}
 	var dirty []string
 	for _, raw := range strings.Split(string(rawOut), "\n") {
@@ -217,10 +217,7 @@ func AssertWorkingTreeClean(cwd string) error {
 	if len(snippet) > 200 {
 		snippet = snippet[:200] + "…"
 	}
-	return errx.New(
-		"working tree dirty in "+cwd+": "+snippet,
-		"cd "+cwd+" && git add <write_scope files> && git commit -m \"…\" then retry (maw submit / maw merge); do not leave staged-only changes",
-	)
+	return i18n.EN("err.dirty_in", []any{cwd, snippet}, "next.commit_scope", cwd)
 }
 
 func RebaseOntoMain(worktree, mainBranch string) error {
@@ -233,7 +230,7 @@ func RebaseOntoMain(worktree, mainBranch string) error {
 	}
 	if out, err := home.Git(worktree, "rebase", base); err != nil {
 		_, _ = home.Git(worktree, "rebase", "--abort")
-		return errx.New("rebase failed: "+out, "resolve conflicts in a conflict task; do not merge manually")
+		return i18n.E("err.rebase_failed", "next.resolve_conflict", out)
 	}
 	return nil
 }
@@ -285,14 +282,13 @@ func RunGatesDetailed(commands []string, cwd string, timeoutSec int) ([]GateResu
 		if ctx.Err() == context.DeadlineExceeded {
 			gr.EnvFailure = true
 			results = append(results, gr)
-			errMsg := "gate timed out: " + cmdStr
-			return results, errx.New(errMsg, "raise gates.timeout_sec or fix tests")
+			return results, i18n.E("err.gate_timeout", "next.raise_timeout", cmdStr)
 		}
 		if err != nil {
 			msg := "gate failed: " + cmdStr + "\n" + string(out)
 			gr.EnvFailure = IsEnvFailure(msg)
 			results = append(results, gr)
-			return results, errx.New(msg, "fix failures then `maw submit` again")
+			return results, i18n.E("err.gate_failed", "next.fix_gates", cmdStr, string(out))
 		}
 		gr.OK = true
 		results = append(results, gr)

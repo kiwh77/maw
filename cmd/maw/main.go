@@ -9,6 +9,7 @@ import (
 
 	"github.com/kiwh77/maw/internal/app"
 	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/version"
 )
 
@@ -18,17 +19,18 @@ func mustFlag(cmd *cobra.Command, name string) string {
 }
 
 func main() {
+	_ = i18n.Resolve()
 	var asJSON, dryRun bool
 	var cwd string
 
 	root := &cobra.Command{
 		Use:     "maw",
-		Short:   "Multi-agent worktree orchestrator",
+		Short:   i18n.T("cmd.root.short"),
 		Version: version.Version,
 	}
-	root.PersistentFlags().BoolVar(&asJSON, "json", false, "JSON output")
-	root.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Preview without writing")
-	root.PersistentFlags().StringVarP(&cwd, "cwd", "C", "", "Working directory")
+	root.PersistentFlags().BoolVar(&asJSON, "json", false, i18n.T("flag.json"))
+	root.PersistentFlags().BoolVar(&dryRun, "dry-run", false, i18n.T("flag.dry_run"))
+	root.PersistentFlags().StringVarP(&cwd, "cwd", "C", "", i18n.T("flag.cwd"))
 
 	printRes := func(r app.Result, err error) {
 		if err != nil {
@@ -62,18 +64,18 @@ func main() {
 		if term, ok := r["terminal"].(string); ok {
 			fmt.Print(term)
 			if h, ok := r["html"].(string); ok {
-				fmt.Println("\nHTML 文件:", h)
+				fmt.Println("\n"+i18n.T("out.html_file")+":", h)
 			}
 			if u, ok := r["url"].(string); ok {
-				fmt.Println("实时地址:", u)
+				fmt.Println(i18n.T("out.live_url")+":", u)
 			}
 			if n, ok := r["next"].(string); ok {
-				fmt.Println("下一步:", n)
+				fmt.Println(i18n.T("out.next")+":", n)
 			}
 			return
 		}
 		if ok, _ := r["ok"].(bool); ok {
-			fmt.Println("OK")
+			fmt.Println(i18n.T("out.ok"))
 		}
 		for _, k := range []string{"home", "global_db", "project_id", "project_name", "worktree", "branch", "task_id", "status", "board", "html", "agent", "registered", "role", "url", "protocol_fallback", "worktrees", "branches", "removed_worktrees", "removed_branches"} {
 			if v, ok := r[k]; ok {
@@ -99,19 +101,19 @@ func main() {
 			fmt.Println("results:", string(b))
 		}
 		if issues, ok := r["issues"].([]string); ok && len(issues) > 0 {
-			fmt.Println("Doctor: FAIL")
+			fmt.Println(i18n.T("out.doctor_fail"))
 			for _, i := range issues {
 				fmt.Println("  -", i)
 			}
 		}
 		if adv, ok := r["branch_protection_advice"].([]string); ok {
-			fmt.Println("Branch protection advice:")
+			fmt.Println(i18n.T("out.branch_advice"))
 			for _, a := range adv {
 				fmt.Println("  -", a)
 			}
 		}
 		if n, ok := r["next"].(string); ok {
-			fmt.Println("Next:", n)
+			fmt.Println(i18n.T("out.next")+":", n)
 		}
 		if ok, exists := r["ok"].(bool); exists && !ok {
 			os.Exit(1)
@@ -120,16 +122,16 @@ func main() {
 
 	initCmd := &cobra.Command{
 		Use:   "init",
-		Short: "Initialize .multiagent environment",
+		Short: i18n.T("cmd.init.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			upgrade, _ := cmd.Flags().GetBool("upgrade")
 			printRes(app.Init(cwd, dryRun, upgrade))
 		},
 	}
-	initCmd.Flags().Bool("upgrade", false, "upgrade protocol/config")
+	initCmd.Flags().Bool("upgrade", false, i18n.T("flag.upgrade"))
 	root.AddCommand(initCmd)
 
-	planCmd := &cobra.Command{Use: "plan", Short: "Blueprint commands"}
+	planCmd := &cobra.Command{Use: "plan", Short: i18n.T("cmd.plan.short")}
 	planCmd.AddCommand(&cobra.Command{
 		Use:  "apply [blueprint]",
 		Args: cobra.ExactArgs(1),
@@ -139,8 +141,8 @@ func main() {
 			printRes(app.PlanApply(args[0], cwd, yes, dryRun, reset))
 		},
 	})
-	planCmd.Commands()[0].Flags().Bool("yes", false, "confirm apply")
-	planCmd.Commands()[0].Flags().Bool("reset", false, "清空该工程全部任务后再灌入（默认增量合并，保留 done/进行中）")
+	planCmd.Commands()[0].Flags().Bool("yes", false, i18n.T("flag.yes"))
+	planCmd.Commands()[0].Flags().Bool("reset", false, i18n.T("flag.reset"))
 	planCmd.AddCommand(&cobra.Command{
 		Use:  "check [blueprint]",
 		Args: cobra.ExactArgs(1),
@@ -152,43 +154,43 @@ func main() {
 
 	regCmd := &cobra.Command{
 		Use:   "register",
-		Short: "向 maw 注册当前 Agent（领取前后均可）",
+		Short: i18n.T("cmd.register.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			agent, _ := cmd.Flags().GetString("agent")
 			role, _ := cmd.Flags().GetString("role")
 			printRes(app.Register(cwd, agent, role))
 		},
 	}
-	regCmd.Flags().String("agent", "", "Agent 唯一名（默认读 MAW_AGENT；未指定则自动分配 {应用}-{工程}-{序号}）")
-	regCmd.Flags().String("role", "worker", "角色：worker|reviewer|integrator")
+	regCmd.Flags().String("agent", "", i18n.T("flag.agent"))
+	regCmd.Flags().String("role", "worker", i18n.T("flag.role"))
 	root.AddCommand(regCmd)
 
 	unregCmd := &cobra.Command{
 		Use:   "unregister",
-		Short: "注销当前 Agent",
+		Short: i18n.T("cmd.unregister.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			agent, _ := cmd.Flags().GetString("agent")
 			printRes(app.Unregister(cwd, agent))
 		},
 	}
-	unregCmd.Flags().String("agent", "", "Agent 唯一名")
+	unregCmd.Flags().String("agent", "", i18n.T("flag.agent"))
 	root.AddCommand(unregCmd)
 
 	root.AddCommand(&cobra.Command{
 		Use:   "agents",
-		Short: "列出已注册 Agent 及其当前任务",
+		Short: i18n.T("cmd.agents.short"),
 		Run:   func(cmd *cobra.Command, args []string) { printRes(app.AgentsList(cwd)) },
 	})
 
 	nextCmd := &cobra.Command{
 		Use:   "next",
-		Short: "领取任务并自动注册执行者",
+		Short: i18n.T("cmd.next.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			agent, _ := cmd.Flags().GetString("agent")
 			printRes(app.Next(cwd, agent, dryRun))
 		},
 	}
-	nextCmd.Flags().String("agent", "", "Agent 唯一名（默认读 MAW_AGENT；未指定则自动分配 {应用}-{工程}-{序号}）")
+	nextCmd.Flags().String("agent", "", i18n.T("flag.agent"))
 	root.AddCommand(nextCmd)
 
 	progCmd := &cobra.Command{
@@ -199,9 +201,9 @@ func main() {
 			printRes(app.Progress(cwd, msg, task))
 		},
 	}
-	progCmd.Flags().StringP("message", "m", "", "milestone message")
+	progCmd.Flags().StringP("message", "m", "", i18n.T("flag.message"))
 	_ = progCmd.MarkFlagRequired("message")
-	progCmd.Flags().String("task", "", "task id")
+	progCmd.Flags().String("task", "", i18n.T("flag.task"))
 	root.AddCommand(progCmd)
 
 	subCmd := &cobra.Command{
@@ -211,7 +213,7 @@ func main() {
 			printRes(app.Submit(cwd, task, dryRun))
 		},
 	}
-	subCmd.Flags().String("task", "", "task id")
+	subCmd.Flags().String("task", "", i18n.T("flag.task"))
 	root.AddCommand(subCmd)
 
 	revCmd := &cobra.Command{
@@ -222,15 +224,15 @@ func main() {
 			req, _ := cmd.Flags().GetBool("request-changes")
 			msg, _ := cmd.Flags().GetString("message")
 			if !approve && !req {
-				printRes(nil, errx.New("specify --approve or --request-changes", ""))
+				printRes(nil, i18n.E("err.review_flags", ""))
 				return
 			}
 			printRes(app.Review(cwd, args[0], approve, msg))
 		},
 	}
-	revCmd.Flags().Bool("approve", false, "approve")
-	revCmd.Flags().Bool("request-changes", false, "request changes")
-	revCmd.Flags().StringP("message", "m", "", "review message")
+	revCmd.Flags().Bool("approve", false, i18n.T("flag.approve"))
+	revCmd.Flags().Bool("request-changes", false, i18n.T("flag.request_changes"))
+	revCmd.Flags().StringP("message", "m", "", i18n.T("flag.message"))
 	root.AddCommand(revCmd)
 
 	mergeCmd := &cobra.Command{
@@ -240,18 +242,18 @@ func main() {
 			printRes(app.Merge(cwd, yes, dryRun))
 		},
 	}
-	mergeCmd.Flags().Bool("yes", false, "confirm merge")
+	mergeCmd.Flags().Bool("yes", false, i18n.T("flag.yes"))
 	root.AddCommand(mergeCmd)
 
 	pruneCmd := &cobra.Command{
 		Use:   "prune",
-		Short: "清理残留 worktree 与无主 agent/* 分支（默认预览，--yes 才删除）",
+		Short: i18n.T("cmd.prune.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			yes, _ := cmd.Flags().GetBool("yes")
 			printRes(app.Prune(cwd, yes, dryRun))
 		},
 	}
-	pruneCmd.Flags().Bool("yes", false, "确认删除（默认仅列出）")
+	pruneCmd.Flags().Bool("yes", false, i18n.T("flag.yes_delete"))
 	root.AddCommand(pruneCmd)
 
 	boardFilters := func(cmd *cobra.Command) app.BoardFilters {
@@ -263,38 +265,38 @@ func main() {
 	}
 	boardCmd := &cobra.Command{
 		Use:   "board",
-		Short: "全局中文任务看板（跨工程；终端 + 动态 HTML）",
+		Short: i18n.T("cmd.board.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			serve, _ := cmd.Flags().GetBool("serve")
 			addr, _ := cmd.Flags().GetString("addr")
 			printRes(app.Board(cwd, serve, addr, boardFilters(cmd)))
 		},
 	}
-	boardCmd.Flags().Bool("serve", false, "启动本机中枢 HTTP（看板 + 状态注入 + SSE）")
-	boardCmd.Flags().String("addr", "127.0.0.1:7420", "监听地址（仅建议 loopback）")
-	boardCmd.Flags().String("project", "", "按工程 ID 筛选（默认全部）")
-	boardCmd.Flags().String("agent", "", "按 Agent 名筛选（默认全部）")
-	boardCmd.Flags().String("status", "", "按任务状态筛选（默认全部）")
+	boardCmd.Flags().Bool("serve", false, i18n.T("flag.serve"))
+	boardCmd.Flags().String("addr", "127.0.0.1:7420", i18n.T("flag.addr"))
+	boardCmd.Flags().String("project", "", i18n.T("flag.project"))
+	boardCmd.Flags().String("agent", "", i18n.T("flag.agent_filter"))
+	boardCmd.Flags().String("status", "", i18n.T("flag.status_filter"))
 	root.AddCommand(boardCmd)
 
 	serveCmd := &cobra.Command{
 		Use:   "serve",
-		Short: "启动本机中枢（等同 maw board --serve）",
+		Short: i18n.T("cmd.serve.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			addr, _ := cmd.Flags().GetString("addr")
 			printRes(app.Serve(cwd, addr, boardFilters(cmd)))
 		},
 	}
-	serveCmd.Flags().String("addr", "127.0.0.1:7420", "监听地址")
-	serveCmd.Flags().String("project", "", "默认工程筛选")
-	serveCmd.Flags().String("agent", "", "默认 Agent 筛选")
-	serveCmd.Flags().String("status", "", "默认状态筛选")
+	serveCmd.Flags().String("addr", "127.0.0.1:7420", i18n.T("flag.addr"))
+	serveCmd.Flags().String("project", "", i18n.T("flag.project"))
+	serveCmd.Flags().String("agent", "", i18n.T("flag.agent_filter"))
+	serveCmd.Flags().String("status", "", i18n.T("flag.status_filter"))
 	root.AddCommand(serveCmd)
 
-	statusCmd := &cobra.Command{Use: "status", Short: "向本机中枢注入 Agent 状态"}
+	statusCmd := &cobra.Command{Use: "status", Short: i18n.T("cmd.status.short")}
 	statusReportCmd := &cobra.Command{
 		Use:   "report",
-		Short: "上报进度/心跳（也可 POST /api/status）",
+		Short: i18n.T("cmd.status.report.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			msg, _ := cmd.Flags().GetString("message")
 			task, _ := cmd.Flags().GetString("task")
@@ -314,14 +316,14 @@ func main() {
 			}))
 		},
 	}
-	statusReportCmd.Flags().StringP("message", "m", "", "进度说明")
-	statusReportCmd.Flags().String("task", "", "关联任务 ID（可选）")
-	statusReportCmd.Flags().String("phase", "", "阶段标签（可选）")
-	statusReportCmd.Flags().Int("pct", 0, "进度百分比（可选）")
-	statusReportCmd.Flags().String("client", "", "来源客户端（如 cursor）")
-	statusReportCmd.Flags().String("agent", "", "Agent 名（默认 MAW_AGENT）")
-	statusReportCmd.Flags().String("project", "", "工程 ID（默认当前仓库）")
-	statusReportCmd.Flags().String("status", "", "Agent 状态 idle|working")
+	statusReportCmd.Flags().StringP("message", "m", "", i18n.T("flag.message"))
+	statusReportCmd.Flags().String("task", "", i18n.T("flag.task"))
+	statusReportCmd.Flags().String("phase", "", i18n.T("flag.phase"))
+	statusReportCmd.Flags().Int("pct", 0, i18n.T("flag.pct"))
+	statusReportCmd.Flags().String("client", "", i18n.T("flag.client"))
+	statusReportCmd.Flags().String("agent", "", i18n.T("flag.agent"))
+	statusReportCmd.Flags().String("project", "", i18n.T("flag.project"))
+	statusReportCmd.Flags().String("status", "", i18n.T("flag.agent_status"))
 	statusCmd.AddCommand(statusReportCmd)
 	root.AddCommand(statusCmd)
 	root.AddCommand(&cobra.Command{Use: "doctor", Run: func(cmd *cobra.Command, args []string) { printRes(app.Doctor(cwd)) }})
@@ -334,9 +336,9 @@ func main() {
 			printRes(app.Block(cwd, msg, task))
 		},
 	}
-	blockCmd.Flags().StringP("message", "m", "", "reason")
+	blockCmd.Flags().StringP("message", "m", "", i18n.T("flag.message"))
 	_ = blockCmd.MarkFlagRequired("message")
-	blockCmd.Flags().String("task", "", "task id")
+	blockCmd.Flags().String("task", "", i18n.T("flag.task"))
 	root.AddCommand(blockCmd)
 
 	taskCmd := &cobra.Command{Use: "task"}

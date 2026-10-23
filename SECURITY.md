@@ -1,17 +1,19 @@
 # Security Policy
 
-## 支持的版本
+> Languages: **English** | [简体中文](SECURITY.zh-CN.md)
 
-请使用最新发布的 `maw`（或从 `main` 构建）。旧版本通常不再单独修安全问题。
+## Supported versions
 
-## 报告漏洞
+Please use the latest released `maw` (or build from `main`). Older versions usually do not receive separate security fixes.
 
-请**不要**在公开 Issue 中披露可利用细节。
+## Reporting a vulnerability
 
-通过 GitHub Security Advisories（仓库 Security 页）私密报告，或联系维护者。请包含：
+Do **not** disclose exploit details in public Issues.
 
-- 影响版本 / 提交
-- 复现步骤或 PoC（私密渠道）
-- 预期影响范围
+Report privately via GitHub Security Advisories (repository Security page) or contact a maintainer. Include:
 
-我们会确认收到并评估修复优先级。
+- Affected version / commit
+- Reproduction steps or PoC (private channel)
+- Expected impact
+
+We will acknowledge receipt and prioritize a fix.

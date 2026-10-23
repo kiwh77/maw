@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>maw 全局任务看板</title>
+<title>maw global task board</title>
 <meta name="color-scheme" content="dark light"/>
 <script id="theme-init">
 const THEMES = ["system", "light", "dark"];
@@ -258,71 +258,578 @@ code, .kv dd, .list-plain { font-family: var(--mono); }
 </head>
 <body>
 <div class="app" id="app-shell">
-  <aside class="sidebar" aria-label="工程与 Agent">
+  <aside class="sidebar" id="app-shell-aside" aria-label="Projects & Agents">
     <div class="brand"><span class="brand-mark" aria-hidden="true">›_</span><div><div class="brand-name">maw<span style="color:var(--accent)">.</span></div><div class="brand-sub">AGENT WORKBENCH</div></div></div>
-    <div class="section-label">工作空间 <span id="projects-count">00</span></div>
+    <div class="section-label"><span id="workspace-label">Workspace</span> <span id="projects-count">00</span></div>
     <nav class="project-nav" id="project-nav" aria-label="工程导航"></nav>
-    <section class="agents-rail" aria-label="执行中 Agent">
+    <section class="agents-rail" id="agents-rail" aria-label="Working Agents">
       <div class="section-label">AGENTS <span id="agents-count">0</span></div>
-      <div class="agents-scroll" id="agents"><p class="empty">正在加载…</p></div>
+      <div class="agents-scroll" id="agents"><p class="empty">Loading…</p></div>
     </section>
     <div class="sidebar-foot"><span>⌘</span> multi-agent / worktree</div>
   </aside>
   <main class="workspace">
     <header class="topbar">
-      <div class="breadcrumb"><span class="dim">工作空间</span><span class="slash">/</span><strong id="workspace-name">全部工程</strong></div>
-      <div class="topbar-tools"><div class="sub" id="subtitle" role="status">正在连接…</div><select id="theme-select" class="theme-select" aria-label="主题" title="主题：默认跟随系统外观"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div>
+      <div class="breadcrumb"><span class="dim">Workspace</span><span class="slash">/</span><strong id="workspace-name">All projects</strong></div>
+      <div class="topbar-tools"><div class="sub" id="subtitle" role="status">Connecting…</div><select id="lang-select" class="theme-select" aria-label="Language" title="Language"><option value="en">EN</option><option value="zh">中</option></select><select id="theme-select" class="theme-select" aria-label="Theme" title="Theme: follow system by default"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
     </header>
     <div class="content">
       <div class="page-heading">
-        <div><div class="eyebrow">OPERATIONS / BOARD</div><h1>任务看板</h1><p class="page-description">跟踪任务流转，协调每一个 Agent。</p></div>
-        <button type="button" id="f-copy-join" class="join-button"><span class="symbol" aria-hidden="true">＋</span>复制工程接入提示词</button>
+        <div><div class="eyebrow">OPERATIONS / BOARD</div><h1 id="page-h1">Task board</h1><p class="page-description" id="page-desc">Track task flow and coordinate every Agent.</p></div>
+        <button type="button" id="f-copy-join" class="join-button"><span class="symbol" aria-hidden="true">＋</span>Copy project join prompt</button>
       </div>
-      <section class="stats" id="stats" aria-label="当前筛选范围任务统计"></section>
+      <section class="stats" id="stats" aria-label="Task stats for current filters"></section>
       <div class="toolbar">
         <div class="filters" id="filters">
-          <select id="f-project" aria-label="工程"><option value="">全部工程</option></select>
-          <select id="f-agent" aria-label="Agent"><option value="">全部 Agent</option></select>
-          <select id="f-status" aria-label="状态"><option value="">全部状态</option></select>
-          <button type="button" id="f-reset" class="quiet-button" title="重置所有筛选">重置</button>
+          <select id="f-project" aria-label="Project"><option value="">All projects</option></select>
+          <select id="f-agent" aria-label="Agent"><option value="">All Agents</option></select>
+          <select id="f-status" aria-label="Status"><option value="">All statuses</option></select>
+          <button type="button" id="f-reset" class="quiet-button" title="Reset all filters">Reset</button>
         </div>
         <div class="toolbar-right">
           <div class="board-meta-left">
-            <div class="view-toggle" id="view-toggle" role="group" aria-label="视图切换">
-              <button type="button" id="view-board" data-view="board" class="active" aria-pressed="true">看板</button>
-              <button type="button" id="view-topo" data-view="topo" aria-pressed="false">依赖拓扑</button>
+            <div class="view-toggle" id="view-toggle" role="group" aria-label="View switch">
+              <button type="button" id="view-board" data-view="board" class="active" aria-pressed="true">Board</button>
+              <button type="button" id="view-topo" data-view="topo" aria-pressed="false">Dependency topology</button>
             </div>
-            <span id="board-count">正在加载任务…</span>
+            <span id="board-count">Loading tasks…</span>
           </div>
-          <label class="search-box"><span aria-hidden="true">⌕</span><input type="search" id="task-search" aria-label="搜索任务" placeholder="搜索任务、编号、负责人…"/><kbd aria-hidden="true">/</kbd></label>
+          <label class="search-box"><span aria-hidden="true">⌕</span><input type="search" id="task-search" aria-label="Search tasks" placeholder="Search tasks, ids, owners…"/><kbd aria-hidden="true">/</kbd></label>
         </div>
       </div>
-      <div class="board" id="columns" aria-label="任务流程"></div>
-      <div class="topo" id="topology" aria-label="任务依赖拓扑" hidden></div>
-      <div class="hint-center" id="hint-center"><div class="hint-next" id="next"><b>NEXT</b><span>正在读取调度建议…</span></div><div class="hint-risks empty" id="risks"></div></div>
+      <div class="board" id="columns" aria-label="Task flow"></div>
+      <div class="topo" id="topology" aria-label="Task dependency topology" hidden></div>
+      <div class="hint-center" id="hint-center"><div class="hint-next" id="next"><b>NEXT</b><span id="next-hint-text">Reading schedule hints…</span></div><div class="hint-risks empty" id="risks"></div></div>
     </div>
   </main>
 </div>
 <div class="drawer-mask" id="drawer-mask" hidden></div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="d-title" aria-hidden="true" inert>
-  <div class="drawer-head"><div><div class="subid" id="d-id"></div><h2 id="d-title"></h2></div><button type="button" class="drawer-close" id="d-close" aria-label="关闭详情">×</button></div>
+  <div class="drawer-head"><div><div class="subid" id="d-id"></div><h2 id="d-title"></h2></div><button type="button" class="drawer-close" id="d-close" aria-label="Close detail">×</button></div>
   <div class="drawer-body" id="drawer-body"></div>
 </aside>
 
 <script id="board-app">
-const COLUMNS = [
-  ["backlog","待排期"],["ready","可领取"],["claimed","已领取"],["in_progress","进行中"],
-  ["self_check","自检中"],["in_review","评审中"],["merging","合并中"],["conflict","冲突"],
-  ["blocked","阻塞"],["done","已完成"],["cancelled","已取消"]
-];
 
-const LANES = [
-  { id: "queued", label: "待处理", statuses: ["backlog", "ready"], symbol: "≡", empty: "等待新的任务" },
-  { id: "running", label: "执行中", statuses: ["claimed", "in_progress", "self_check"], symbol: "⌁", empty: "暂无执行中的任务" },
-  { id: "integrating", label: "评审与合并", statuses: ["in_review", "merging"], symbol: "⑂", empty: "等待提交评审" },
-  { id: "attention", label: "需处理", statuses: ["conflict", "blocked"], symbol: "!", empty: "暂无阻塞或冲突" },
-  { id: "finished", label: "已结束", statuses: ["done", "cancelled"], symbol: "✓", empty: "完成的任务会出现在这里" }
-];
+const I18N = {
+  en: {
+    "title": "maw global task board",
+    "aria.sidebar": "Projects & Agents",
+    "label.workspace": "Workspace",
+    "aria.project_nav": "Project navigation",
+    "aria.agents": "Working Agents",
+    "loading": "Loading…",
+    "connecting": "Connecting…",
+    "theme": "Theme",
+    "theme.title": "Theme: follow system by default",
+    "theme.system": "System",
+    "theme.light": "Light",
+    "theme.dark": "Dark",
+    "lang": "Language",
+    "all_projects": "All projects",
+    "heading.board": "Task board",
+    "heading.desc": "Track task flow and coordinate every Agent.",
+    "copy.join": "Copy project join prompt",
+    "aria.stats": "Task stats for current filters",
+    "filter.project": "Project",
+    "filter.agent": "Agent",
+    "filter.status": "Status",
+    "all_agents": "All Agents",
+    "all_statuses": "All statuses",
+    "reset": "Reset",
+    "reset.title": "Reset all filters",
+    "aria.views": "View switch",
+    "view.board": "Board",
+    "view.topo": "Dependency topology",
+    "loading_tasks": "Loading tasks…",
+    "search": "Search tasks",
+    "search.ph": "Search tasks, ids, owners…",
+    "aria.flow": "Task flow",
+    "aria.topo": "Task dependency topology",
+    "next.reading": "Reading schedule hints…",
+    "close_detail": "Close detail",
+    "status.backlog": "Backlog",
+    "status.ready": "Ready",
+    "status.claimed": "Claimed",
+    "status.in_progress": "In progress",
+    "status.self_check": "Self-check",
+    "status.in_review": "In review",
+    "status.merging": "Merging",
+    "status.conflict": "Conflict",
+    "status.blocked": "Blocked",
+    "status.done": "Done",
+    "status.cancelled": "Cancelled",
+    "lane.queued": "Queued",
+    "lane.queued.empty": "Waiting for new tasks",
+    "lane.running": "Running",
+    "lane.running.empty": "No tasks running",
+    "lane.integrating": "Review & merge",
+    "lane.integrating.empty": "Waiting for review",
+    "lane.attention": "Needs attention",
+    "lane.attention.empty": "No blocks or conflicts",
+    "lane.finished": "Finished",
+    "lane.finished.empty": "Completed tasks appear here",
+    "ev.task_created": "Task created",
+    "ev.task_claimed": "Task claimed",
+    "ev.status_changed": "Status changed",
+    "ev.progress": "Progress milestone",
+    "ev.agent_registered": "Agent registered",
+    "ev.agent_unregistered": "Agent unregistered",
+    "ev.review_auto": "Auto-approved review",
+    "ev.review_result": "Review result",
+    "ev.gate_failed": "Gate failed",
+    "ev.merged": "Merged",
+    "ev.plan_applied": "Blueprint applied",
+    "none": "none",
+    "files_n": " files",
+    "file_n": "file ",
+    "unknown_project": "Unknown project",
+    "unknown_path": "(unknown path; confirm in board Project filter)",
+    "copied": "Copied",
+    "copy_failed": "Copy failed",
+    "detail_unavailable": "Detail unavailable",
+    "task_missing": "Task missing or filtered out",
+    "task_not_found": "No task matches current filters",
+    "no_title": "(no title)",
+    "loading_logs": "Loading logs…",
+    "no_logs": "No task logs (needs maw board --serve)",
+    "copy_prompt": "Copy join prompt",
+    "copy_cmd": "Copy show command",
+    "copy_wt": "Copy cd into worktree",
+    "sec.basic": "Basics",
+    "dt.status": "Status",
+    "dt.priority": "Priority",
+    "dt.owner": "Owner",
+    "unassigned": "Unassigned",
+    "dt.deps": "Deps",
+    "dt.attempts": "Attempts",
+    "dt.rev": " · rev ",
+    "dt.heartbeat": "Heartbeat",
+    "dt.blocked": "Blocked reason",
+    "sec.exec": "Execution",
+    "dt.project": "Project",
+    "dt.path": "Project path",
+    "dt.branch": "Branch",
+    "empty": "empty",
+    "show_cmd": "Show command",
+    "one_click_copy": "One-click copy",
+    "join_prompt": "Join prompt",
+    "sec.logs": "Task log",
+    "copied_prompt": "Prompt copied",
+    "load_fail": "Failed to load board data",
+    "prio_title": "Schedule priority; lower runs first",
+    "no_tasks_filter": "No tasks to show under current filters",
+    "no_tasks_topo": "No tasks yet; apply a blueprint to see topology",
+    "topo.legend": "Deps: prerequisite → dependent",
+    "topo.legend_cross": "Dashed: deps outside current view",
+    "topo.missing": "Missing dep ",
+    "topo.outside": "Outside filter / historical dep",
+    "topo.not_in_view": "Not in current view",
+    "tasks_edges": " tasks · ",
+    "edges": " edges",
+    "n_projects": " projects",
+    "n_match": " matching tasks / ",
+    "n_tasks_deps": " tasks · ",
+    "n_deps": " deps",
+    "other_status": "Other",
+    "no_tasks": "No tasks",
+    "n_tasks": " tasks",
+    "n_stages": " stages",
+    "progress": "Progress",
+    "flow": "Flow",
+    "flow_hint": "Includes self-check, review, merge",
+    "deps_ready": "Deps ready",
+    "blocked_conflict": "Blocked / merge conflicts",
+    "no_hint": "No schedule hint",
+    "no_task": "no task",
+    "working": "Working",
+    "no_working_agents": "No working Agents",
+    "copy_prefix": "Copy ",
+    "copy_suffix_prompt": " join prompt",
+    "pick_project": "Select a project first",
+    "pick_project_short": "Select a project",
+    "load_task_fail": "Failed to load task",
+    "offline": "Confirm maw board --serve is running, then wait for reconnect.",
+    "sync_fail": "Sync failed",
+    "live": "Live",
+    "poll": "3s sync",
+    "live_hint": "Live updates connected; 3s poll as fallback",
+    "poll_hint": "Syncing every 3s; live reconnects automatically",
+    "workspace": "Workspace",
+    "join_prompt_btn": "Copy project join prompt",
+    "prompt.no_projects": "No projects on this board yet. In the target git repo run: maw init && maw plan apply .multiagent/blueprint.toml --yes",
+    "prompt.header": "You are an execution Agent for maw (Multi-Agent Workspace CLI). Connect using the project/task info below and follow the protocol; do not skip steps.",
+    "prompt.project_info": "## Project",
+    "prompt.name": "- Name: ",
+    "prompt.project_id": "- Project ID: ",
+    "prompt.path": "- Local path: ",
+    "prompt.trunk": "- Trunk branch: ",
+    "prompt.target": "## Target task",
+    "prompt.task_id": "- Task ID: ",
+    "prompt.title": "- Title: ",
+    "prompt.status": "- Status: ",
+    "prompt.priority": "- Priority: ",
+    "prompt.deps": "- Deps: ",
+    "prompt.owner": "- Current owner: ",
+    "prompt.worktree": "- Worktree (repo-relative): ",
+    "prompt.branch": "- Task branch: ",
+    "prompt.blocked": "- Blocked reason: ",
+    "prompt.write_scope": "- write_scope (only these): ",
+    "prompt.write_empty": "- (empty; run maw task show ",
+    "prompt.write_empty2": " to confirm)",
+    "prompt.read_scope": "- read_scope: ",
+    "prompt.acceptance": "- acceptance: ",
+    "prompt.accept_none": "- (none; use the task card in the worktree)",
+    "prompt.steps": "## Join & execute",
+    "prompt.step1": "1. cd into the project:",
+    "prompt.step2_owner": "2. If continuing the same owner, reuse that Agent name; otherwise pick a unique unused name from the board.",
+    "prompt.current_owner": "   Current owner: ",
+    "prompt.export": "   export MAW_AGENT=<unique-name>",
+    "prompt.step3_wt": "3. If the task already has a worktree: enter it and keep coding; re-bind with maw next if needed (same agent is idempotent).",
+    "prompt.keep_task": "4. Keep the target task as ",
+    "prompt.keep_task2": "; do not touch other agents' worktrees.",
+    "prompt.step2_new": "2. Set a unique Agent name for this session (must not collide",
+    "prompt.occupied": "; in use: ",
+    "prompt.step3_next": "3. Register and claim the next ready task (by priority / merge_order):",
+    "prompt.or_next": "   or: maw next --agent <unique-name>",
+    "prompt.step4_check": "4. Check the claimed task id. Expected: ",
+    "prompt.step4a": "   - If it matches: work in the printed worktree.",
+    "prompt.step4b": "   - If another task: continue with what you got (queue order), or re-check the board; do not edit others' worktrees.",
+    "prompt.step5": "5. Only modify inside the maw worktree; only write_scope; run maw request-change before going out of scope.",
+    "prompt.step6": "6. Milestone: maw progress -m \"msg\"",
+    "prompt.step6b": "; done: maw submit; blocked: maw block (add reason per CLI).",
+    "prompt.step7": "7. After submit you may merge: maw merge --yes; do not git merge/rebase/push trunk directly.",
+    "prompt.step8": "8. After merge, if ready tasks remain, maw next again until none left or the user stops you.",
+    "prompt.step9": "9. Global board: maw board --serve (default http://127.0.0.1:7420/).",
+    "prompt.redlines": "## Protocol red lines",
+    "prompt.red1": "- State DB is ~/.maw/maw.db; this repo's .multiagent/ is config/blueprint only.",
+    "prompt.red2": "- Before handoff/interrupt: maw handoff; maw unregister when this session has no more tasks.",
+    "prompt.red3": "- On errors, read maw's Next hint first; do not bypass.",
+    "prompt.show_before": "- Before starting: maw task show ",
+    "prompt.ready_header": "You are an execution Agent for maw. Connect to the project below, claim and finish the next ready task.",
+    "prompt.ready_list": "## Ready tasks (reference; maw next is authoritative)",
+    "prompt.ready_more": "- …total ",
+    "prompt.ready_more2": " tasks",
+    "prompt.no_ready": "- (no ready under current filters; check the board or wait for deps)",
+    "prompt.path_ph": "<project-path>",
+    "prompt.export2": "2. export MAW_AGENT=<unique-name>",
+    "prompt.occupied2": "  # in use: ",
+    "prompt.step4_generic": "4. Enter the printed worktree; only that task's write_scope; maw progress / maw submit; then maw merge --yes if appropriate.",
+    "prompt.step5_loop": "5. After merge, if ready remains, maw next again until none left.",
+    "prompt.step6_board": "6. Board: maw board --serve",
+    "prompt.red_short1": "- DB ~/.maw/maw.db; work only in maw worktrees; merge with maw merge --yes.",
+    "prompt.red_short2": "- On errors, read maw Next hints first."
+  },
+  zh: {
+    "title": "maw 全局任务看板",
+    "aria.sidebar": "工程与 Agent",
+    "label.workspace": "工作空间",
+    "aria.project_nav": "工程导航",
+    "aria.agents": "执行中 Agent",
+    "loading": "正在加载…",
+    "connecting": "正在连接…",
+    "theme": "主题",
+    "theme.title": "主题：默认跟随系统外观",
+    "theme.system": "跟随系统",
+    "theme.light": "浅色",
+    "theme.dark": "深色",
+    "lang": "语言",
+    "all_projects": "全部工程",
+    "heading.board": "任务看板",
+    "heading.desc": "跟踪任务流转，协调每一个 Agent。",
+    "copy.join": "复制工程接入提示词",
+    "aria.stats": "当前筛选范围任务统计",
+    "filter.project": "工程",
+    "filter.agent": "Agent",
+    "filter.status": "状态",
+    "all_agents": "全部 Agent",
+    "all_statuses": "全部状态",
+    "reset": "重置",
+    "reset.title": "重置所有筛选",
+    "aria.views": "视图切换",
+    "view.board": "看板",
+    "view.topo": "依赖拓扑",
+    "loading_tasks": "正在加载任务…",
+    "search": "搜索任务",
+    "search.ph": "搜索任务、编号、负责人…",
+    "aria.flow": "任务流程",
+    "aria.topo": "任务依赖拓扑",
+    "next.reading": "正在读取调度建议…",
+    "close_detail": "关闭详情",
+    "status.backlog": "待排期",
+    "status.ready": "可领取",
+    "status.claimed": "已领取",
+    "status.in_progress": "进行中",
+    "status.self_check": "自检中",
+    "status.in_review": "评审中",
+    "status.merging": "合并中",
+    "status.conflict": "冲突",
+    "status.blocked": "阻塞",
+    "status.done": "已完成",
+    "status.cancelled": "已取消",
+    "lane.queued": "待处理",
+    "lane.queued.empty": "等待新的任务",
+    "lane.running": "执行中",
+    "lane.running.empty": "暂无执行中的任务",
+    "lane.integrating": "评审与合并",
+    "lane.integrating.empty": "等待提交评审",
+    "lane.attention": "需处理",
+    "lane.attention.empty": "暂无阻塞或冲突",
+    "lane.finished": "已结束",
+    "lane.finished.empty": "完成的任务会出现在这里",
+    "ev.task_created": "创建任务",
+    "ev.task_claimed": "领取任务",
+    "ev.status_changed": "状态变更",
+    "ev.progress": "进度里程碑",
+    "ev.agent_registered": "Agent 注册",
+    "ev.agent_unregistered": "Agent 注销",
+    "ev.review_auto": "自动通过评审",
+    "ev.review_result": "评审结果",
+    "ev.gate_failed": "门禁失败",
+    "ev.merged": "已合并",
+    "ev.plan_applied": "应用蓝图",
+    "none": "无",
+    "files_n": " 个",
+    "file_n": "文件 ",
+    "unknown_project": "未知工程",
+    "unknown_path": "（未知路径，请在看板「工程」中确认）",
+    "copied": "已复制",
+    "copy_failed": "复制失败",
+    "detail_unavailable": "详情不可用",
+    "task_missing": "任务不存在或已筛选掉",
+    "task_not_found": "当前筛选下找不到该任务",
+    "no_title": "（无标题）",
+    "loading_logs": "正在加载日志…",
+    "no_logs": "暂无任务日志（需 maw board --serve）",
+    "copy_prompt": "复制接入提示词",
+    "copy_cmd": "复制查看命令",
+    "copy_wt": "复制进入 worktree",
+    "sec.basic": "基本信息",
+    "dt.status": "状态",
+    "dt.priority": "优先级",
+    "dt.owner": "负责人",
+    "unassigned": "未分配",
+    "dt.deps": "依赖",
+    "dt.attempts": "尝试次数",
+    "dt.rev": " · 修订 ",
+    "dt.heartbeat": "心跳",
+    "dt.blocked": "阻塞原因",
+    "sec.exec": "执行节点",
+    "dt.project": "工程",
+    "dt.path": "工程路径",
+    "dt.branch": "分支",
+    "empty": "空",
+    "show_cmd": "查看命令",
+    "one_click_copy": "一键复制",
+    "join_prompt": "接入提示词",
+    "sec.logs": "任务日志",
+    "copied_prompt": "已复制提示词",
+    "load_fail": "无法加载看板数据",
+    "prio_title": "调度优先级，数值越小越优先",
+    "no_tasks_filter": "当前筛选下没有可展示的任务",
+    "no_tasks_topo": "暂无任务，应用蓝图后可查看依赖拓扑",
+    "topo.legend": "依赖方向：前置 → 后续",
+    "topo.legend_cross": "虚线：当前视图外的依赖",
+    "topo.missing": "缺失依赖 ",
+    "topo.outside": "筛选外 / 历史依赖",
+    "topo.not_in_view": "不在当前视图",
+    "tasks_edges": " 任务 · ",
+    "edges": " 边",
+    "n_projects": " 个工程",
+    "n_match": " 个匹配任务 / ",
+    "n_tasks_deps": " 个任务 · ",
+    "n_deps": " 条依赖",
+    "other_status": "其他状态",
+    "no_tasks": "暂无任务",
+    "n_tasks": " 个任务",
+    "n_stages": " 个阶段",
+    "progress": "完成进度",
+    "flow": "执行与流转",
+    "flow_hint": "含自检、评审与合并",
+    "deps_ready": "依赖已就绪",
+    "blocked_conflict": "阻塞 / 合并冲突",
+    "no_hint": "暂无调度建议",
+    "no_task": "无任务",
+    "working": "执行中",
+    "no_working_agents": "暂无执行中 Agent",
+    "copy_prefix": "复制 ",
+    "copy_suffix_prompt": " 接入提示词",
+    "pick_project": "请先选择一个工程",
+    "pick_project_short": "请先选择工程",
+    "load_task_fail": "未能加载任务",
+    "offline": "请确认 maw board --serve 正在运行，然后等待自动重连。",
+    "sync_fail": "同步失败",
+    "live": "实时",
+    "poll": "3s 同步",
+    "live_hint": "实时更新已连接，每 3 秒同步兜底",
+    "poll_hint": "每 3 秒同步，实时连接会自动重试",
+    "workspace": "工作空间",
+    "join_prompt_btn": "复制工程接入提示词",
+    "prompt.no_projects": "当前看板尚无已接入工程。请先在目标 git 仓库内运行：maw init && maw plan apply .multiagent/blueprint.toml --yes",
+    "prompt.header": "你是接入 maw（Multi-Agent Worktree CLI）的执行 Agent。请严格按下列工程与任务信息连接 maw 并完成工作，不要跳过协议步骤。",
+    "prompt.project_info": "## 工程信息",
+    "prompt.name": "- 名称：",
+    "prompt.project_id": "- 工程 ID：",
+    "prompt.path": "- 本地路径：",
+    "prompt.trunk": "- 主干分支：",
+    "prompt.target": "## 目标任务",
+    "prompt.task_id": "- 任务 ID：",
+    "prompt.title": "- 标题：",
+    "prompt.status": "- 状态：",
+    "prompt.priority": "- 优先级：",
+    "prompt.deps": "- 依赖：",
+    "prompt.owner": "- 当前负责人：",
+    "prompt.worktree": "- Worktree（相对仓库）：",
+    "prompt.branch": "- 任务分支：",
+    "prompt.blocked": "- 阻塞原因：",
+    "prompt.write_scope": "- 可写范围 write_scope（只改这些）：",
+    "prompt.write_empty": "- （空；先运行 maw task show ",
+    "prompt.write_empty2": " 确认）",
+    "prompt.read_scope": "- 只读范围 read_scope：",
+    "prompt.acceptance": "- 验收标准 acceptance：",
+    "prompt.accept_none": "- （无；以 worktree 内任务卡为准）",
+    "prompt.steps": "## 接入与执行步骤",
+    "prompt.step1": "1. 终端进入工程目录：",
+    "prompt.step2_owner": "2. 若你接续同一负责人，复用其 Agent 名；否则另选看板未占用的唯一名。",
+    "prompt.current_owner": "   当前负责人：",
+    "prompt.export": "   export MAW_AGENT=<唯一名>",
+    "prompt.step3_wt": "3. 若任务已有 worktree：直接进入该目录继续改代码；需要重新绑定可再执行 maw next（同名 agent 幂等）。",
+    "prompt.keep_task": "4. 目标任务保持为 ",
+    "prompt.keep_task2": "；勿改其他 agent 的 worktree。",
+    "prompt.step2_new": "2. 设定本会话唯一 Agent 名（勿与已注册冲突",
+    "prompt.occupied": "；已占用：",
+    "prompt.step3_next": "3. 注册并领取下一道 ready 任务（按 priority / merge_order）：",
+    "prompt.or_next": "   或：maw next --agent <唯一名>",
+    "prompt.step4_check": "4. 核对输出的任务 ID。期望领取：",
+    "prompt.step4a": "   - 若正是该任务：进入输出的 worktree 目录工作。",
+    "prompt.step4b": "   - 若领到其他任务：以实际领到的任务为准继续（队列按优先级）；或查看看板后再调度，勿改他人 worktree。",
+    "prompt.step5": "5. 只在 maw 创建的 worktree 中修改；只改 write_scope；越界前运行 maw request-change。",
+    "prompt.step6": "6. 里程碑：maw progress -m \"说明\"",
+    "prompt.step6b": "；完成：maw submit；阻塞：maw block（按 CLI 提示附原因）。",
+    "prompt.step7": "7. 完成 submit 后可自行合入：maw merge --yes；禁止直接 git merge / rebase / push 主干。",
+    "prompt.step8": "8. 合入后若仍有 ready 任务，继续 maw next 领取并执行下一题，循环直至无题可领或用户叫停。",
+    "prompt.step9": "9. 全局看板：maw board --serve（默认 http://127.0.0.1:7420/）。",
+    "prompt.redlines": "## 协议红线",
+    "prompt.red1": "- 状态库在本机 ~/.maw/maw.db；本仓库 .multiagent/ 仅存配置与蓝图。",
+    "prompt.red2": "- 换人或中断前：maw handoff；本会话无更多可领任务时再 maw unregister。",
+    "prompt.red3": "- 出错时先读 maw 输出的「下一步」提示，不要绕过。",
+    "prompt.show_before": "- 开始前建议：maw task show ",
+    "prompt.ready_header": "你是接入 maw（Multi-Agent Worktree CLI）的执行 Agent。请连接下列工程，领取并完成下一道可领取（ready）任务。",
+    "prompt.ready_list": "## 当前可领取任务（供参考，以 maw next 实际领取为准）",
+    "prompt.ready_more": "- …共 ",
+    "prompt.ready_more2": " 道",
+    "prompt.no_ready": "- （当前筛选下无 ready；先看看板或等待依赖完成）",
+    "prompt.path_ph": "<工程路径>",
+    "prompt.export2": "2. export MAW_AGENT=<唯一名>",
+    "prompt.occupied2": "  # 已占用：",
+    "prompt.step4_generic": "4. 进入输出的 worktree，只改该任务 write_scope；maw progress / maw submit；完成后可自行 maw merge --yes。",
+    "prompt.step5_loop": "5. 合入后若仍有 ready，继续 maw next 领下一题并执行，循环直至无题可领。",
+    "prompt.step6_board": "6. 看板：maw board --serve",
+    "prompt.red_short1": "- 状态库 ~/.maw/maw.db；只在 maw worktree 内工作；合入用 maw merge --yes（可自行执行）。",
+    "prompt.red_short2": "- 出错先读 maw「下一步」提示。",
+  }
+};
+
+let uiLang = "en";
+function t(key) {
+  const pack = I18N[uiLang] || I18N.en;
+  return (pack[key] != null ? pack[key] : (I18N.en[key] != null ? I18N.en[key] : key));
+}
+function readLang() {
+  try {
+    const q = new URLSearchParams(location.search).get("lang");
+    if (q === "en" || q === "zh") return q;
+  } catch (_) {}
+  try {
+    const v = localStorage.getItem("maw-board-lang");
+    if (v === "en" || v === "zh") return v;
+  } catch (_) {}
+  try {
+    if ((navigator.language || "").toLowerCase().startsWith("zh")) return "zh";
+  } catch (_) {}
+  return "en";
+}
+function setLang(lang) {
+  uiLang = (lang === "zh") ? "zh" : "en";
+  try { localStorage.setItem("maw-board-lang", uiLang); } catch (_) {}
+  try {
+    if (document.documentElement) document.documentElement.lang = uiLang === "zh" ? "zh-CN" : "en";
+  } catch (_) {}
+  rebuildLocalizedLists();
+  try { applyStaticI18n(); } catch (_) {}
+  const sel = document.getElementById("lang-select");
+  if (sel) sel.value = uiLang;
+  if (typeof lastSnap !== "undefined" && lastSnap) {
+    try { render(lastSnap); } catch (_) {}
+  }
+}
+function rebuildLocalizedLists() {
+  COLUMNS.length = 0;
+  [
+    ["backlog","status.backlog"],["ready","status.ready"],["claimed","status.claimed"],
+    ["in_progress","status.in_progress"],["self_check","status.self_check"],["in_review","status.in_review"],
+    ["merging","status.merging"],["conflict","status.conflict"],["blocked","status.blocked"],
+    ["done","status.done"],["cancelled","status.cancelled"]
+  ].forEach(([k, ik]) => COLUMNS.push([k, t(ik)]));
+  LANES.length = 0;
+  [
+    { id: "queued", label: "lane.queued", statuses: ["backlog", "ready"], symbol: "≡", empty: "lane.queued.empty" },
+    { id: "running", label: "lane.running", statuses: ["claimed", "in_progress", "self_check"], symbol: "⌁", empty: "lane.running.empty" },
+    { id: "integrating", label: "lane.integrating", statuses: ["in_review", "merging"], symbol: "⑂", empty: "lane.integrating.empty" },
+    { id: "attention", label: "lane.attention", statuses: ["conflict", "blocked"], symbol: "!", empty: "lane.attention.empty" },
+    { id: "finished", label: "lane.finished", statuses: ["done", "cancelled"], symbol: "✓", empty: "lane.finished.empty" }
+  ].forEach(L => LANES.push({ id: L.id, label: t(L.label), statuses: L.statuses, symbol: L.symbol, empty: t(L.empty) }));
+}
+function applyStaticI18n() {
+  document.title = t("title");
+  const map = [
+    ["workspace-label", "label.workspace"],
+    ["subtitle", "connecting"],
+    ["page-h1", "heading.board"],
+    ["page-desc", "heading.desc"],
+    ["f-copy-join", "copy.join"],
+    ["view-board", "view.board"],
+    ["view-topo", "view.topo"],
+    ["board-count", "loading_tasks"],
+    ["f-reset", "reset"],
+    ["next-hint-text", "next.reading"],
+  ];
+  map.forEach(([id, key]) => { const el = document.getElementById(id); if (el) el.textContent = t(key); });
+  const setAria = (id, key) => { const el = document.getElementById(id); if (el) el.setAttribute("aria-label", t(key)); };
+  setAria("app-shell-aside", "aria.sidebar");
+  setAria("project-nav", "aria.project_nav");
+  setAria("agents-rail", "aria.agents");
+  setAria("theme-select", "theme");
+  setAria("lang-select", "lang");
+  setAria("stats", "aria.stats");
+  setAria("f-project", "filter.project");
+  setAria("f-agent", "filter.agent");
+  setAria("f-status", "filter.status");
+  setAria("view-toggle", "aria.views");
+  setAria("task-search", "search");
+  setAria("columns", "aria.flow");
+  setAria("topology", "aria.topo");
+  setAria("d-close", "close_detail");
+  const th = document.getElementById("theme-select");
+  if (th) {
+    th.title = t("theme.title");
+    const opts = th.querySelectorAll("option");
+    if (opts[0]) opts[0].textContent = t("theme.system");
+    if (opts[1]) opts[1].textContent = t("theme.light");
+    if (opts[2]) opts[2].textContent = t("theme.dark");
+  }
+  const ts = document.getElementById("task-search");
+  if (ts) ts.placeholder = t("search.ph");
+  const bc = document.querySelector(".breadcrumb .dim");
+  if (bc) bc.textContent = t("workspace");
+  const wn = document.getElementById("workspace-name");
+  if (wn && (!wn.dataset.locked)) wn.textContent = t("all_projects");
+  const agentsEmpty = document.querySelector("#agents .empty");
+  if (agentsEmpty) agentsEmpty.textContent = t("loading");
+}
+
+const COLUMNS = [];
+const LANES = [];
 const VIEWS = ["board", "topo"];
 const TOPO_NODE_W = 200;
 const TOPO_NODE_H = 98;
@@ -409,17 +916,17 @@ function setProjectFilter(projectId, { syncHash = true } = {}) {
 }
 
 const EVENT_LABEL = {
-  task_created: "创建任务",
-  claimed: "领取任务",
-  status_changed: "状态变更",
-  progress: "进度里程碑",
-  agent_registered: "Agent 注册",
-  agent_unregistered: "Agent 注销",
-  review_auto_approved: "自动通过评审",
-  review_result: "评审结果",
-  gate_failed: "门禁失败",
-  merged: "已合并",
-  plan_applied: "应用蓝图"
+  task_created: t("ev.task_created"),
+  claimed: t("ev.task_claimed"),
+  status_changed: t("ev.status_changed"),
+  progress: t("ev.progress"),
+  agent_registered: t("ev.agent_registered"),
+  agent_unregistered: t("ev.agent_unregistered"),
+  review_auto_approved: t("ev.review_auto"),
+  review_result: t("ev.review_result"),
+  gate_failed: t("ev.gate_failed"),
+  merged: t("ev.merged"),
+  plan_applied: t("ev.plan_applied")
 };
 
 function esc(s) {
@@ -466,7 +973,7 @@ function findProject(projectId) {
 }
 
 function listBullets(arr, empty) {
-  if (!arr || !arr.length) return '<p class="empty">' + esc(empty || "无") + '</p>';
+  if (!arr || !arr.length) return '<p class="empty">' + esc(empty || t("none")) + '</p>';
   return '<ul class="list-plain">' + arr.map(x => '<li>' + esc(x) + '</li>').join("") + '</ul>';
 }
 
@@ -511,8 +1018,8 @@ function takenAgentNames() {
 
 function buildTaskPrompt(t) {
   const p = findProject(t.project_id) || {};
-  const projName = t.project_name || p.name || t.project_id || "未知工程";
-  const projPath = p.path || "（未知路径，请在看板「工程」中确认）";
+  const projName = t.project_name || p.name || t.project_id || t("unknown_project");
+  const projPath = p.path || t("unknown_path");
   const mainBranch = p.main_branch || "main";
   const taken = takenAgentNames();
   const lines = [];
@@ -529,7 +1036,7 @@ function buildTaskPrompt(t) {
   lines.push("- 标题：" + (t.title || "—"));
   lines.push("- 状态：" + statusLabel(t.status) + "（" + (t.status || "—") + "）");
   lines.push("- 优先级：" + (t.priority ?? "—") + " · merge_order：" + (t.merge_order ?? "—"));
-  lines.push("- 依赖：" + ((t.deps && t.deps.length) ? t.deps.join(", ") : "无"));
+  lines.push("- 依赖：" + ((t.deps && t.deps.length) ? t.deps.join(", ") : t("none")));
   if (t.owner) lines.push("- 当前负责人：" + t.owner);
   if (t.worktree) lines.push("- Worktree（相对仓库）：" + t.worktree);
   if (t.branch) lines.push("- 任务分支：" + t.branch);
@@ -619,11 +1126,11 @@ async function copyText(btn, text, okLabel) {
   const prev = btn.innerHTML;
   try {
     await navigator.clipboard.writeText(text);
-    btn.textContent = okLabel || "已复制";
+    btn.textContent = okLabel || t("copied");
     btn.classList.add("ok");
     setTimeout(() => { btn.innerHTML = prev; btn.classList.remove("ok"); }, 2500);
   } catch (_) {
-    btn.textContent = "复制失败";
+    btn.textContent = t("copy_failed");
     setTimeout(() => { btn.innerHTML = prev; }, 1400);
   }
 }
@@ -660,7 +1167,7 @@ async function refreshTaskDetail(tid, pid) {
     const q = new URLSearchParams({ id: tid, t: Date.now() });
     if (pid) q.set("project", pid);
     const res = await fetch("/api/task?" + q, { cache: "no-store" });
-    if (!res.ok) throw new Error("详情不可用");
+    if (!res.ok) throw new Error(t("detail_unavailable"));
     const d = await res.json();
     if (request !== detailRequest || selectedTid !== tid || selectedPid !== pid) return;
     drawerEvents = d.events || [];
@@ -715,7 +1222,7 @@ function renderDrawerBody() {
   const t = findTask(selectedTid, selectedPid);
   if (!t) {
     document.getElementById("d-id").textContent = "";
-    document.getElementById("d-title").textContent = "任务不存在或已筛选掉";
+    document.getElementById("d-title").textContent = t("task_missing");
     document.getElementById("drawer-body").innerHTML = '<p class="empty">当前筛选下找不到该任务</p>';
     return;
   }
@@ -727,7 +1234,7 @@ function renderDrawerBody() {
     ? "cd " + ((p.path || "<工程路径>").replace(/\\/g, "/") + "/" + t.worktree)
     : "";
   document.getElementById("d-id").textContent = t.id;
-  document.getElementById("d-title").textContent = t.title || "（无标题）";
+  document.getElementById("d-title").textContent = t.title || t("no_title");
 
   let logsHtml;
   if (drawerLoading) {
@@ -759,8 +1266,8 @@ function renderDrawerBody() {
     '<div class="drawer-section"><h3>基本信息</h3><dl class="kv">' +
       '<dt>状态</dt><dd>' + statusBadge(t.status) + '<code style="font-size:.68rem;color:var(--muted)">' + esc(t.status) + '</code></dd>' +
       '<dt>优先级</dt><dd>' + esc(t.priority ?? "—") + ' · merge_order ' + esc(t.merge_order ?? "—") + '</dd>' +
-      '<dt>负责人</dt><dd>' + esc(t.owner || "未分配") + '</dd>' +
-      '<dt>依赖</dt><dd>' + esc((t.deps && t.deps.length) ? t.deps.join(", ") : "无") + '</dd>' +
+      '<dt>负责人</dt><dd>' + esc(t.owner || t("unassigned")) + '</dd>' +
+      '<dt>依赖</dt><dd>' + esc((t.deps && t.deps.length) ? t.deps.join(", ") : t("none")) + '</dd>' +
       '<dt>尝试次数</dt><dd>' + esc(t.attempts ?? 0) + ' · 修订 ' + esc(t.revision ?? 0) + '</dd>' +
       '<dt>心跳</dt><dd>' + esc(fmtTime(t.heartbeat) || "—") + '</dd>' +
       (t.blocked_reason ? '<dt>阻塞原因</dt><dd>' + esc(t.blocked_reason) + '</dd>' : "") +
@@ -772,12 +1279,12 @@ function renderDrawerBody() {
       '<dt>分支</dt><dd>' + esc(t.branch || "—") + '</dd>' +
       '<dt>Agent</dt><dd>' + esc(agent ? (agent.id + " · " + (agent.status || "") + " · " + (fmtTime(agent.last_seen) || "")) : (t.owner || "—")) + '</dd>' +
     '</dl></div>' +
-    '<div class="drawer-section"><h3>write_scope</h3>' + listBullets(t.write_scope, "空") + '</div>' +
-    '<div class="drawer-section"><h3>read_scope</h3>' + listBullets(t.read_scope, "无") + '</div>' +
-    '<div class="drawer-section"><h3>acceptance</h3>' + listBullets(t.acceptance, "无") + '</div>' +
-    '<div class="drawer-section">' + secCopy("查看命令", "d-copy-cmd", "一键复制") +
+    '<div class="drawer-section"><h3>write_scope</h3>' + listBullets(t.write_scope, t("empty")) + '</div>' +
+    '<div class="drawer-section"><h3>read_scope</h3>' + listBullets(t.read_scope, t("none")) + '</div>' +
+    '<div class="drawer-section"><h3>acceptance</h3>' + listBullets(t.acceptance, t("none")) + '</div>' +
+    '<div class="drawer-section">' + secCopy(t("show_cmd"), "d-copy-cmd", t("one_click_copy")) +
       '<div class="cmd-box">' + esc(cmd) + '</div></div>' +
-    '<div class="drawer-section">' + secCopy("接入提示词", "d-copy-prompt", "一键复制") +
+    '<div class="drawer-section">' + secCopy(t("join_prompt"), "d-copy-prompt", t("one_click_copy")) +
       '<div class="prompt-box" id="d-prompt">' + esc(prompt) + '</div></div>' +
     '<div class="drawer-section"><h3>任务日志</h3>' + logsHtml + '</div>';
 
@@ -786,11 +1293,11 @@ function renderDrawerBody() {
     if (!el) return;
     el.onclick = async (e) => { e.stopPropagation(); await copyText(el, text, ok); };
   };
-  bind("d-copy-prompt-top", prompt, "已复制提示词");
-  bind("d-copy-prompt", prompt, "已复制提示词");
-  bind("d-copy-cmd-top", cmd, "已复制");
-  bind("d-copy-cmd", cmd, "已复制");
-  bind("d-copy-wt", cdWt, "已复制");
+  bind("d-copy-prompt-top", prompt, t("copied_prompt"));
+  bind("d-copy-prompt", prompt, t("copied_prompt"));
+  bind("d-copy-cmd-top", cmd, t("copied"));
+  bind("d-copy-cmd", cmd, t("copied"));
+  bind("d-copy-wt", cdWt, t("copied"));
 
   document.querySelectorAll(".card.clickable").forEach(el => {
     const on = el.dataset.tid === t.id && (!selectedPid || el.dataset.pid === selectedPid);
@@ -818,7 +1325,7 @@ async function loadSnapshot() {
       return await res.json();
     } catch (e) { lastErr = e; }
   }
-  throw lastErr || new Error("无法加载看板数据");
+  throw lastErr || new Error(t("load_fail"));
 }
 
 function fillSelect(el, items, valueKey, labelKey, current, allLabel) {
@@ -846,8 +1353,8 @@ function syncFilterControls(s) {
     }
   });
   agentOptions.sort((a,b) => a.id.localeCompare(b.id));
-  fillSelect(document.getElementById("f-project"), projectOptions, "id", "name", filters.project, "全部工程");
-  fillSelect(document.getElementById("f-agent"), agentOptions, "id", "label", filters.agent, "全部 Agent");
+  fillSelect(document.getElementById("f-project"), projectOptions, "id", "name", filters.project, t("all_projects"));
+  fillSelect(document.getElementById("f-agent"), agentOptions, "id", "label", filters.agent, t("all_agents"));
   document.getElementById("f-status").value = filters.status || "";
 }
 
@@ -935,7 +1442,7 @@ function layoutTopoBands(tasks) {
     }
     bands.push({
       pid,
-      name: group[0]?.project_name || pid || "未知工程",
+      name: group[0]?.project_name || pid || t("unknown_project"),
       tasks: group,
       byId,
       positions,
@@ -967,10 +1474,10 @@ function renderTopoNode(t, pos, indeg, outdeg) {
   const outN = outdeg.get(t.id) || 0;
   return '<article class="topo-node clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(t.id)+'" data-pid="'+esc(t.project_id||'')+'" style="left:'+pos.x+'px;top:'+pos.y+'px" aria-label="'+esc(t.id+' '+t.title+'，'+statusLabel(t.status))+'">'+
     '<div class="card-top"><span class="id">'+esc(t.id)+'</span>'+statusBadge(t.status)+'</div>'+
-    '<h4 class="task-title">'+esc(t.title || "（无标题）")+'</h4>'+
+    '<h4 class="task-title">'+esc(t.title || t("no_title"))+'</h4>'+
     '<div class="topo-meta">'+
-      '<span class="owner">'+esc(t.owner || "未分配")+'</span>'+
-      '<span class="priority" title="调度优先级，数值越小越优先">P'+esc(t.priority ?? "—")+'</span>'+
+      '<span class="owner">'+esc(t.owner || t("unassigned"))+'</span>'+
+      '<span class="priority" title=t("prio_title")>P'+esc(t.priority ?? "—")+'</span>'+
       '<span title="入度 / 出度">←'+inN+' · '+outN+'→</span>'+
     '</div>'+
     (deps.length ? '<div class="topo-deps">deps: '+esc(deps.join(", "))+'</div>' : '')+
@@ -986,7 +1493,7 @@ function renderTopology(s) {
   const edgeTotal = bands.reduce((n, b) => n + b.edgeCount, 0);
   let html;
   if (!tasks.length) {
-    html = '<p class="topo-empty">'+(searchTerm || filters.status || filters.agent ? "当前筛选下没有可展示的任务" : "暂无任务，应用蓝图后可查看依赖拓扑")+'</p>';
+    html = '<p class="topo-empty">'+(searchTerm || filters.status || filters.agent ? t("no_tasks_filter") : t("no_tasks_topo"))+'</p>';
   } else {
     html = '<div class="topo-legend"><span><i></i>依赖方向：前置 → 后续</span><span><i class="cross"></i>虚线：当前视图外的依赖</span></div>' + bands.map(band => {
       const markerId = "topo-arrow-" + esc(band.pid || "all").replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -1038,7 +1545,7 @@ function renderBoard(s) {
   const lanes = LANES.filter(lane => lane.id !== "attention" || tasks.some(t => lane.statuses.includes(t.status)) || lane.statuses.includes(filters.status));
   // Unknown future statuses stay visible instead of silently dropping tasks.
   if (tasks.some(t => !COLUMNS.some(([status]) => status === t.status))) {
-    lanes.push({ id: "other", label: "其他状态", statuses: [...new Set(tasks.map(t => t.status))].filter(status => !COLUMNS.some(([key]) => key === status)), symbol: "?", empty: "暂无任务" });
+    lanes.push({ id: "other", label: t("other_status"), statuses: [...new Set(tasks.map(t => t.status))].filter(status => !COLUMNS.some(([key]) => key === status)), symbol: "?", empty: t("no_tasks") });
   }
   const html = lanes.map((lane, i) => {
     const items = tasks.filter(t => lane.statuses.includes(t.status));
@@ -1047,9 +1554,9 @@ function renderBoard(s) {
       return '<article class="card clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(t.id)+'" data-pid="'+esc(t.project_id||'')+'" aria-label="'+esc(t.id+' '+t.title+'，'+statusLabel(t.status))+'">'+
         '<div class="card-top"><span class="id">'+esc(t.id)+'</span>'+statusBadge(t.status)+'</div>'+
         '<h4 class="task-title">'+esc(t.title)+'</h4>'+
-        '<div class="card-project">'+esc(t.project_name || t.project_id || "未知工程")+'</div>'+
+        '<div class="card-project">'+esc(t.project_name || t.project_id || t("unknown_project"))+'</div>'+
         (t.blocked_reason ? '<div class="task-reason">'+esc(t.blocked_reason)+'</div>' : '')+
-        '<div class="card-bottom"><span class="owner">'+esc(t.owner || "未分配")+'</span><span class="priority" title="调度优先级，数值越小越优先">P'+esc(t.priority ?? "—")+'</span></div>'+
+        '<div class="card-bottom"><span class="owner">'+esc(t.owner || t("unassigned"))+'</span><span class="priority" title=t("prio_title")>P'+esc(t.priority ?? "—")+'</span></div>'+
         '<div class="actions"><button type="button" class="copy primary" data-action="prompt" aria-label="'+esc('复制 '+t.id+' 接入提示词')+'">接入提示词 ↗</button><button type="button" class="copy" data-action="command" aria-label="'+esc('复制 '+t.id+' 查看命令')+'">⌘ 命令</button></div></article>';
     }).join("");
     return '<section class="col" data-lane="'+lane.id+'" aria-label="'+lane.label+'"><h3><span class="lane-index">'+String(i+1).padStart(2,"0")+'</span>'+lane.label+'<span class="count">'+items.length+'</span><span class="lane-symbol" aria-hidden="true">'+lane.symbol+'</span></h3><div class="col-body">'+(cards || '<div class="lane-empty"><span aria-hidden="true">'+lane.symbol+'</span>'+lane.empty+'</div>')+'</div></section>';
@@ -1086,7 +1593,7 @@ function render(s) {
   const pct = Math.max(0, Math.min(100, Number(s.percent) || 0));
   const projects = s.projects || [];
   const selectedProject = projects.find(p => p.id === filters.project);
-  document.getElementById("workspace-name").textContent = selectedProject?.name || "全部工程";
+  document.getElementById("workspace-name").textContent = selectedProject?.name || t("all_projects");
   document.getElementById("projects-count").textContent = String(projects.length).padStart(2, "0");
   snapshotHealthy = true;
   updateSyncStatus();
@@ -1094,28 +1601,28 @@ function render(s) {
   const stat = (label, value, title, extra = "", cls = "") =>
     '<div class="stat" title="'+esc(title)+'"><div class="stat-label">'+label+'</div><div class="stat-value '+cls+'">'+value+'</div>'+extra+'</div>';
   document.getElementById("stats").innerHTML =
-    stat("完成进度", pct+'<small>% · '+esc(s.done || 0)+' / '+esc(s.total || 0)+'</small>', "完成进度",
-      '<div class="bar-wrap" role="progressbar" aria-label="完成进度" aria-valuenow="'+pct+'" aria-valuemin="0" aria-valuemax="100"><span class="bar" style="width:'+pct+'%"></span></div>', "accent")+
-    stat("执行与流转", esc(s.active || 0), "含自检、评审与合并")+
-    stat("可领取", esc(s.counts?.ready || 0), "依赖已就绪")+
-    stat("需处理", attention, "阻塞 / 合并冲突", "", attention ? "danger" : "");
-  const nextText = s.next_hint || "暂无调度建议";
+    stat(t("progress"), pct+'<small>% · '+esc(s.done || 0)+' / '+esc(s.total || 0)+'</small>', t("progress"),
+      '<div class="bar-wrap" role="progressbar" aria-label=t("progress") aria-valuenow="'+pct+'" aria-valuemin="0" aria-valuemax="100"><span class="bar" style="width:'+pct+'%"></span></div>', "accent")+
+    stat(t("flow"), esc(s.active || 0), t("flow_hint"))+
+    stat("可领取", esc(s.counts?.ready || 0), t("deps_ready"))+
+    stat("需处理", attention, t("blocked_conflict"), "", attention ? "danger" : "");
+  const nextText = s.next_hint || t("no_hint");
   document.getElementById("next").innerHTML = '<b>NEXT →</b><span>'+esc(nextText)+'</span>';
   const risks = s.risks || [];
   const riskEl = document.getElementById("risks");
   riskEl.className = "hint-risks" + (risks.length ? "" : " empty");
   riskEl.textContent = risks.join("；");
-  const navHTML = [{id: "", name: "全部工程"}, ...projects].map(p => '<button type="button" class="nav-item'+(filters.project === p.id ? ' active' : '')+'" data-project="'+esc(p.id)+'"'+(filters.project === p.id ? ' aria-current="page"' : '')+' title="'+esc(p.path || p.name)+'"><span class="nav-icon" aria-hidden="true">'+(p.id ? '⌁' : '▦')+'</span><span class="nav-name">'+esc(p.name)+'</span></button>').join("");
+  const navHTML = [{id: "", name: t("all_projects")}, ...projects].map(p => '<button type="button" class="nav-item'+(filters.project === p.id ? ' active' : '')+'" data-project="'+esc(p.id)+'"'+(filters.project === p.id ? ' aria-current="page"' : '')+' title="'+esc(p.path || p.name)+'"><span class="nav-icon" aria-hidden="true">'+(p.id ? '⌁' : '▦')+'</span><span class="nav-name">'+esc(p.name)+'</span></button>').join("");
   const nav = document.getElementById("project-nav");
   if (nav.innerHTML !== navHTML) nav.innerHTML = navHTML;
   // 侧栏只展示执行中 Agent（不展示 idle / offline）
   const agents = (s.agents || []).filter(a => a.status === "working");
   document.getElementById("agents-count").textContent = String(agents.length).padStart(2,"0");
   document.getElementById("agents").innerHTML = agents.length ? agents.map(a =>
-    '<div class="agent-chip" title="'+esc([a.project_name || a.project_id, a.id, a.task_id || "无任务", fmtTime(a.last_seen)].join(' / '))+'"><div class="agent-top"><span class="agent-dot st-working"></span><span class="id">'+esc(a.id)+'</span><span class="agent-state">执行中</span></div><div class="meta">'+esc(a.task_id || "无任务")+' · '+esc(a.project_name || a.project_id)+'</div></div>'
+    '<div class="agent-chip" title="'+esc([a.project_name || a.project_id, a.id, a.task_id || t("no_task"), fmtTime(a.last_seen)].join(' / '))+'"><div class="agent-top"><span class="agent-dot st-working"></span><span class="id">'+esc(a.id)+'</span><span class="agent-state">执行中</span></div><div class="meta">'+esc(a.task_id || t("no_task"))+' · '+esc(a.project_name || a.project_id)+'</div></div>'
   ).join("") : '<p class="empty" style="padding:0 9px">暂无执行中 Agent</p>';
   document.getElementById("f-copy-join").disabled = !projects.length;
-  document.getElementById("f-copy-join").title = selectedProject ? "复制 " + selectedProject.name + " 接入提示词" : projects.length > 1 ? "请先选择一个工程" : "复制工程接入提示词";
+  document.getElementById("f-copy-join").title = selectedProject ? "复制 " + selectedProject.name + " 接入提示词" : projects.length > 1 ? t("pick_project") : t("join_prompt_btn");
   renderWorkspace(s);
   if (selectedTid && !findTask(selectedTid, selectedPid)) closeDrawer();
 }
@@ -1141,11 +1648,11 @@ document.getElementById("f-copy-join").onclick = async () => {
   const btn = document.getElementById("f-copy-join");
   if (!filters.project && projectOptions.length > 1) {
     document.getElementById("f-project").focus();
-    btn.textContent = "请先选择工程";
-    setTimeout(() => { btn.textContent = "复制工程接入提示词"; }, 2000);
+    btn.textContent = t("pick_project_short");
+    setTimeout(() => { btn.textContent = t("join_prompt_btn"); }, 2000);
     return;
   }
-  await copyText(btn, buildProjectJoinPrompt(filters.project || ""), "已复制提示词");
+  await copyText(btn, buildProjectJoinPrompt(filters.project || ""), t("copied_prompt"));
 };
 document.getElementById("d-close").onclick = closeDrawer;
 document.getElementById("drawer-mask").onclick = closeDrawer;
@@ -1180,7 +1687,7 @@ document.getElementById("columns").addEventListener("click", async e => {
   const btn = e.target.closest("button[data-action]");
   if (btn) {
     const t = findTask(card.dataset.tid, card.dataset.pid);
-    if (t) await copyText(btn, btn.dataset.action === "prompt" ? buildTaskPrompt(t) : "maw task show " + t.id, "已复制");
+    if (t) await copyText(btn, btn.dataset.action === "prompt" ? buildTaskPrompt(t) : "maw task show " + t.id, t("copied"));
   } else openDrawer(card.dataset.tid, card.dataset.pid);
 });
 document.getElementById("columns").addEventListener("keydown", e => {
@@ -1226,16 +1733,16 @@ async function tick() {
     snapshotHealthy = false;
     updateSyncStatus(String(e.message || e));
     if (!lastSnap) {
-      document.getElementById("board-count").textContent = "未能加载任务";
+      document.getElementById("board-count").textContent = t("load_task_fail");
       document.getElementById("next").innerHTML = '<b>OFFLINE</b><span>请确认 maw board --serve 正在运行，然后等待自动重连。</span>';
     }
   }
 }
 function updateSyncStatus(error = "") {
   const subtitle = document.getElementById("subtitle");
-  const label = !snapshotHealthy ? "同步失败" : sseConnected ? "实时" : "3s 同步";
+  const label = !snapshotHealthy ? t("sync_fail") : sseConnected ? t("live") : t("poll");
   subtitle.innerHTML = '<span class="live'+(!snapshotHealthy ? ' err' : '')+'"><span class="dot"></span>'+label+'</span>' + (lastSnap ? '<time>'+esc(fmtTime(lastSnap.updated_at))+'</time>' : '');
-  subtitle.title = error || (sseConnected ? "实时更新已连接，每 3 秒同步兜底" : "每 3 秒同步，实时连接会自动重试");
+  subtitle.title = error || (sseConnected ? t("live_hint") : t("poll_hint"));
 }
 
 async function syncBoard() {
@@ -1262,6 +1769,19 @@ function connectEvents() {
     // EventSource reconnects automatically; the independent polling loop stays active.
   };
 }
+
+
+uiLang = readLang();
+rebuildLocalizedLists();
+document.addEventListener("DOMContentLoaded", () => {
+  applyStaticI18n();
+  const ls = document.getElementById("lang-select");
+  if (ls) {
+    ls.value = uiLang;
+    ls.addEventListener("change", () => setLang(ls.value));
+  }
+  document.documentElement.lang = uiLang === "zh" ? "zh-CN" : "en";
+});
 
 // Bootstrap stays separate so the inline application can be exercised without a server.
 const themeSelect = document.getElementById("theme-select");

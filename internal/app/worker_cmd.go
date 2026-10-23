@@ -8,6 +8,7 @@ import (
 	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/gitops"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/machine"
 	"github.com/kiwh77/maw/internal/schedule"
@@ -65,7 +66,7 @@ func Next(cwd, agentFlag string, dryRun bool) (Result, error) {
 		}
 		ready := schedule.PickNextReadyForShared(tasks, who, shared)
 		if ready == nil {
-			return errx.New("no ready tasks", "run `maw board`；检查 deps/写盘优先级，或 `maw plan apply`")
+			return i18n.E("err.no_ready", "next.board_deps")
 		}
 		if dryRun {
 			task = ready
@@ -107,7 +108,7 @@ func Next(cwd, agentFlag string, dryRun bool) (Result, error) {
 		res := Result{
 			"ok": true, "idempotent": true, "task": task, "agent": who,
 			"project_id": pc.ID(), "worktree": filepath.Join(pc.Repo, task.Worktree),
-			"next": "cd " + filepath.Join(pc.Repo, task.Worktree) + " && continue; maw progress -m '...'; maw submit",
+			"next": i18n.T("next.continue_worktree", filepath.Join(pc.Repo, task.Worktree)),
 		}
 		attachAgentNameMeta(res, who, allocated, nameWarn)
 		return res, nil
@@ -143,7 +144,7 @@ func Next(cwd, agentFlag string, dryRun bool) (Result, error) {
 		"ok": true, "task": task, "worktree": wt, "branch": branch, "agent": who,
 		"project_id": pc.ID(), "registered": true,
 		"env":  map[string]string{"MAW_AGENT": who, "MAW_TASK": task.ID},
-		"next": "已注册为 " + who + "。cd " + wt + " 后执行；里程碑 maw progress，完成 maw submit",
+		"next": i18n.T("next.registered", who, wt),
 	}
 	attachAgentNameMeta(res, who, allocated, nameWarn)
 	return res, nil
@@ -261,7 +262,7 @@ func Unregister(cwd, agentFlag string) (Result, error) {
 		return nil, err
 	}
 	_, _ = refreshBoard(pc)
-	return Result{"ok": true, "agent": who, "status": "offline", "project_id": pc.ID(), "next": "重新加入时 maw register"}, nil
+	return Result{"ok": true, "agent": who, "status": "offline", "project_id": pc.ID(), "next": i18n.T("next.reregister")}, nil
 }
 
 func AgentsList(cwd string) (Result, error) {
@@ -282,7 +283,7 @@ func AgentsList(cwd string) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Result{"ok": true, "agents": agents, "project_id": projectID, "next": "maw board --serve 查看全局看板"}, nil
+	return Result{"ok": true, "agents": agents, "project_id": projectID, "next": i18n.T("next.board_serve")}, nil
 }
 
 func Progress(cwd, message, taskID string) (Result, error) {
@@ -304,7 +305,7 @@ func Progress(cwd, message, taskID string) (Result, error) {
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
 		if err != nil || t == nil {
-			return errx.New("unknown task "+taskID, "maw task list")
+			return i18n.E("err.unknown_task", "next.task_list", taskID)
 		}
 		if err := identity.RequireOwner(who, t); err != nil {
 			return err
@@ -322,7 +323,7 @@ func Progress(cwd, message, taskID string) (Result, error) {
 		return nil, err
 	}
 	_, _ = refreshBoard(pc)
-	return Result{"ok": true, "task_id": taskID, "agent": who, "heartbeat": hb, "project_id": pc.ID(), "next": "继续或 maw submit"}, nil
+	return Result{"ok": true, "task_id": taskID, "agent": who, "heartbeat": hb, "project_id": pc.ID(), "next": i18n.T("next.continue_or_submit")}, nil
 }
 
 func Submit(cwd, taskID string, dryRun bool) (Result, error) {
@@ -355,13 +356,13 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
 		if err != nil || t == nil {
-			return errx.New("unknown task "+taskID, "maw task list")
+			return i18n.E("err.unknown_task", "next.task_list", taskID)
 		}
 		if err := identity.RequireOwner(who, t); err != nil {
 			return err
 		}
 		if t.Status != "in_progress" && t.Status != "self_check" && t.Status != "conflict" {
-			return errx.New("task "+taskID+" status "+t.Status+" cannot submit", "only in_progress tasks can be submitted")
+			return i18n.E("err.cannot_submit", "next.only_in_progress", taskID, t.Status)
 		}
 		fromStatus = t.Status
 		writeScope = t.WriteScope
@@ -421,7 +422,7 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
 		if err != nil || t == nil {
-			return errx.New("unknown task "+taskID, "maw task list")
+			return i18n.E("err.unknown_task", "next.task_list", taskID)
 		}
 		if err := identity.RequireOwner(who, t); err != nil {
 			return err
@@ -490,13 +491,13 @@ func Review(cwd, taskID string, approve bool, message string) (Result, error) {
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
 		if err != nil || t == nil {
-			return errx.New("unknown task "+taskID, "")
+			return i18n.E("err.unknown_task", "", taskID)
 		}
 		if t.Owner == who {
-			return errx.New("author cannot review own task", "use another MAW_AGENT")
+			return i18n.E("err.author_review", "next.other_agent")
 		}
 		if t.Status != "in_review" {
-			return errx.New("task not in_review ("+t.Status+")", "")
+			return i18n.E("err.not_in_review", "", t.Status)
 		}
 		from := t.Status
 		if approve {

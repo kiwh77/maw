@@ -4,142 +4,146 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev/)
 
-**本机多 Agent 任务中枢**（Multi-Agent Workspace）。单二进制 CLI：编排并行开发、跨工程汇聚状态；桌面端（Tauri）复用看板页并用系统托盘通知。
+> Languages: **English** | [简体中文](README.zh-CN.md)
 
-### 适用场景
+**Local multi-agent task hub** (Multi-Agent Workspace). A single Go CLI binary to orchestrate parallel development and aggregate status across projects; the desktop app (Tauri) reuses the board page with system-tray notifications.
 
-1. **多 Agent 并行领题执行** — 规划好任务清单后，在多个 Agent 会话中分别领取并落地；兼容 Codex、Cursor、WorkBuddy、Qoder、Trae 等主流客户端。
-2. **本机 Agent 任务看板** — 作为本机统一看板，即时查看各 Agent 的领取、进行中与完成状态，跨工程一眼掌握进度。
+### When to use it
 
-设计见 [docs/DESIGN.md](docs/DESIGN.md)，路线图见 [docs/ROADMAP.md](docs/ROADMAP.md)。Python 原型保留在 `legacy/python/`。
+1. **Parallel agent execution** — After you plan a task list, claim and land work in multiple agent sessions. Works with Codex, Cursor, WorkBuddy, Qoder, Trae, and similar clients.
+2. **Local agent task board** — One board for claim / in-progress / done across repos.
 
-## 能力概览
+Design: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md). Python prototype: `legacy/python/`.
 
-| 能力 | 状态 |
+## Capabilities
+
+| Capability | Status |
 | --- | --- |
-| 蓝图拆题、持久 worktree、领取 / 提交 / 合并、写盘范围检查 | 已交付 |
-| 全局状态库 + 跨工程看板（`maw board` / `maw serve`） | 已交付 |
-| 跨工程 Agent 状态注入（`maw status report` / `POST /api/status`） | 已交付 |
-| 富事件流（`/api/feed`、SSE `event` 帧） | 已交付 |
-| Tauri 桌面壳 + 托盘通知 | [进行中](clients/desktop/README.md) |
+| Blueprint tasks, persistent worktrees, claim / submit / merge, write-scope checks | Shipped |
+| Global DB + cross-project board (`maw board` / `maw serve`) | Shipped |
+| Cross-project status inject (`maw status report` / `POST /api/status`) | Shipped |
+| Rich event feed (`/api/feed`, SSE `event` frames) | Shipped |
+| Tauri desktop shell + tray notifications | [In progress](clients/desktop/README.md) |
+| English / Chinese docs, board UI, CLI, protocol, skills | Shipped |
 
-## 安装
+## Install
 
-### 预编译包（推荐）
+### Prebuilt binaries (recommended)
 
-从 [Releases](https://github.com/kiwh77/maw/releases) 下载对应平台的 `maw_*` 压缩包，解压后放到 `PATH` 即可：
+Download a `maw_*` archive from [Releases](https://github.com/kiwh77/maw/releases), unpack, and put it on your `PATH`:
 
 ```bash
-# 示例：macOS Apple Silicon
+# Example: macOS Apple Silicon
 tar -xzf maw_0.4.0_darwin_arm64.tar.gz
 install -m 755 maw_0.4.0_darwin_arm64 ~/.local/bin/maw
 maw --version
 ```
 
-校验：同目录下载 `checksums.txt`，用 `sha256sum -c`（或 `shasum -a 256 -c`）核对。
+Verify with `checksums.txt` and `sha256sum -c` (or `shasum -a 256 -c`).
 
-### 从源码安装
+### From source
 
-需要 **Go 1.26+**（与 `go.mod` 一致）：
+Requires **Go 1.26+** (see `go.mod`):
 
 ```bash
 git clone https://github.com/kiwh77/maw.git
 cd maw
 ./install.sh
-# 安装到 ~/.local/bin/maw（CGO_ENABLED=0）
+# Installs to ~/.local/bin/maw (CGO_ENABLED=0)
 maw --version   # 0.4.0+
 ```
 
-或：
+Or:
 
 ```bash
 go install github.com/kiwh77/maw/cmd/maw@latest
 ```
 
-手动构建：
+Manual build:
 
 ```bash
 CGO_ENABLED=0 go build -o maw ./cmd/maw
 ```
 
-## 多工程与全局看板
+## Multi-project & global board
 
-- **状态库**：`~/.maw/maw.db`（可用 `MAW_GLOBAL` 覆盖目录）
-- **工程本地**：各仓库 `.multiagent/` 只存 `config.toml` / `blueprint.toml` / hooks 相关
-- **接入**：在任意仓库 `maw init` 即登记到全局库；旧版 `.multiagent/maw.db` 会自动迁移一次
-- **看板**：`maw board --serve` 为全系统视图，可按工程 / Agent / 状态筛选；深浅主题、SSE 实时更新（[设计体系](docs/BOARD_DESIGN.md)）
-- **优先级与一次压入（0.3.1）**：`write_scope` 允许重叠；激活/领取按 `priority` → `merge_order` → `id`，并尊重 `deps`
-- **增量压入（0.3.2）**：`maw plan apply` 默认保留已完成/进行中任务；清空历史用 `--reset`
-- **上下文亲和（0.3.5）**：同一 Agent 连续 `maw next` 时优先同链/同模块 ready
-- **派活不卡槽（0.3.6）**：`maw next` 不受 `max_parallel` 限制；写盘重叠仍串行
-- **统一 Agent 名（0.3.8）**：`{应用}-{工程}-{序号}`（例 `cursor-demo-1`）；可用 `MAW_APP` 覆盖
-- **每 Agent 持久 worktree（0.4.0）**：`.worktrees/{agent}` 跨题复用；残留用 `maw prune`
+- **State DB**: `~/.maw/maw.db` (override with `MAW_GLOBAL`)
+- **Per repo**: `.multiagent/` holds `config.toml` / `blueprint.toml` / hooks only
+- **Onboard**: `maw init` registers the repo; legacy `.multiagent/maw.db` migrates once
+- **Board**: `maw board --serve` is the system-wide view with project / Agent / status filters; light/dark themes and SSE ([design](docs/BOARD_DESIGN.md)). Switch UI language in the page (中 / EN).
+- **Locale**: `MAW_LANG=en|zh` (else `LANG` / `LC_*`, default **en**) for CLI, terminal board, and protocol text injected by `maw init`
+- **Priority & one-shot apply (0.3.1)**: overlapping `write_scope` allowed; activate/claim by `priority` → `merge_order` → `id`, respecting `deps`
+- **Incremental apply (0.3.2)**: `maw plan apply` keeps done/in-progress; use `--reset` to wipe
+- **Context affinity (0.3.5)**: repeated `maw next` prefers same chain/module
+- **No parallel slot block (0.3.6)**: `maw next` ignores `max_parallel`; write-scope overlap still serializes
+- **Unified agent names (0.3.8)**: `{app}-{project}-{n}` (e.g. `cursor-demo-1`); override with `MAW_APP`
+- **Persistent worktree per agent (0.4.0)**: `.worktrees/{agent}` reused across tasks; prune leftovers with `maw prune`
 
-蓝图规范：[docs/TASK-SPEC.md](docs/TASK-SPEC.md)，示例：[templates/blueprint.example.toml](templates/blueprint.example.toml)。  
-Agent Skills（Cursor 等）：[skills/](skills/README.md)（`maw` / `maw-init` / `maw-task-list` / `maw-plan-push` / `maw-task-pull`）。
+Blueprint spec: [docs/TASK-SPEC.md](docs/TASK-SPEC.md). Example: [templates/blueprint.example.toml](templates/blueprint.example.toml).  
+Agent Skills: [skills/](skills/README.md) (`maw` / `maw-init` / `maw-task-list` / `maw-plan-push` / `maw-task-pull`).
 
 ```bash
-maw serve                  # 推荐：本机中枢（等同 board --serve）
-maw board --serve          # 默认 http://127.0.0.1:7420/
-maw status report -m "实现中" --phase code --pct 40
-# 或：curl -sX POST http://127.0.0.1:7420/api/status -d '{"actor":"cursor-demo-1","message":"hi"}'
+maw serve                  # recommended local hub (= board --serve)
+maw board --serve          # default http://127.0.0.1:7420/
+maw status report -m "coding" --phase code --pct 40
+# or: curl -sX POST http://127.0.0.1:7420/api/status -d '{"actor":"cursor-demo-1","message":"hi"}'
 ```
 
-![maw board --serve 全局任务看板](docs/images/board-serve.png)
+![maw board --serve global task board](docs/images/board-serve.png)
 
-## 快速上手
+## Quick start
 
 ```bash
 cd /path/to/your-git-repo
 maw init
-# 编辑 .multiagent/blueprint.toml 后：
+# Edit .multiagent/blueprint.toml then:
 maw plan apply .multiagent/blueprint.toml --yes
 
-maw register          # 如 cursor-demo-1
-# 或：export MAW_AGENT=cursor-demo-1
+maw register          # e.g. cursor-demo-1
+# or: export MAW_AGENT=cursor-demo-1
 maw next
-# 进入输出的 worktree，改 write_scope 内文件并 commit
-maw progress -m "里程碑"
+# Enter the printed worktree, edit write_scope files, commit
+maw progress -m "milestone"
 maw submit
 maw merge --yes
-maw next              # 仍有 ready 则继续
+maw next              # continue if ready tasks remain
 
 maw board --serve     # http://127.0.0.1:7420/
 ```
 
-## 命令
+## Commands
 
-| 命令 | 说明 |
+| Command | Description |
 | --- | --- |
-| `maw init` | 登记工程到全局库；写入多 Agent 协议规则 |
-| `maw plan apply / check` | 蓝图校验与落盘 |
-| `maw next` | 领取任务 + 复用/创建持久 worktree |
-| `maw submit` | 范围检查 → 合并队列 |
-| `maw merge --yes` | 串行合入；保留 worktree、删题分支 |
-| `maw prune` | 清理残留（默认预览，`--yes` 删除） |
-| `maw board` | 终端摘要 + HTML |
-| `maw board --serve` / `maw serve` | 本机中枢（看板 + 状态注入 + SSE） |
-| `maw status report` | 向中枢注入进度/心跳 |
+| `maw init` | Register project; install multi-agent protocol rules |
+| `maw plan apply / check` | Validate and apply blueprints |
+| `maw next` | Claim a task + reuse/create persistent worktree |
+| `maw submit` | Scope check → merge queue |
+| `maw merge --yes` | Serial merge; keep worktree, delete task branch |
+| `maw prune` | Clean leftovers (preview; `--yes` deletes) |
+| `maw board` | Terminal summary + HTML |
+| `maw board --serve` / `maw serve` | Local hub (board + status + SSE) |
+| `maw status report` | Inject progress/heartbeat into the hub |
 
-附属：`register`、`agents`、`progress`、`doctor`、`review`、`block`、`task`、`hook`。全局：`--json`、`--dry-run`、`-C`。
+Also: `register`, `agents`, `progress`, `doctor`, `review`, `block`, `task`, `hook`. Global flags: `--json`, `--dry-run`, `-C`.
 
-桌面端（Tauri，复用看板页）：见 [clients/desktop/](clients/desktop/README.md)。
+Desktop (Tauri, reuses board page): [clients/desktop/](clients/desktop/README.md).
 
-## 测试
+## Tests
 
 ```bash
 CGO_ENABLED=0 go test ./...
 ```
 
-## 贡献与安全
+## Contributing & security
 
-见 [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md)、[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。变更记录：[CHANGELOG.md](CHANGELOG.md)。
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Changelog: [CHANGELOG.md](CHANGELOG.md).
 
-## 技术栈
+## Stack
 
 - Go + [cobra](https://github.com/spf13/cobra)
-- 纯 Go SQLite：[modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)（无 CGO）
-- TOML：pelletier/go-toml
+- Pure Go SQLite: [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) (no CGO)
+- TOML: pelletier/go-toml
 
 ## License
 

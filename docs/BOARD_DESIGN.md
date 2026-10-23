@@ -1,79 +1,71 @@
-# Board 设计体系：Workbench
+# Board design system: Workbench
 
-Board 是只读的多工程 Agent 调度工作台。首屏需要回答：任务在哪里、谁在执行、哪里需要介入、接下来做什么。
+> Languages: **English** | [简体中文](zh/BOARD_DESIGN.md)
 
-## 现状分析
+The board is a read-only multi-project agent scheduling workbench. The first screen must answer: where are the tasks, who is running them, what needs attention, and what to do next.
 
-原页面逐项展开十种任务状态，空列与有效任务占用相同宽度，主流程与已完成任务经常处于横向视口之外。顶部把下一步、风险、筛选、Agent 与统计放在相近权重的容器中，缺少稳定的阅读顺序。任务标题紧接工程标签和编号，换行后难以快速识别；复制操作也与信息正文竞争注意力。
+## Status quo
 
-## 设计方向
+The old page expanded all ten task statuses; empty columns shared width with live work, so the main flow and done work often sat outside the horizontal viewport. Next steps, risks, filters, agents, and stats shared similar visual weight without a stable reading order. Titles sat next to project tags and IDs, wrapping poorly; copy actions competed with body text.
 
-视觉命题：像开发工具一样平静、准确，用石墨灰表面、细分隔线和信号绿建立可持续工作的操作环境。
+## Design direction
 
-内容结构：工程与 Agent 侧栏 → 工作空间定位 → 当前筛选统计 → 筛选和搜索 → 任务流程 → 调度建议；任务细节按需在右侧抽屉展开。侧栏 Agent 只展示执行中（不展示 idle / offline）；小屏隐藏侧栏，工程仍可由筛选器选择。
+Visual thesis: calm and precise like a developer tool—graphite surfaces, fine dividers, signal green for sustained work.
 
-交互命题：轻量入场建立层级；卡片悬停明确可打开；详情抽屉短距离平滑展开。减少动态效果偏好下关闭所有过渡与动画。
+Content structure: project & Agent sidebar → workspace location → filtered stats → filters & search → task flow → scheduling hints; details open in a right drawer. Sidebar Agents show only working (not idle/offline). On small screens the sidebar hides; projects remain selectable via filters.
 
-## 视觉基准
+Interaction thesis: light entrance for hierarchy; hover shows cards are openable; drawer expands a short distance. Respect reduced-motion by disabling transitions.
 
-所有 token 定义于 `internal/board/page.html` 的 `:root`，无字体、图标库或 CDN 依赖。深浅主题共享语义 token 和组件结构，避免组件内写死颜色。
+## Visual tokens
 
-| Token | 深色 | 浅色 | 用途 |
+All tokens live in `internal/board/page.html` `:root`—no font/icon CDN. Light and dark share semantic tokens and structure.
+
+| Token | Dark | Light | Use |
 | --- | --- | --- | --- |
-| `--bg` | `#141618` | `#f7f8f9` | 主工作区 |
-| `--panel` | `#191c1f` | `#eef1f3` | 侧栏、筛选、抽屉 |
-| `--card` | `#202427` | `#ffffff` | 可打开的任务对象 |
-| `--line` | `#2d3338` | `#dce1e5` | 区域分隔、卡片边界 |
-| `--text` | `#e6eaed` | `#20282f` | 标题、正文 |
-| `--muted` | `#9ba5ad` | `#5b6871` | 标签、辅助信息 |
-| `--accent` | `#9cdbb0` | `#267044` | 接入操作、选中、进度、执行列 |
-| `--warn` | `#e5bc78` | `#8a601f` | 执行状态、需关注项 |
-| `--danger` | `#ed9797` | `#b53e45` | 阻塞、冲突、同步失败 |
-| `--radius` | `6px` | `6px` | 表单、任务对象 |
+| `--bg` | `#141618` | `#f7f8f9` | Main workspace |
+| `--panel` | `#191c1f` | `#eef1f3` | Sidebar, filters, drawer |
+| `--card` | `#202427` | `#ffffff` | Openable task objects |
+| `--line` | `#2d3338` | `#dce1e5` | Separators, card edges |
+| `--text` | `#e6eaed` | `#20282f` | Titles, body |
+| `--muted` | `#9ba5ad` | `#5b6871` | Labels, secondary |
+| `--accent` | `#9cdbb0` | `#267044` | Join actions, selection, progress |
+| `--warn` | `#e5bc78` | `#8a601f` | Attention states |
+| `--danger` | `#ed9797` | `#b53e45` | Blocked, conflict, sync failure |
+| `--radius` | `6px` | `6px` | Forms, tasks |
 
-主题默认「跟随系统」，通过 `prefers-color-scheme` 随系统外观即时变化。右上角支持「跟随系统 / 浅色 / 深色」，手动选择保存到本地浏览器；初始化脚本在首帧前应用偏好。存储被禁用时仍可切换，本次选择在刷新后回到跟随系统。原生表单、滚动条、选区、悬停、按钮文字和遮罩也使用对应主题。浅色以纸白背景、白色任务对象、墨绿强调延续工程工具气质。
+Theme defaults to system (`prefers-color-scheme`). Top-right supports System / Light / Dark; choice persists in localStorage. Body copy uses system sans; IDs, paths, and commands use monospace. UI language (en/zh) is switchable and stored as `maw-board-lang`.
 
-中文正文使用系统无衬线；数字、任务 ID、Agent 名、路径和命令使用系统等宽字体。字号层级：页面标题 22px，统计数字 18px，任务标题 12px，正文 13px，辅助标签 10–11px。桌面内容边距 28px，小屏 16px；统计区保持紧凑单行（隐藏说明文案），优先留给任务流程可视高度；任务间距 8px。
+## Status lanes
 
-使用平面布局与细线建立层级；任务卡片是可交互的任务对象，统计区不使用独立卡片。颜色须配合文字状态，禁止只依赖颜色传达含义。优先级直接展示真实数值 `P{priority}`，不重映射高低等级。
-
-## 状态与任务流
-
-| 阶段 | 精确状态 |
+| Stage | Exact statuses |
 | --- | --- |
-| 待处理 | backlog、ready |
-| 执行中 | claimed、in_progress、self_check |
-| 评审与合并 | in_review、merging |
-| 需处理 | conflict、blocked |
-| 已结束 | done、cancelled |
+| Queued | backlog, ready |
+| Running | claimed, in_progress, self_check |
+| Review & merge | in_review, merging |
+| Needs attention | conflict, blocked |
+| Finished | done, cancelled |
 
-卡片保留精确状态标签，筛选仍支持每一种状态。无异常时隐藏“需处理”列；新增的未知状态单独展示，避免漏任务。任务沿用 API 调度顺序。各列独立纵向滚动，宽度不足时仅流程区域横向滚动。
+Cards keep exact status labels; filters support every status. Hide the attention lane when empty. Unknown statuses get their own column. Columns scroll independently; only the flow area scrolls horizontally when narrow.
 
-统计跟随工程 / Agent / 状态筛选；搜索只影响任务展示，在结果数量中说明匹配数，不改变统计口径。异常数同时包含阻塞与合并冲突。无数据、无搜索结果、无日志和断线分别给出状态文案。
+## Views
 
-## 视图
+Workspace toggles **Board** vs **Dependency topology** (`maw-board-view`). Topology is a per-project DAG. Filters and search apply to both; clicking a node opens the drawer.
 
-工作区支持「看板」与「依赖拓扑」切换，选择保存在本地浏览器（`maw-board-view`）。看板按状态泳道展示流转；拓扑按工程分层绘制 DAG（前置任务在左、依赖方在右），节点展示编号、标题、状态、负责人、优先级与出入度，虚线边表示当前筛选外的依赖。筛选与搜索同时作用于两种视图；点击节点同样打开详情抽屉。
+## Interaction
 
-## 交互约定
+- Filters apply immediately; reset also clears search; `/` focuses search.
+- Project nav syncs with the project select; selection writes URL `#projectId`.
+- Cards open with click / Enter / Space; copy controls have accessible names.
+- Drawer traps focus; Escape / close / mask dismiss it.
+- SSE plus 3s polling; identical task content does not rebuild lists.
+- Sync failure keeps last good data and shows failure status.
 
-- 筛选即时生效，重置同时清空搜索；`/` 聚焦搜索框。
-- 工程导航与工程下拉框同步；选中工程写入 URL `#工程ID`（`history.replaceState`），刷新后恢复；选「全部工程」或重置时清除锚点。多个工程时要求先选工程再复制接入提示词，避免默认接入错误工程。
-- 卡片可点击，键盘 Enter / Space 可打开详情。复制按钮独立操作，具有明确的辅助技术名称。
-- 详情抽屉限制背景交互与焦点范围；Escape、关闭按钮和遮罩均可关闭，关闭后恢复任务焦点。
-- SSE 通知与三秒轮询并行工作。相同任务内容不重建列表；数据更新保留列滚动与任务焦点。详情随同步刷新，使用工程 + 任务 ID 标识，丢弃过期请求。
-- 同步失败保留最近一次有效数据并显示失败状态；首次加载失败给出启动服务的提示，继续自动重试。
+## Live notifications
 
-## 实时通知
+`GET /api/events` is `text/event-stream`: `ready` on connect, `board-changed` on data change, comment heartbeats every 15s. Suggested reconnect 3s. Clients refetch snapshots; they do not replay history.
 
-`GET /api/events` 返回 `text/event-stream`。连接建立发送 `ready`，业务数据变化发送 `board-changed`，15 秒发送一次注释心跳，重连间隔建议为 3 秒。事件只传递失效通知，客户端按当时的工程 / Agent / 状态重新获取快照并更新已打开的详情。重连后的 `ready` 会立即补拉当前状态，无需重放历史通知。
+References: [MDN SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events), [prefers-color-scheme](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-color-scheme), [Go ResponseController](https://pkg.go.dev/net/http#ResponseController).
 
-CLI 写入来自多个独立进程，服务端为所有 SSE 订阅者共享一条 500ms 检测循环：读取全局快照与最新事件 ID，对稳定内容计算摘要，忽略生成时间。任务、Agent、工程或纯事件日志变化都会触发通知；最后一个订阅者断开时停止检测。慢客户端最多保留一个待处理通知；网络写入带超时，避免长连接资源泄漏。
+## Verification
 
-浏览器同时保留每 3 秒同步，SSE 断线时自动重连，不支持 SSE 时直接继续轮询。多个实时通知与轮询请求会合并，保证慢请求期间不会无限叠加。顶部「实时」表示推送已连接；「3s 同步」表示依靠轮询；快照获取失败时显示「同步失败」并保留最近有效数据。
-
-实现参考：[MDN SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)、[系统配色偏好](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-color-scheme)、[Go HTTP ResponseController](https://pkg.go.dev/net/http#ResponseController)。
-
-## 验证
-
-前端行为回归：`node --test internal/board/page.test.cjs`。工程验证：`go test ./...` 与 `go build ./cmd/maw`。视觉检查覆盖真实任务数据、任务详情、搜索、筛选、复制、窄屏布局及空数据 / 异常状态。
+Front-end: `node --test internal/board/page.test.cjs`. Project: `go test ./...` and `go build ./cmd/maw`. Visual checks cover real data, detail drawer, search, filters, copy, narrow layout, empty and error states.

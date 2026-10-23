@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use tauri::{
-    image::Image,
+    include_image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent,
@@ -15,6 +15,27 @@ use tauri::{
 const HUB: &str = "http://127.0.0.1:7420";
 
 struct HubChild(Mutex<Option<Child>>);
+
+fn ui_lang_zh() -> bool {
+    for key in ["MAW_LANG", "LC_ALL", "LC_MESSAGES", "LANG"] {
+        if let Ok(v) = std::env::var(key) {
+            let t = v.trim().to_ascii_lowercase();
+            if t.is_empty() || t == "c" || t == "posix" {
+                continue;
+            }
+            return t.starts_with("zh");
+        }
+    }
+    false
+}
+
+fn tray_labels() -> (&'static str, &'static str) {
+    if ui_lang_zh() {
+        ("显示看板", "退出")
+    } else {
+        ("Show board", "Quit")
+    }
+}
 
 fn hub_ready() -> bool {
     let Ok(resp) = ureq_get(&format!("{HUB}/api/board")) else {
@@ -72,16 +93,14 @@ fn main() {
         .setup(|app| {
             ensure_hub(app.state::<HubChild>().inner());
 
-            let show = MenuItem::with_id(app, "show", "显示看板", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let (show_label, quit_label) = tray_labels();
+            let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
             // Color tray mark; macOS template variants live beside it as tray-template*.png.
-            let tray_icon =
-                Image::from_bytes(include_bytes!("../icons/tray-color.png")).expect("tray icon");
-
             let _tray = TrayIconBuilder::new()
-                .icon(tray_icon)
+                .icon(include_image!("icons/tray-color.png"))
                 .menu(&menu)
                 .tooltip("maw")
                 .on_menu_event(|app, event| match event.id.as_ref() {

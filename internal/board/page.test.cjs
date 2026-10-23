@@ -10,13 +10,25 @@ function app() {
   const theme = html.match(/<script id="theme-init">([\s\S]*?)<\/script>/)[1];
   const elements = new Map();
   const document = {
+    documentElement: { lang: 'en' },
+    title: '',
     getElementById(id) {
-      if (!elements.has(id)) elements.set(id, { innerHTML: '', value: '', addEventListener() {} });
+      if (!elements.has(id)) elements.set(id, { innerHTML: '', value: '', textContent: '', setAttribute() {}, addEventListener() {}, querySelectorAll() { return []; }, title: '' });
       return elements.get(id);
     },
+    querySelector() { return { textContent: '' }; },
+    querySelectorAll() { return []; },
     addEventListener() {},
   };
-  const context = vm.createContext({ document, URLSearchParams, setTimeout, clearTimeout });
+  const context = vm.createContext({
+    document,
+    location: { search: '' },
+    navigator: { language: 'en-US' },
+    localStorage: { getItem() { return null; }, setItem() {} },
+    URLSearchParams,
+    setTimeout,
+    clearTimeout,
+  });
   vm.runInContext(theme.split('// Theme bootstrap')[0], context);
   vm.runInContext(source.split('// Bootstrap stays separate')[0], context);
   return code => vm.runInContext(code, context);
@@ -222,4 +234,13 @@ test('board view preference defaults to board and persists explicit topology cho
   assert.equal(run('document.getElementById("topology").hidden'), false);
   run('setView("board")');
   assert.equal(run('boardView'), 'board');
+});
+
+test('uiLang switches board column labels between en and zh', () => {
+  const run = app();
+  run('setLang("en")');
+  assert.equal(run('COLUMNS.find(([s]) => s === "ready")[1]'), 'Ready');
+  run('setLang("zh")');
+  assert.equal(run('COLUMNS.find(([s]) => s === "ready")[1]'), '可领取');
+  assert.equal(run('uiLang'), 'zh');
 });
