@@ -1,0 +1,101 @@
+/* 表单 —— 契约 §7。标签 12px/muted 在控件上方；控件高 32px、圆角 6px、panel 底、line 边。 */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--space-block);
+}
+
+.field > label,
+.field-label {
+  font: var(--font-meta)/1.4 var(--sans);
+  color: var(--muted);
+}
+
+.field-hint {
+  font-size: var(--font-body);
+  line-height: var(--line-body);
+  color: var(--muted);
+}
+
+.input,
+.select,
+.textarea {
+  min-height: var(--control-height);
+  padding: 0 10px;
+  font-size: var(--font-body);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--faint);
+}
+
+.textarea {
+  padding: 8px 10px;
+  line-height: var(--line-body);
+  resize: vertical;
+}
+
+.input[aria-invalid="true"],
+.select[aria-invalid="true"],
+.textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field-error {
+  font-size: var(--font-body);
+  color: var(--danger);
+}
+
+/* 只读态用 muted 表达，不以禁用外观冒充只读。 */
+.input[readonly],
+.textarea[readonly] {
+  color: var(--muted);
+  background: transparent;
+}
+
+.button {
+  min-height: var(--control-height);
+  padding: 0 14px;
+  font-size: var(--font-body);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  transition: background var(--dur-interaction) var(--ease),
+              border-color var(--dur-interaction) var(--ease),
+              color var(--dur-interaction) var(--ease);
+}
+
+/* 同一区域只保留一个主操作。 */
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.button--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.button--compact {
+  min-height: var(--control-height-compact);
+}
+
+.button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+/* 提交中禁用重复提交并保留已填值，不使用阻塞式弹窗确认。 */
+.field[data-pending="true"] .button--primary {
+  pointer-events: none;
+  opacity: .55;
+}

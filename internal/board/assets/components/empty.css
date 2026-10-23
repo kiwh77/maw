@@ -1,0 +1,40 @@
+/* 空态 —— 契约 §8。虚线 1px line、圆角 6px、内边距 24px 16px、说明 13px muted。
+ * 不用插画与渐变；错误态例外，文案用 danger 并说明下一步。 */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.empty-state__symbol {
+  font: var(--font-panel) var(--mono);
+  color: var(--faint);
+  line-height: 1;
+}
+
+.empty-state__text {
+  font-size: var(--font-body);
+  line-height: var(--line-body);
+  color: var(--muted);
+  margin: 0;
+  max-width: 42em;
+}
+
+.empty-state__action {
+  min-height: var(--control-height);
+}
+
+.empty-state--error {
+  border-style: solid;
+  border-color: var(--danger);
+}
+
+.empty-state--error .empty-state__text {
+  color: var(--danger);
+}
