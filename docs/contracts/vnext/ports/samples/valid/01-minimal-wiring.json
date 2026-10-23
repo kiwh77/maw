@@ -6,7 +6,9 @@
     {
       "path": "internal/engine/ports",
       "layer": "port",
-      "imports": []
+      "imports": [
+        "internal/engine/model"
+      ]
     },
     {
       "path": "internal/engine/model",

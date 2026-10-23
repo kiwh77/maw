@@ -2,7 +2,7 @@
 
 契约标识：`maw.app.ports/v1`
 上游契约：`maw.task.instance/v1`（`../task/`）、`maw.runtime.state/v1`（`../execution/`）、`maw.delivery.manifest/v1`（`../delivery/`）——本文件只谈「谁通过哪个接口、在哪个事务边界里、能做什么」，三份上游契约的对象定义不在这里重复。
-状态：**冻结**。VN-005 起以它为引用基线；改含义只能出 v2。
+状态：**冻结**。VN-005 起以它为引用基线；改含义只能出 v2。**修订 v1.1（2026-10-23）：只澄清 P121 的判定口径，标识与语义不变，见文末「修订记录」。**
 
 范围：`ClaimExecution`、`Store`、`Probe`／`Launch`／`Decode`／`Interpret`、`ProcessController` 的输入、结果、错误、事务边界与依赖方向。**不实现端口、不建包、不引微服务或外部消息队列。**
 
@@ -22,23 +22,23 @@
 | 层 | 职责 | 目录（本卡只登记，不创建） |
 | --- | --- | --- |
 | `app`（用例） | 编排端口、持有事务、决定业务状态 | `internal/engine/claim`、`internal/engine/dispatch`、`internal/engine/reconcile`、`internal/runner`、`internal/app` |
-| `port`（接口） | 只有类型与接口声明，零依赖 | `internal/engine/ports` |
+| `port`（接口） | 只有类型与接口声明；可引用**同层值对象**（`internal/engine/model`），不 import 实现 | `internal/engine/ports`、`internal/engine/model` |
 | `adapter`（来源适配） | 把厂商 CLI 翻译成端口语义 | `internal/adapters/codebuddy`、`internal/adapters/workbuddy`、`internal/adapters/trae`、`internal/adapters/zcode` |
 | `infra`（基础设施） | 存储、git、进程、时钟 | `internal/db`、`internal/gitops`、`internal/runner/process` |
 
 允许的依赖（只准向下，`→` 表示「可以 import」）：
 
 ```text
-app     → port, infra
-adapter → port
+app     → port, model, infra
+adapter → port, model
 infra   → port（只为实现接口）
-port    → （无）
+port    → model（仅同层值对象；不 import app／adapter／infra）
 ```
 
 **禁止的边（P120／P121）**：
 
 - `adapter` 不得 import `app`、`infra`、`schedule`、`machine`——接入器不认识业务状态机，也不认识数据库。
-- `port` 不得 import 任何实现包，包括 `internal/db`；端口包里出现 `*sql.Tx` 就是泄漏。
+- `port` 不得 import 任何**实现**（`app`／`adapter`／`infra` 三层），包括 `internal/db`；端口包里出现 `*sql.Tx` 就是泄漏。同层的值对象模块（`internal/engine/model`）不算实现：接口签名必须用契约定义的身份与状态，不允许在端口包里另抄一套字符串常量。
 - `infra` 不得 import `app`：`internal/db` 不知道「领取」是什么意思，只提供事务与行读写。
 
 这条边界直接对应验收第二条：**接入器不允许直接写业务任务状态**（P130）。接入器的产出只能是「端口结果」，落库由 `app` 层在事务里完成。
@@ -187,7 +187,7 @@ VN-301 的实测证据就落在这里：同一版本下退出码 0 可能是认�
 | P112 | `bindings` | 同一端口不得重复绑定 |
 | P113 | `bindings` | 七个端口必须全部有绑定，声明了不接线等于没有边界 |
 | P120 | 模块依赖 | adapter 不得 import app／infra／schedule／machine |
-| P121 | 模块依赖 | port 层不得 import 任何模块 |
+| P121 | 模块依赖 | port 层不得 import 实现（app／adapter／infra）；同层值对象（model）允许 |
 | P122 | 模块依赖 | 被 import 的模块必须在 `modules` 中声明 |
 | P123 | 模块依赖 | 依赖图不得成环 |
 | P130 | 适配器副作用 | 接入器不得产生 `task_status_write` |
@@ -205,14 +205,14 @@ VN-301 的实测证据就落在这里：同一版本下退出码 0 可能是认�
 
 | 文件 | 覆盖现场 |
 | --- | --- |
-| `01-minimal-wiring.json` | 七个端口全绑定、四层依赖单向、无环的最小装配 |
+| `01-minimal-wiring.json` | 七个端口全绑定、四层依赖单向、无环的最小装配；port → model 的同层引用是合法边 |
 | `02-claim-in-tx.json` | 领取在事务内只写库与事件；worktree 与卡片在事务外 |
-| `03-adapter-isolated.json` | 接入器只依赖 port／model，四个协议端口全绑 2.173.0 并挂证据 |
+| `03-adapter-isolated.json` | 接入器只依赖 port／model，四个协议端口全绑 2.173.0 并挂证据（ports 显式 import model） |
 | `04-process-outside-tx.json` | 启动与停止在事务外，`stop_unconfirmed` 保持占用 |
 | `05-multi-adapter.json` | 两个接入器各自绑版本，能力不互相继承 |
 | `06-unknown-retained.json` | 未知协议记录只留原始引用，结果标 unknown 且不产生 done |
 
-反例（`samples/invalid/`，每个用 `expect_error` 声明应触发的码）：未知端口、重复绑定、缺绑定、适配器依赖 db、端口依赖实现、import 未声明模块、依赖成环、适配器写任务状态、调用无错误集、事务内跑 git、事务外写状态、领取缺幂等键、适配器无版本、退出码当成功、未知当成功、非法层。
+反例（`samples/invalid/`，每个用 `expect_error` 声明应触发的码）：未知端口、重复绑定、缺绑定、适配器依赖 db、端口依赖实现（adapter 与 infra 两个方向各一个）、import 未声明模块、依赖成环、适配器写任务状态、调用无错误集、事务内跑 git、事务外写状态、领取缺幂等键、适配器无版本、退出码当成功、未知当成功、非法层。
 
 验证命令（本卡 Verify）：
 
@@ -226,3 +226,19 @@ python3 -m unittest discover -s docs/contracts/vnext/ports -p 'test_*.py'
 - 不定义 HTTP 入口与本机授权（VN-005）、节点登记（VN-302）、启动规格（VN-303）、事件解析（VN-304）。
 - 不引入微服务、消息队列或跨进程 RPC：所有端口都是同进程内的 Go 接口。
 - 不规定重试次数、超时数值与日志格式。
+
+## 修订记录
+
+### v1.1 · 2026-10-23 · P121 口径澄清（标识不变，语义不变）
+
+**问题**：P121 原文写作「port 层不得 import 任何模块」，机检实现为「`layer == "port"` 且 `imports` 非空即违规」。但同一节又写「端口层不得 import 任何**实现包**」——两句在 Go 里必然冲突：端口接口要引用契约定义的 `InstanceID`、`RunPhase`、`Run` 等值对象，而值对象只能定义在某个包里（`internal/engine/model`）。按原机检口径，任何真实实现都会违反 P121；按原文口径，引用同层值对象并不算 import 实现。
+
+**决定**：把机检口径对齐正文——**P121 判定的是跨层依赖，不是「有没有 import」**：
+
+- `port` 模块可以 import 另一个 `port` 层模块（值对象、接口声明）；
+- `port` 模块 import `app`／`adapter`／`infra` 任一层的模块 → P121；
+- 反向（`adapter` → `app`／`infra`）仍由 P120 拦住，成环仍由 P123 拦住。
+
+**影响**：接线快照（`internal/engine/ports` + `internal/engine/model`）从「必须两条 `imports: []`」改为「ports 可声明 `imports: ["internal/engine/model"]`」。正例 `01`／`03` 显式写出这条边；反例 `05`（port → adapter）与新增 `19`（port → infra）两条方向都有背书。
+
+**不影响的**：端口签名仍不得出现 `*sql.Tx`、HTTP 类型、厂商进程句柄；接口集合、七个端口、错误集、事务边界判定全部不变。`CONTRACT_ID` 保持 `maw.app.ports/v1`，不需要 v2。

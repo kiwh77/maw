@@ -174,6 +174,8 @@ func ValidateCatalog() []*model.Error {
 
 // portForbiddenImports 是端口层绝不允许出现的依赖：
 // 传输（HTTP）、存储（SQLite/sql）、进程创建（os/exec）与一切 maw 实现包。
+// 判定口径与 ports_contract.py 的 P121 一致：禁的是**跨层**依赖（app／adapter／infra），
+// 同层值对象（internal/engine/model）不在其中。
 var portForbiddenImports = []string{
 	"net/http",
 	"net",

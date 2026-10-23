@@ -103,7 +103,7 @@ RULES = {
     "P112": "同一端口重复绑定",
     "P113": "端口声明了却没有绑定实现",
     "P120": "适配器反向依赖业务或基础设施",
-    "P121": "端口层依赖了实现",
+    "P121": "端口层依赖了实现（app/adapter/infra）",
     "P122": "import 了未声明的模块",
     "P123": "模块依赖成环",
     "P130": "接入器直接写业务任务状态",
@@ -196,17 +196,25 @@ def _check_modules(doc: dict, out: list) -> dict:
 
 
 def _check_import_edges(doc: dict, by_path: dict, out: list) -> None:
-    """依赖方向、未声明模块、环。"""
+    """依赖方向、未声明模块、环。
+
+    P121 判定的是**跨层**依赖：port 层可以引用同层的值对象模块（接口签名必须用
+    契约定义的身份与状态，不允许在端口包里另抄一套），但不得引用实现层
+    （app／adapter／infra）。见正文「修订记录 v1.1」。
+    """
     declared = set(by_path)
     for mod in by_path.values():
         mod_path = mod.get("path")
         layer = mod.get("layer")
         imports = [i for i in (mod.get("imports") or []) if isinstance(i, str)]
-        if layer == "port" and imports:
-            _add(out, "P121", f"module:{mod_path}", "端口层不得 import 任何实现")
         for target in imports:
             if target not in declared:
                 _add(out, "P122", f"module:{mod_path}", f"import {target!r} 未在 modules 中声明")
+                continue
+            target_layer = by_path[target].get("layer") or ""
+            if layer == "port" and target_layer != "port":
+                _add(out, "P121", f"module:{mod_path}",
+                     f"端口层不得 import 实现：{target!r} 属于 {target_layer or '未声明'} 层")
             if layer == "adapter" and target.startswith(ADAPTER_FORBIDDEN_IMPORTS):
                 _add(out, "P120", f"module:{mod_path}",
                      f"适配器不得依赖 {target!r}（只能依赖 port 与 model）")
