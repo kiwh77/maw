@@ -50,3 +50,38 @@ func inspectProcess(pid int) (procInfo, error) {
 	}
 	return procInfo{Start: start}, nil
 }
+
+// prepareCommand 让子进程独立成组，停止时可以按组确认后代。
+func prepareCommand(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
+
+// signalGroup 向进程组发信号；组已不存在时视为成功。
+func signalGroup(pgid int, force bool) error {
+	if pgid <= 0 {
+		return fmt.Errorf("%w: 缺少进程组号", ErrInvalidIdentity)
+	}
+	sig := syscall.SIGTERM
+	if force {
+		sig = syscall.SIGKILL
+	}
+	if err := syscall.Kill(-pgid, sig); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		return fmt.Errorf("process: 向进程组 %d 发送信号: %w", pgid, err)
+	}
+	return nil
+}
+
+// groupAlive 判断进程组是否仍有存活成员；无权限时按仍存在处理，不猜已停止。
+func groupAlive(pgid int) bool {
+	if pgid <= 0 {
+		return false
+	}
+	err := syscall.Kill(-pgid, 0)
+	if err == nil || errors.Is(err, syscall.EPERM) {
+		return true
+	}
+	return false
+}

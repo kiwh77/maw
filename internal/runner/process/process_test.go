@@ -35,8 +35,7 @@ func startSleep(t *testing.T, nonce string) *Process {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = p.cmd.Process.Kill()
-		_, _ = p.cmd.Process.Wait()
+		_, _ = p.Stop(StopCancel)
 	})
 	return p
 }
@@ -50,6 +49,9 @@ func TestStartCaptureAndVerifyIdentity(t *testing.T) {
 
 	if p.Identity.RunID != "run_test" || p.Identity.PID <= 0 || p.Identity.Nonce != nonce {
 		t.Fatalf("捕获身份 = %+v", p.Identity)
+	}
+	if p.Identity.PGID != p.Identity.PID {
+		t.Fatalf("子进程应独立成组: %+v", p.Identity)
 	}
 	if err := Verify(p.Identity, nonce); err != nil {
 		t.Fatalf("Verify: %v", err)
@@ -130,8 +132,7 @@ func TestStartUsesArgvAndFixedWorkingDirectory(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	defer func() {
-		_ = p.cmd.Process.Kill()
-		_, _ = p.cmd.Process.Wait()
+		_, _ = p.Stop(StopCancel)
 	}()
 
 	marker := filepath.Join(dir, "marker.txt")
@@ -171,6 +172,181 @@ func TestStartRejectsInvalidSpec(t *testing.T) {
 	}
 }
 
+func TestStopRecordsCancelEvidence(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("仅 macOS 实现进程停止")
+	}
+	p := startSleep(t, newNonce(t))
+	ev, err := p.Stop(StopCancel)
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if ev.Outcome != OutcomeStopped || ev.Reason != StopCancel {
+		t.Fatalf("取消证据 = %+v", ev)
+	}
+	if !ev.Exited || !ev.GroupEmpty || !ev.DescendantsConfirmed || !ev.Reusable() {
+		t.Fatalf("应确认整组停止: %+v", ev)
+	}
+	if ev.Signal != "term" || ev.Escalated {
+		t.Fatalf("常规取消不应升级: %+v", ev)
+	}
+
+	again, err := p.Stop(StopCancel)
+	if err != nil {
+		t.Fatalf("重复 Stop: %v", err)
+	}
+	if again.Recorded != ev.Recorded {
+		t.Fatalf("重复 Stop 应返回同一份证据: %+v vs %+v", again, ev)
+	}
+}
+
+func TestStopEscalatesWhenTermIgnored(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("仅 macOS 实现进程停止")
+	}
+	p, err := Start(StartSpec{
+		RunID: "run_stubborn",
+		Argv:  []string{"/bin/sh", "-c", `trap "" TERM; sleep 30 & wait`},
+		Dir:   t.TempDir(),
+		Nonce: newNonce(t),
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		_, _ = p.Stop(StopCancel)
+	}()
+
+	ev, err := p.Stop(StopTimeout)
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if !ev.Escalated || ev.Signal != "kill" {
+		t.Fatalf("TERM 无效时应升级 KILL: %+v", ev)
+	}
+	if ev.Reason != StopTimeout || ev.Outcome != OutcomeStopped || !ev.Reusable() {
+		t.Fatalf("超时证据 = %+v", ev)
+	}
+}
+
+func TestStopRecordsAlreadyExited(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("仅 macOS 实现进程停止")
+	}
+	p, err := Start(StartSpec{
+		RunID: "run_done",
+		Argv:  []string{"/bin/sh", "-c", "exit 3"},
+		Dir:   t.TempDir(),
+		Nonce: newNonce(t),
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	_ = p.Wait()
+
+	ev, err := p.Stop(StopDone)
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if ev.Outcome != OutcomeExited || !ev.Exited || ev.ExitCode != 3 {
+		t.Fatalf("已完成证据 = %+v", ev)
+	}
+	if ev.Signal != "" || !ev.DescendantsConfirmed || !ev.Reusable() {
+		t.Fatalf("已完成且组已清空应可复用: %+v", ev)
+	}
+}
+
+func TestRecoverRunningRunIsUnknown(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("仅 macOS 实现进程恢复核对")
+	}
+	p := startSleep(t, newNonce(t))
+	ev, err := Recover(p.Identity)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if ev.Outcome != OutcomeUnknown || ev.Exited || ev.Reusable() {
+		t.Fatalf("仍在运行的运行不应宣布可复用: %+v", ev)
+	}
+}
+
+func TestRecoverLostRunAfterExternalKill(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("仅 macOS 实现进程恢复核对")
+	}
+	p := startSleep(t, newNonce(t))
+	if err := p.cmd.Process.Kill(); err != nil {
+		t.Fatalf("外部终止: %v", err)
+	}
+	_ = p.Wait()
+
+	ev, err := Recover(p.Identity)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if !ev.Lost || !ev.Exited {
+		t.Fatalf("应记录进程失联: %+v", ev)
+	}
+	if ev.Outcome != OutcomeExited || !ev.Reusable() {
+		t.Fatalf("组已清空时失联也可复用: %+v", ev)
+	}
+}
+
+func TestRecoverUnknownWhenGroupUnconfirmed(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("仅 macOS 实现进程恢复核对")
+	}
+	live := startSleep(t, newNonce(t))
+	dead := exec.Command("/bin/sh", "-c", "exit 0")
+	if err := dead.Start(); err != nil {
+		t.Fatalf("启动短进程: %v", err)
+	}
+	_ = dead.Wait()
+
+	// 父进程 PID 已消失，但记录里的组号仍指向一个存活组：无法确认归属。
+	id := Identity{
+		RunID: "run_lost",
+		PID:   dead.Process.Pid,
+		PGID:  live.Identity.PGID,
+		Start: time.Now().UTC(),
+		Nonce: newNonce(t),
+	}
+	ev, err := Recover(id)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if ev.Outcome != OutcomeUnknown || ev.Reusable() || ev.DescendantsConfirmed {
+		t.Fatalf("进程组未确认时不得宣布可复用: %+v", ev)
+	}
+}
+
+func TestReusableRequiresConfirmedDescendants(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   StopEvidence
+		want bool
+	}{
+		{"父进程退出但组未确认", StopEvidence{Exited: true}, false},
+		{"组已空但未确认后代", StopEvidence{GroupEmpty: true}, false},
+		{"后代已确认", StopEvidence{GroupEmpty: true, DescendantsConfirmed: true}, true},
+	}
+	for _, c := range cases {
+		if got := c.ev.Reusable(); got != c.want {
+			t.Fatalf("%s: Reusable = %v，期望 %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestStopRejectsUnknownReason(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("仅 macOS 实现进程停止")
+	}
+	p := startSleep(t, newNonce(t))
+	if _, err := p.Stop(StopReason("panic")); !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("未知停止原因应拒绝: %v", err)
+	}
+}
+
 func TestLockExcludesSecondSupervisor(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("仅 macOS 实现排他锁")
@@ -204,5 +380,8 @@ func TestUnsupportedPlatformIsExplicit(t *testing.T) {
 	}
 	if _, err := Start(StartSpec{RunID: "r", Argv: []string{"/bin/true"}, Dir: t.TempDir(), Nonce: "n"}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("非 macOS 启动应明确不支持: %v", err)
+	}
+	if _, err := Recover(Identity{RunID: "r", PID: 1, Start: time.Now(), Nonce: "n"}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("非 macOS 恢复核对应明确不支持: %v", err)
 	}
 }
