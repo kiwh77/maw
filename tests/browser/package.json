@@ -1,0 +1,13 @@
+{
+  "name": "maw-browser-acceptance",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Real-browser acceptance harness for the maw workbench",
+  "scripts": {
+    "test": "playwright test",
+    "install:browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.0"
+  }
+}
