@@ -1,0 +1,879 @@
+{
+  "cli_version": "2.173.0",
+  "note": "只登记实测出现过的字段。未出现的字段一律视为未知，不得由其他来源补齐。",
+  "provenance": "measured:VN301-S03/S04/S08（字段名与类型级；不含取值）",
+  "records": [
+    {
+      "fields": {
+        "isSnapshotUpdate": {
+          "type": "boolean"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "snapshot": {
+          "type": "object"
+        },
+        "snapshot.messageId": {
+          "type": "string"
+        },
+        "snapshot.trackedFileBackups": {
+          "type": "object"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "output_format": "json",
+      "subtype": "None",
+      "type": "file-history-snapshot"
+    },
+    {
+      "fields": {
+        "__codebuddyLocal": {
+          "type": "object"
+        },
+        "__codebuddyLocal.sensitiveUserInputReviewed": {
+          "type": "boolean"
+        },
+        "content": {
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "type": "string"
+        },
+        "providerData": {
+          "type": "object"
+        },
+        "providerData.agent": {
+          "type": "string"
+        },
+        "providerData.conversationRequestId": {
+          "type": "string"
+        },
+        "providerData.messageId": {
+          "type": "string"
+        },
+        "providerData.model": {
+          "type": "string"
+        },
+        "providerData.rawUsage": {
+          "type": "object"
+        },
+        "providerData.rawUsage.cache_creation_input_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.cache_read_input_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.cached_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.completion_thinking_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.completion_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.completion_tokens_details": {
+          "type": "object"
+        },
+        "providerData.rawUsage.completion_tokens_details.accepted_prediction_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.completion_tokens_details.audio_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.completion_tokens_details.cached_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.completion_tokens_details.reasoning_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.completion_tokens_details.rejected_prediction_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.credit": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.prompt_cache_hit_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.prompt_cache_miss_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.prompt_cache_write_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.prompt_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.prompt_tokens_details": {
+          "type": "object"
+        },
+        "providerData.rawUsage.prompt_tokens_details.accepted_prediction_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.prompt_tokens_details.audio_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.prompt_tokens_details.cached_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.prompt_tokens_details.reasoning_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.prompt_tokens_details.rejected_prediction_tokens": {
+          "type": "integer"
+        },
+        "providerData.rawUsage.total_tokens": {
+          "type": "integer"
+        },
+        "providerData.requestModelId": {
+          "type": "string"
+        },
+        "providerData.requestModelName": {
+          "type": "string"
+        },
+        "providerData.stepSeq": {
+          "type": "integer"
+        },
+        "providerData.traceId": {
+          "type": "string"
+        },
+        "providerData.usage": {
+          "type": "object"
+        },
+        "providerData.usage.inputTokens": {
+          "type": "integer"
+        },
+        "providerData.usage.inputTokensDetails": {
+          "type": "array"
+        },
+        "providerData.usage.outputTokens": {
+          "type": "integer"
+        },
+        "providerData.usage.outputTokensDetails": {
+          "type": "array"
+        },
+        "providerData.usage.requests": {
+          "type": "integer"
+        },
+        "providerData.usage.totalTokens": {
+          "type": "integer"
+        },
+        "role": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "output_format": "json",
+      "subtype": "None",
+      "type": "message"
+    },
+    {
+      "fields": {
+        "content": {
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "type": "string"
+        },
+        "providerData": {
+          "type": "object"
+        },
+        "providerData.agent": {
+          "type": "string"
+        },
+        "providerData.conversationRequestId": {
+          "type": "string"
+        },
+        "providerData.messageId": {
+          "type": "string"
+        },
+        "providerData.model": {
+          "type": "string"
+        },
+        "providerData.requestModelId": {
+          "type": "string"
+        },
+        "providerData.requestModelName": {
+          "type": "string"
+        },
+        "providerData.stepSeq": {
+          "type": "integer"
+        },
+        "providerData.traceId": {
+          "type": "string"
+        },
+        "rawContent": {
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "output_format": "json",
+      "subtype": "None",
+      "type": "reasoning"
+    },
+    {
+      "fields": {
+        "__timestamp": {
+          "type": "string"
+        },
+        "duration_api_ms": {
+          "type": "integer"
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "is_error": {
+          "type": "boolean"
+        },
+        "num_turns": {
+          "type": "integer"
+        },
+        "permission_denials": {
+          "type": "array"
+        },
+        "result": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "subtype": {
+          "type": "string"
+        },
+        "total_cost_usd": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        },
+        "usage.cache_creation": {
+          "type": "null"
+        },
+        "usage.cache_creation_input_tokens": {
+          "type": "integer"
+        },
+        "usage.cache_read_input_tokens": {
+          "type": "integer"
+        },
+        "usage.input_tokens": {
+          "type": "integer"
+        },
+        "usage.output_tokens": {
+          "type": "integer"
+        },
+        "usage.server_tool_use": {
+          "type": "null"
+        },
+        "usage.service_tier": {
+          "type": "null"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "output_format": "json",
+      "subtype": "success",
+      "type": "result"
+    },
+    {
+      "fields": {
+        "__timestamp": {
+          "type": "string"
+        },
+        "_messageId": {
+          "type": "string"
+        },
+        "_meta": {
+          "type": "object"
+        },
+        "_meta.baggage": {
+          "type": "string"
+        },
+        "_meta.codebuddy.ai/conversationRequestId": {
+          "type": "string"
+        },
+        "_meta.codebuddy.ai/llmMessageId": {
+          "type": "string"
+        },
+        "_meta.codebuddy.ai/messageId": {
+          "type": "string"
+        },
+        "_meta.codebuddy.ai/modelRequestId": {
+          "type": "string"
+        },
+        "_meta.traceparent": {
+          "type": "string"
+        },
+        "_requestId": {
+          "type": "string"
+        },
+        "message": {
+          "type": "object"
+        },
+        "message.content": {
+          "type": "array"
+        },
+        "message.id": {
+          "type": "string"
+        },
+        "message.model": {
+          "type": "string"
+        },
+        "message.role": {
+          "type": "string"
+        },
+        "message.stop_reason": {
+          "type": "null"
+        },
+        "message.stop_sequence": {
+          "type": "null"
+        },
+        "message.type": {
+          "type": "string"
+        },
+        "message.usage": {
+          "type": "object"
+        },
+        "message.usage.cache_creation": {
+          "type": "null"
+        },
+        "message.usage.cache_creation_input_tokens": {
+          "type": "integer"
+        },
+        "message.usage.cache_read_input_tokens": {
+          "type": "integer"
+        },
+        "message.usage.input_tokens": {
+          "type": "integer"
+        },
+        "message.usage.output_tokens": {
+          "type": "integer"
+        },
+        "message.usage.server_tool_use": {
+          "type": "null"
+        },
+        "message.usage.service_tier": {
+          "type": "null"
+        },
+        "parent_tool_use_id": {
+          "type": "null"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "output_format": "stream-json",
+      "subtype": "None",
+      "type": "assistant"
+    },
+    {
+      "fields": {
+        "__timestamp": {
+          "type": "string"
+        },
+        "_meta": {
+          "type": "object"
+        },
+        "_meta.baggage": {
+          "type": "string"
+        },
+        "_requestId": {
+          "type": "string"
+        },
+        "duration_api_ms": {
+          "type": "integer"
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "errors": {
+          "type": "array"
+        },
+        "is_error": {
+          "type": "boolean"
+        },
+        "modelUsage": {
+          "type": "object"
+        },
+        "modelUsage.default-model": {
+          "type": "object"
+        },
+        "modelUsage.default-model.cacheCreationInputTokens": {
+          "type": "integer"
+        },
+        "modelUsage.default-model.cacheReadInputTokens": {
+          "type": "integer"
+        },
+        "modelUsage.default-model.contextWindow": {
+          "type": "integer"
+        },
+        "modelUsage.default-model.inputTokens": {
+          "type": "integer"
+        },
+        "modelUsage.default-model.maxOutputTokens": {
+          "type": "integer"
+        },
+        "modelUsage.default-model.outputTokens": {
+          "type": "integer"
+        },
+        "num_turns": {
+          "type": "integer"
+        },
+        "permission_denials": {
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "subtype": {
+          "type": "string"
+        },
+        "total_cost_usd": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        },
+        "usage.cache_creation": {
+          "type": "null"
+        },
+        "usage.cache_creation_input_tokens": {
+          "type": "integer"
+        },
+        "usage.cache_read_input_tokens": {
+          "type": "integer"
+        },
+        "usage.input_tokens": {
+          "type": "integer"
+        },
+        "usage.output_tokens": {
+          "type": "integer"
+        },
+        "usage.server_tool_use": {
+          "type": "null"
+        },
+        "usage.service_tier": {
+          "type": "null"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "output_format": "stream-json",
+      "subtype": "error_during_execution",
+      "type": "result"
+    },
+    {
+      "fields": {
+        "__timestamp": {
+          "type": "string"
+        },
+        "_meta": {
+          "type": "object"
+        },
+        "_meta.baggage": {
+          "type": "string"
+        },
+        "_meta.codebuddy.ai/contextUsed": {
+          "type": "integer"
+        },
+        "_meta.codebuddy.ai/usageByCategory": {
+          "type": "object"
+        },
+        "_meta.codebuddy.ai/usageByCategory.conversation": {
+          "type": "integer"
+        },
+        "_meta.codebuddy.ai/usageByCategory.mcp": {
+          "type": "integer"
+        },
+        "_meta.codebuddy.ai/usageByCategory.skills": {
+          "type": "integer"
+        },
+        "_meta.codebuddy.ai/usageByCategory.systemPrompt": {
+          "type": "integer"
+        },
+        "_meta.codebuddy.ai/usageByCategory.tools": {
+          "type": "integer"
+        },
+        "_meta.codebuddy.ai/usageByCategory.version": {
+          "type": "integer"
+        },
+        "_meta.traceparent": {
+          "type": "string"
+        },
+        "_requestId": {
+          "type": "string"
+        },
+        "duration_api_ms": {
+          "type": "integer"
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "is_error": {
+          "type": "boolean"
+        },
+        "modelUsage": {
+          "type": "object"
+        },
+        "modelUsage.step-5-preview": {
+          "type": "object"
+        },
+        "modelUsage.step-5-preview.cacheCreationInputTokens": {
+          "type": "integer"
+        },
+        "modelUsage.step-5-preview.cacheReadInputTokens": {
+          "type": "integer"
+        },
+        "modelUsage.step-5-preview.contextWindow": {
+          "type": "integer"
+        },
+        "modelUsage.step-5-preview.inputTokens": {
+          "type": "integer"
+        },
+        "modelUsage.step-5-preview.maxOutputTokens": {
+          "type": "integer"
+        },
+        "modelUsage.step-5-preview.outputTokens": {
+          "type": "integer"
+        },
+        "num_turns": {
+          "type": "integer"
+        },
+        "permission_denials": {
+          "type": "array"
+        },
+        "result": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "subtype": {
+          "type": "string"
+        },
+        "total_cost_usd": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        },
+        "usage.cache_creation": {
+          "type": "null"
+        },
+        "usage.cache_creation_input_tokens": {
+          "type": "integer"
+        },
+        "usage.cache_read_input_tokens": {
+          "type": "integer"
+        },
+        "usage.input_tokens": {
+          "type": "integer"
+        },
+        "usage.output_tokens": {
+          "type": "integer"
+        },
+        "usage.server_tool_use": {
+          "type": "null"
+        },
+        "usage.service_tier": {
+          "type": "null"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "output_format": "stream-json",
+      "subtype": "success",
+      "type": "result"
+    },
+    {
+      "fields": {
+        "__timestamp": {
+          "type": "string"
+        },
+        "_messageId": {
+          "type": "string"
+        },
+        "_meta": {
+          "type": "object"
+        },
+        "_meta.baggage": {
+          "type": "string"
+        },
+        "_meta.codebuddy.ai/conversationRequestId": {
+          "type": "string"
+        },
+        "_meta.codebuddy.ai/llmMessageId": {
+          "type": "string"
+        },
+        "_meta.codebuddy.ai/messageId": {
+          "type": "string"
+        },
+        "_meta.codebuddy.ai/modelRequestId": {
+          "type": "string"
+        },
+        "_meta.traceparent": {
+          "type": "string"
+        },
+        "_requestId": {
+          "type": "string"
+        },
+        "event": {
+          "type": "object"
+        },
+        "event.content_block": {
+          "type": "object"
+        },
+        "event.content_block.signature": {
+          "type": "string"
+        },
+        "event.content_block.text": {
+          "type": "string"
+        },
+        "event.content_block.thinking": {
+          "type": "string"
+        },
+        "event.content_block.type": {
+          "type": "string"
+        },
+        "event.delta": {
+          "type": "object"
+        },
+        "event.delta.stop_reason": {
+          "type": "string"
+        },
+        "event.delta.stop_sequence": {
+          "type": "null"
+        },
+        "event.delta.text": {
+          "type": "string"
+        },
+        "event.delta.thinking": {
+          "type": "string"
+        },
+        "event.delta.type": {
+          "type": "string"
+        },
+        "event.index": {
+          "type": "integer"
+        },
+        "event.message": {
+          "type": "object"
+        },
+        "event.message.content": {
+          "type": "array"
+        },
+        "event.message.id": {
+          "type": "string"
+        },
+        "event.message.model": {
+          "type": "string"
+        },
+        "event.message.role": {
+          "type": "string"
+        },
+        "event.message.stop_reason": {
+          "type": "null"
+        },
+        "event.message.stop_sequence": {
+          "type": "null"
+        },
+        "event.message.type": {
+          "type": "string"
+        },
+        "event.message.usage": {
+          "type": "object"
+        },
+        "event.message.usage.cache_creation": {
+          "type": "object"
+        },
+        "event.message.usage.cache_creation.ephemeral_1h_input_tokens": {
+          "type": "integer"
+        },
+        "event.message.usage.cache_creation.ephemeral_5m_input_tokens": {
+          "type": "integer"
+        },
+        "event.message.usage.cache_creation_input_tokens": {
+          "type": "integer"
+        },
+        "event.message.usage.cache_read_input_tokens": {
+          "type": "integer"
+        },
+        "event.message.usage.input_tokens": {
+          "type": "integer"
+        },
+        "event.message.usage.output_tokens": {
+          "type": "integer"
+        },
+        "event.message.usage.service_tier": {
+          "type": "string"
+        },
+        "event.type": {
+          "type": "string"
+        },
+        "event.usage": {
+          "type": "object"
+        },
+        "event.usage.cache_creation_input_tokens": {
+          "type": "integer"
+        },
+        "event.usage.cache_read_input_tokens": {
+          "type": "integer"
+        },
+        "event.usage.input_tokens": {
+          "type": "integer"
+        },
+        "event.usage.output_tokens": {
+          "type": "integer"
+        },
+        "parent_tool_use_id": {
+          "type": "null"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "output_format": "stream-json",
+      "subtype": "None",
+      "type": "stream_event"
+    },
+    {
+      "fields": {
+        "__timestamp": {
+          "type": "string"
+        },
+        "apiKeySource": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "mcp_servers": {
+          "type": "array"
+        },
+        "model": {
+          "type": "string"
+        },
+        "output_style": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "slash_commands": {
+          "type": "array"
+        },
+        "subtype": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "output_format": "stream-json",
+      "subtype": "init",
+      "type": "system"
+    },
+    {
+      "fields": {
+        "__timestamp": {
+          "type": "string"
+        },
+        "_meta": {
+          "type": "object"
+        },
+        "_meta.baggage": {
+          "type": "string"
+        },
+        "_meta.traceparent": {
+          "type": "string"
+        },
+        "_requestId": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "null"
+        },
+        "subtype": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "output_format": "stream-json",
+      "subtype": "status",
+      "type": "system"
+    }
+  ],
+  "schema": "maw.evidence.codebuddy/event-inventory/v1"
+}

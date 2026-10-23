@@ -1,0 +1,14 @@
+{
+  "assumed_values": [],
+  "defect": "missing_final_result",
+  "derived_from": "VN301-S03",
+  "do_not_use_as": "来源实测；本样本不可用于声称 CLI 会丢结果",
+  "expected_interpretation": "缺少 result 记录时运行只能判为不完整／待核实，不得判 done",
+  "files": {
+    "events.jsonl": "2b6df01920702387876614262961db22c4e35394f3ab1b02fd8c1eb9f40b555c"
+  },
+  "kind": "synthetic",
+  "origin": "由 VN301-S03 删除 result 记录构造",
+  "sample_id": "VN301-X02",
+  "schema": "maw.evidence.codebuddy/v1"
+}

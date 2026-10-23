@@ -1,0 +1,322 @@
+{
+  "schema": "maw.evidence.codebuddy/capability-matrix/v1",
+  "source": {
+    "cli": "codebuddy",
+    "cli_version": "2.173.0",
+    "cli_version_provenance": "measured:VN301-S01",
+    "platform": "darwin",
+    "evidence_dir": "docs/evidence/codebuddy",
+    "generated_at": "2026-10-23T03:06:00Z",
+    "collected_by": "workbuddy-goalagents-1"
+  },
+  "states": {
+    "observed": "本次实测到该行为，样本可复核",
+    "unobserved": "本版本可能具备，但本次没有构造出可观测条件",
+    "unknown": "存在字段或现象，但语义/口径未验证，不得当作已知能力使用",
+    "unsupported": "有证据表明不支持"
+  },
+  "version_binding": {
+    "valid_for_versions": [
+      "2.173.0"
+    ],
+    "invalidated_by": [
+      "cli_version_change",
+      "cli_entry_change",
+      "platform_change"
+    ],
+    "rule": "版本、入口或平台变化后，本矩阵的 observed 行自动降级为 unobserved，需重新采集"
+  },
+  "capabilities": [
+    {
+      "id": "C01",
+      "capability": "entry.version_probe",
+      "state": "observed",
+      "samples": [
+        "VN301-S01"
+      ],
+      "note": "`--version` 退出 0，stdout 为单行 `2.173.0`；不触发登录与模型任务，可直接用于探测"
+    },
+    {
+      "id": "C02",
+      "capability": "entry.help_probe",
+      "state": "observed",
+      "samples": [
+        "VN301-S02"
+      ],
+      "note": "`--help` 退出 0，stdout 13,452 字节用法清单；启动规格所需的参数枚举以此为准，不以记忆推断"
+    },
+    {
+      "id": "C03",
+      "capability": "print.headless_mode",
+      "state": "observed",
+      "samples": [
+        "VN301-S03",
+        "VN301-S04",
+        "VN301-S05"
+      ],
+      "note": "`-p <prompt>` 可在无交互下完成一次回合，固定文本 `Reply with exactly: MAW-OK` 得到 `MAW-OK`"
+    },
+    {
+      "id": "C04",
+      "capability": "output_format.stream_json",
+      "state": "observed",
+      "samples": [
+        "VN301-S03"
+      ],
+      "note": "逐行 JSON；本次 23 条记录 = init 1 + status 1 + stream_event 18 + assistant 2 + result 1"
+    },
+    {
+      "id": "C05",
+      "capability": "output_format.json",
+      "state": "observed",
+      "samples": [
+        "VN301-S04"
+      ],
+      "note": "stdout 是单个 JSON 数组（5 条会话记录：message/file-history-snapshot/reasoning/message/result），不是 JSONL，字段集与 stream_json 不同"
+    },
+    {
+      "id": "C06",
+      "capability": "output_format.text",
+      "state": "observed",
+      "samples": [
+        "VN301-S05"
+      ],
+      "note": "stdout 仅正文 `MAW-OK\\n`（7 字节），无结构化结束证据；不能单独作为完成判据"
+    },
+    {
+      "id": "C07",
+      "capability": "output_format.invalid_value_accepted",
+      "state": "observed",
+      "samples": [
+        "VN301-S07"
+      ],
+      "note": "`--output-format bogus` 未被拒绝，退出 0，输出与 text 模式完全一致（7 字节 `MAW-OK`）；启动规格不能依赖 CLI 校验枚举"
+    },
+    {
+      "id": "C08",
+      "capability": "event_stream.record_sequence",
+      "state": "observed",
+      "samples": [
+        "VN301-S03"
+      ],
+      "note": "顺序为 system/init → system/status → stream_event* → assistant* → result；result 恒为最后一条"
+    },
+    {
+      "id": "C09",
+      "capability": "event_stream.partial_messages",
+      "state": "observed",
+      "samples": [
+        "VN301-S03"
+      ],
+      "note": "`--include-partial-messages` 产生 stream_event 记录（message_start/content_block_* /message_delta/message_stop），是 SSE 原样透传，不是归一化事件"
+    },
+    {
+      "id": "C10",
+      "capability": "event_stream.assistant_repeated",
+      "state": "observed",
+      "samples": [
+        "VN301-S03"
+      ],
+      "note": "同一回合出现 2 条 assistant 记录（thinking 一条、text 一条），需按 `_messageId` 去重；简单累加会重复计数"
+    },
+    {
+      "id": "C11",
+      "capability": "result.record_present",
+      "state": "observed",
+      "samples": [
+        "VN301-S03",
+        "VN301-S08"
+      ],
+      "note": "成功与失败都输出 result 记录，含 subtype / is_error / num_turns / duration_ms / usage / modelUsage"
+    },
+    {
+      "id": "C12",
+      "capability": "result.exit_zero_with_is_error",
+      "state": "observed",
+      "samples": [
+        "VN301-S08"
+      ],
+      "note": "隔离空 HOME 时退出码 0，但 result.subtype=error_during_execution、is_error=true、errors 为认证缺失文本；退出码不能作为完成判据（对应 G04）"
+    },
+    {
+      "id": "C13",
+      "capability": "result.auth_error_text_in_assistant",
+      "state": "observed",
+      "samples": [
+        "VN301-S08"
+      ],
+      "note": "失败时 assistant 记录的 text 内容就是错误文本，直接取 assistant 文本当交付会假 done"
+    },
+    {
+      "id": "C14",
+      "capability": "auth.missing_credentials_detectable",
+      "state": "observed",
+      "samples": [
+        "VN301-S08"
+      ],
+      "note": "唯一稳定信号是 result.errors 里的英文文本 `Authentication required. Please use /login command...`；未见机器可判的错误码，匹配需按前缀而非全等"
+    },
+    {
+      "id": "C15",
+      "capability": "launch.explicit_port_required",
+      "state": "observed",
+      "samples": [
+        "VN301-S06"
+      ],
+      "note": "端口被占用时退出码 1、stdout 空、stderr 为 `Error: listen EADDRINUSE ...`；`--port 0` 可自动分配。启动规格必须显式传端口，不能依赖默认稳定端口"
+    },
+    {
+      "id": "C16",
+      "capability": "turn.completed_turn",
+      "state": "observed",
+      "samples": [
+        "VN301-S03",
+        "VN301-S04",
+        "VN301-S05"
+      ],
+      "note": "本机账号在 CLI 下已认证，单回合可完成并返回正文；前提是环境为白名单（见 notes.inherited_env）"
+    },
+    {
+      "id": "C17",
+      "capability": "usage.fields_present",
+      "state": "observed",
+      "samples": [
+        "VN301-S03",
+        "VN301-S04"
+      ],
+      "note": "result.usage 含 input_tokens / output_tokens / cache_creation_input_tokens / cache_read_input_tokens / cache_creation / server_tool_use / service_tier"
+    },
+    {
+      "id": "C18",
+      "capability": "usage.input_includes_cache",
+      "state": "observed",
+      "samples": [
+        "VN301-S03",
+        "VN301-S04"
+      ],
+      "note": "实测 input_tokens = cache_creation_input_tokens + cache_read_input_tokens（23,945 = 23,433 + 512；23,941 = 21,125 + 2,816）；把 input 与 cache_* 相加会重复计算"
+    },
+    {
+      "id": "C19",
+      "capability": "usage.aggregation_semantics",
+      "state": "unknown",
+      "samples": [],
+      "note": "assistant 记录也带 usage，thinking 那条为 0、text 那条为全量；多记录聚合口径未验证，禁止直接求和后宣称总量",
+      "observed_in": [
+        "VN301-S03"
+      ]
+    },
+    {
+      "id": "C20",
+      "capability": "turn.num_turns_semantics",
+      "state": "unknown",
+      "samples": [],
+      "note": "单轮文本回复 num_turns=3，认证失败 num_turns=2；不是用户轮次，不能当「对话轮数」展示",
+      "observed_in": [
+        "VN301-S03",
+        "VN301-S08"
+      ]
+    },
+    {
+      "id": "C21",
+      "capability": "cost.total_cost_usd",
+      "state": "unknown",
+      "samples": [],
+      "note": "成功与失败均为 0；0 不代表免费，口径（是否含订阅计费）未验证，不得展示为费用",
+      "observed_in": [
+        "VN301-S03",
+        "VN301-S04",
+        "VN301-S08"
+      ]
+    },
+    {
+      "id": "C22",
+      "capability": "modelUsage.may_be_null",
+      "state": "observed",
+      "samples": [
+        "VN301-S04"
+      ],
+      "note": "json 模式 result.modelUsage 为 null；stream_json 模式为按模型 id 的映射。解析必须允许 null"
+    },
+    {
+      "id": "C23",
+      "capability": "cancel.graceful_stop",
+      "state": "unknown",
+      "samples": [],
+      "note": "本题未向运行中的进程发送信号（避免留下孤儿进程），取消语义与退出码无任何实测",
+      "observed_in": []
+    },
+    {
+      "id": "C24",
+      "capability": "session.resume",
+      "state": "unknown",
+      "samples": [],
+      "note": "未执行 `-r/--resume`、`-c/--continue`；恢复语义、会话是否存在及跨进程可用性均未验证",
+      "observed_in": []
+    },
+    {
+      "id": "C25",
+      "capability": "session.id_reuse",
+      "state": "unobserved",
+      "samples": [],
+      "note": "`--session-id` 仅在帮助中出现，未实测指定后是否复用同一 id",
+      "observed_in": []
+    },
+    {
+      "id": "C26",
+      "capability": "error.stable_code",
+      "state": "unobserved",
+      "samples": [],
+      "note": "只观察到自由文本错误；是否有稳定错误码字段，样本中未出现",
+      "observed_in": [
+        "VN301-S08"
+      ]
+    },
+    {
+      "id": "C27",
+      "capability": "tool_use.events",
+      "state": "unobserved",
+      "samples": [],
+      "note": "固定提示不需要工具，未观察到 tool_use / tool_result 记录；权限拒绝路径同样未触发",
+      "observed_in": []
+    },
+    {
+      "id": "C28",
+      "capability": "stderr.carries_error",
+      "state": "unobserved",
+      "samples": [],
+      "note": "仅启动期错误（端口占用）走 stderr；回合内错误在 stream_json 模式走 stdout 事件，json/text 模式下的回合内错误位置未观察",
+      "observed_in": [
+        "VN301-S06"
+      ]
+    }
+  ],
+  "gates": {
+    "G04": {
+      "requirement": "指定版本 CodeBuddy 的结束、错误与交付协议可识别，验收独立成立",
+      "status": "partially_supported",
+      "evidence": [
+        "VN301-S03",
+        "VN301-S08"
+      ],
+      "conclusion": "结束语义可由 result.subtype + is_error 判定；退出码 0 不可信（S08）。缺 result 记录时的处置由 VN304 定义，本卡只提供反例 X02。",
+      "remaining_gap": "取消、恢复、工具调用与权限拒绝路径未实测"
+    },
+    "G07": {
+      "requirement": "厂商能力有按版本的验证记录",
+      "status": "satisfied_for_observed_rows",
+      "evidence": [
+        "capability-matrix.json",
+        "manifest.json"
+      ],
+      "conclusion": "C01–C22 绑定 2.173.0 且逐条挂样本；C23–C28 保持 unknown/unobserved，不随安装完成而视为可用。",
+      "remaining_gap": "版本升级后需重采；未知能力不得自动开放"
+    }
+  },
+  "notes": {
+    "inherited_env": "采集期间观察到：继承宿主应用的私有环境（含指向另一份配置目录的 CODEBUDDY_CONFIG_DIR 等）时，同一调用返回认证缺失；该次运行未留存脱敏样本，故不计入能力证据，仅提示 VN303 固定环境白名单并显式覆盖。",
+    "auth_location": "S08 证明认证状态随 HOME 解析：空 HOME 即未登录。CLI 的登录态不来自 CODEBUDDY_CONFIG_DIR。",
+    "prompt_wrapping": "json 模式的 user 记录里，提示被包在 `<user_query>` 标签内，并附带 CLI 注入的长上下文；该上下文在样本中已替换为 <CLI_INJECTED_CONTEXT>。",
+    "no_fabrication": "未观察到的能力一律留在 unknown/unobserved；本文件不包含任何推算值。"
+  }
+}

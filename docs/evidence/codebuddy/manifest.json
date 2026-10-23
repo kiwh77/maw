@@ -1,0 +1,240 @@
+{
+  "environment": {
+    "cli": "codebuddy",
+    "cli_version": "2.173.0",
+    "cli_version_provenance": "measured:VN301-S01",
+    "env_whitelist": [
+      "HOME",
+      "LANG",
+      "NO_COLOR",
+      "PATH",
+      "SHELL",
+      "TERM",
+      "TMPDIR"
+    ],
+    "platform": "darwin",
+    "python": "3.13.12"
+  },
+  "generated_at": "2026-10-23T03:05:34Z",
+  "generated_by": "collect_probe.py v1",
+  "redaction_rules": [
+    {
+      "detail": "$HOME 及其真实用户名替换为 <HOME>",
+      "id": "R01",
+      "rule": "home_dir"
+    },
+    {
+      "detail": "临时工作目录 / TMPDIR / 会话临时目录替换为 <WORKDIR> 或 <TMP_PATH>",
+      "id": "R02",
+      "rule": "temp_path"
+    },
+    {
+      "detail": "UUID 形式的消息/会话标识替换为 <UUID>/<SESSION_ID>",
+      "id": "R03",
+      "rule": "uuid"
+    },
+    {
+      "detail": "32 位十六进制请求标识替换为 <REQUEST_ID>",
+      "id": "R04",
+      "rule": "hex32"
+    },
+    {
+      "detail": "traceparent/baggage/traceId 替换为 <TRACEPARENT>/<BAGGAGE>/<REQUEST_ID>",
+      "id": "R05",
+      "rule": "trace_context"
+    },
+    {
+      "detail": "sk-*/Bearer/Authorization 等凭据形态替换为 <TOKEN>",
+      "id": "R06",
+      "rule": "credential_like"
+    },
+    {
+      "detail": "邮箱替换为 <EMAIL>",
+      "id": "R07",
+      "rule": "email"
+    },
+    {
+      "detail": "tools/slash_commands 列表保留长度，元素替换为 <TOOL_n>/<SLASH_COMMAND_n>",
+      "id": "R08",
+      "rule": "tool_names"
+    },
+    {
+      "detail": "mcp_servers 保留 status，name 替换为 <MCP_SERVER_n>",
+      "id": "R09",
+      "rule": "mcp_names"
+    },
+    {
+      "detail": "apiKeySource 取值替换为 <REDACTED>",
+      "id": "R10",
+      "rule": "api_key_source"
+    },
+    {
+      "detail": "127.0.0.1:<port> 端口号替换为 <PORT>",
+      "id": "R11",
+      "rule": "loopback_port"
+    },
+    {
+      "detail": "CLI 绝对入口替换为 <CLI_PATH>",
+      "id": "R12",
+      "rule": "cli_path"
+    },
+    {
+      "detail": "CLI 注入的 system-reminder/记忆提示等长文本替换为 <CLI_INJECTED_CONTEXT>",
+      "id": "R13",
+      "rule": "injected_context"
+    },
+    {
+      "detail": "_messageId/messageId/parentId 替换为 <MESSAGE_ID>/<UUID>",
+      "id": "R14",
+      "rule": "message_ids"
+    }
+  ],
+  "samples": [
+    {
+      "dir": "samples/VN301-S01-version-probe",
+      "files": {
+        "meta.json": "cf86c418ba558c26d4018c2fa8f0001771b59e4e0a932f88f7bcfbfd50f91561",
+        "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.txt": "9f306e18e6efec382ba65eec400b14addd5818ee9801cb6fb45e79d523fa1b4f"
+      },
+      "kind": "measured",
+      "output_format": "text",
+      "probe": "version",
+      "sample_id": "VN301-S01"
+    },
+    {
+      "dir": "samples/VN301-S02-help-probe",
+      "files": {
+        "meta.json": "06cd1e54b4eca3b9f6c58bdd967334f85583a5952ee9457d009b2ad12c2ae96b",
+        "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.txt": "6c18764a1c264f9c6ebf5c8f762d56819e793896057abb8af6f9926e27a292ed"
+      },
+      "kind": "measured",
+      "output_format": "text",
+      "probe": "help",
+      "sample_id": "VN301-S02"
+    },
+    {
+      "dir": "samples/VN301-S03-print-stream-json",
+      "files": {
+        "events.jsonl": "517beffa45df68611267848eb6e4ed39b34f3e8eaf14899756f2d7d217776d9e",
+        "meta.json": "92894a14c46394d7fe2b17ddbecc4aee32ee0316082fe57a028d7ad57ced6fbc",
+        "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.txt": "bae55fca2c092fba750863a9e701e48d87b96d760d72b14a2c224d9c13608096"
+      },
+      "kind": "measured",
+      "output_format": "stream-json",
+      "probe": "print.stream_json",
+      "sample_id": "VN301-S03"
+    },
+    {
+      "dir": "samples/VN301-S04-print-json",
+      "files": {
+        "meta.json": "09dde0abae5a3bb827324ec5a75717ad05898ebf859c33d421a598eb835dbb64",
+        "records.json": "67e79eeee9ed981d2a8d9d8659af673443b0b022f6f6a1fe7097a1b84bb07247",
+        "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.txt": "5d314bdf98b42a1e5b26c80fdec311473760015f3e88cdf4009ccef31d3d9191"
+      },
+      "kind": "measured",
+      "output_format": "json",
+      "probe": "print.json",
+      "sample_id": "VN301-S04"
+    },
+    {
+      "dir": "samples/VN301-S05-print-text",
+      "files": {
+        "meta.json": "5196a2733c087c9c77bdeaa9c565d05c3a796bb942bd78666f23f6f4556dfbf6",
+        "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.txt": "68f8cd0001f5dc755b5bf97656d58f776e4cc7dca0caeb0ff0322125c0a61d71"
+      },
+      "kind": "measured",
+      "output_format": "text",
+      "probe": "print.text",
+      "sample_id": "VN301-S05"
+    },
+    {
+      "dir": "samples/VN301-S06-port-conflict",
+      "files": {
+        "meta.json": "e40a4790bb5332aec070b94a981032ebe8f62c8ef00e20761670e4400c6204f4",
+        "stderr.txt": "9e8da2f1126724572d43fc85867e94eb961dec5734121dc6192ee9b0e3269953",
+        "stdout.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "kind": "measured",
+      "output_format": "stream-json",
+      "probe": "launch.port_conflict",
+      "sample_id": "VN301-S06"
+    },
+    {
+      "dir": "samples/VN301-S07-invalid-output-format",
+      "files": {
+        "meta.json": "1904377d84c830afb2ad65b5acd69e91104a9cf500a282a5155ef238c1ac963e",
+        "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.txt": "68f8cd0001f5dc755b5bf97656d58f776e4cc7dca0caeb0ff0322125c0a61d71"
+      },
+      "kind": "measured",
+      "output_format": "text",
+      "probe": "print.invalid_output_format",
+      "sample_id": "VN301-S07"
+    },
+    {
+      "dir": "samples/VN301-S08-print-stream-json-no-credentials",
+      "files": {
+        "events.jsonl": "5f3645ffa5e012100e8ec50ce67edb442777a3f8c827b221e4b5e9b050a4255d",
+        "meta.json": "ceb6b89fbf1a49c49a27131c3a24cb649e5d5aa470037e475fba54c4bfaacbb3",
+        "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.txt": "e9bed9072ebbd05aa36e16888b6b63523d54fe889e7c073bd3f25120c61e2394"
+      },
+      "kind": "measured",
+      "output_format": "stream-json",
+      "probe": "print.stream_json_no_credentials",
+      "sample_id": "VN301-S08"
+    }
+  ],
+  "schema": "maw.evidence.codebuddy/v1",
+  "synthetic_samples": [
+    {
+      "defect": "corrupted_json_line",
+      "derived_from": "VN301-S03",
+      "dir": "samples/synthetic/VN301-X01-corrupted-line",
+      "files": {
+        "events.jsonl": "075c0bba07d4414d0422aa89a03c038fa17c4b4513ad3b7c3b23b56a63d21266",
+        "meta.json": "ec0be81ba69b4b317b455890318cb7913983e45a5eab19e97ee80583cb56522c"
+      },
+      "kind": "synthetic",
+      "sample_id": "VN301-X01"
+    },
+    {
+      "defect": "missing_final_result",
+      "derived_from": "VN301-S03",
+      "dir": "samples/synthetic/VN301-X02-missing-result",
+      "files": {
+        "events.jsonl": "2b6df01920702387876614262961db22c4e35394f3ab1b02fd8c1eb9f40b555c",
+        "meta.json": "2aead631b5b0f08fae5c8fec4b0700fff024ee461b02cf617906e8affa4dbec4"
+      },
+      "kind": "synthetic",
+      "sample_id": "VN301-X02"
+    },
+    {
+      "defect": "success_subtype_without_content",
+      "derived_from": "VN301-S04",
+      "dir": "samples/synthetic/VN301-X03-success-without-content",
+      "files": {
+        "meta.json": "0a7a0e9a2347f1a38a7e27f6f5bcb5572a4ad010dfe8b75393a3ae286ad9b29c",
+        "records.json": "d18e93deec719959eeed05d22272f30408923b65f888a821b5eae36188150afb"
+      },
+      "kind": "synthetic",
+      "sample_id": "VN301-X03"
+    },
+    {
+      "defect": "unknown_event_type_and_fields",
+      "derived_from": "VN301-S03",
+      "dir": "samples/synthetic/VN301-X04-unknown-event-and-version",
+      "files": {
+        "events.jsonl": "eaff136468a20f71c13dfeb1b138b7617359d3c13abb24c72fa1c3318ace10e2",
+        "meta.json": "d5bf3e7a2e13d77d8c9d1e7a4b939463903cf4cf990b3986d382350073b9fb1d"
+      },
+      "kind": "synthetic",
+      "sample_id": "VN301-X04"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "expectation": "exit 0 且输出用法清单；用于启动规格的参数枚举",
+  "kind": "measured",
+  "outcome": {
+    "duration_ms": 823,
+    "error_class": null,
+    "errors": [],
+    "exit_code": 0,
+    "is_error": null,
+    "protocol_records": 0,
+    "result_record_present": false,
+    "result_subtype": null,
+    "stderr_bytes": 0,
+    "stdout_bytes": 13452,
+    "success": true,
+    "success_basis": "exit_code_and_nonempty_stdout",
+    "timed_out": false,
+    "unparseable_stdout_lines": 0
+  },
+  "output_format": "text",
+  "probe": "help",
+  "redactions": [
+    "R01",
+    "R02",
+    "R03",
+    "R04",
+    "R05",
+    "R06",
+    "R07",
+    "R08",
+    "R09",
+    "R10",
+    "R11",
+    "R12",
+    "R13",
+    "R14"
+  ],
+  "sample_id": "VN301-S02",
+  "schema": "maw.evidence.codebuddy/v1",
+  "source": {
+    "argv_template": [
+      "<CLI_PATH>",
+      "--help"
+    ],
+    "captured_at": "2026-10-23T03:05:03Z",
+    "cli": "codebuddy",
+    "cli_entry": "<CLI_PATH>",
+    "cli_version": "2.173.0",
+    "cli_version_source": "measured:VN301-S01",
+    "collector": "collect_probe.py v1",
+    "cwd_template": "<WORKDIR>",
+    "env_overrides": {},
+    "env_whitelist": [
+      "HOME",
+      "LANG",
+      "NO_COLOR",
+      "PATH",
+      "SHELL",
+      "TERM",
+      "TMPDIR"
+    ],
+    "fixed_prompt": "Reply with exactly: MAW-OK",
+    "platform": "darwin"
+  }
+}
