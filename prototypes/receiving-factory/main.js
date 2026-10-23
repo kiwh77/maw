@@ -1,0 +1,65 @@
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import './style.css';
+import {createSimulation,step,releaseBlock} from './simulation.js';
+const $=s=>document.querySelector(s),stage=$('#stage');
+let sim=createSimulation(),paused=matchMedia('(prefers-reduced-motion: reduce)').matches,speed=1,selected=null;
+const scene=new THREE.Scene();scene.background=new THREE.Color('#e9eee4');
+const camera=new THREE.OrthographicCamera(-16,16,12,-12,.1,150);camera.position.set(25,28,30);
+let renderer;
+try{renderer=new THREE.WebGLRenderer({canvas:$('#scene'),antialias:true});}catch(e){$('#error').hidden=false;$('#error').textContent='当前环境无法启动 WebGL，请使用支持三维加速的浏览器。';throw e}
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.3;
+const controls=new OrbitControls(camera,renderer.domElement);controls.target.set(0,0,0);controls.enableDamping=true;controls.maxPolarAngle=Math.PI/2.25;controls.minZoom=.65;controls.maxZoom=2;controls.enablePan=false;
+scene.add(new THREE.HemisphereLight(0xffffff,0x819274,3));const sun=new THREE.DirectionalLight(0xfff5da,4);sun.position.set(-10,24,15);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-24,right:24,top:24,bottom:-24});sun.shadow.bias=-.001;sun.shadow.normalBias=.03;scene.add(sun);
+const materials=new Map();function mat(c){if(!materials.has(c))materials.set(c,new THREE.MeshStandardMaterial({color:c,roughness:.8}));return materials.get(c)}
+function box(parent,w,h,d,c,x=0,y=0,z=0){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(c));o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o}
+function cyl(parent,r,h,c,x,y,z){const o=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,16),mat(c));o.position.set(x,y,z);o.castShadow=true;parent.add(o);return o}
+function group(parent,x=0,y=0,z=0){const g=new THREE.Group();g.position.set(x,y,z);parent.add(g);return g}
+function text(parent,label,x,y,z,size=.35,color='#55654c',rotate=false){const c=document.createElement('canvas');c.width=1024;c.height=128;const ctx=c.getContext('2d');ctx.fillStyle=color;ctx.font='600 60px sans-serif';ctx.textAlign='center';ctx.fillText(label,512,85);const tx=new THREE.CanvasTexture(c);tx.colorSpace=THREE.SRGBColorSpace;const o=new THREE.Mesh(new THREE.PlaneGeometry(size*8,size),new THREE.MeshBasicMaterial({map:tx,transparent:true,depthWrite:false}));o.position.set(x,y,z);if(rotate)o.rotation.x=-Math.PI/2;parent.add(o);return o}
+const world=new THREE.Group();scene.add(world);
+box(world,27,.5,22,'#d4deca',0,-.35,0);box(world,26,.12,21,'#e0e6d7',0,-.04,0);
+// Two quiet ground zones and road markings.
+box(world,24,.03,6.2,'#aab6a4',0,.04,7.3);for(let x=-11;x<12;x+=2)box(world,.85,.015,.1,'#e4e7d4',x,.065,9.2);
+box(world,17,.45,5,'#bfcab5',-3,.16,1.8);box(world,17,.12,5,'#e9eadb',-3,.43,1.8);
+for(const x of [-8,-1]){for(const dx of [-2,2])box(world,.08,.025,5,'#e8d48d',x+dx,.07,6.5);text(world,x===-8?'01':'02',x,.09,8.1,.38,'#eef0df',true)}
+text(world,'RECEIVING / 收货月台',-3,.51,3.2,.4,'#7a8869',true);
+for(let x=-11;x<-8;x+=.4){const stripe=box(world,.19,.03,.5,'#d5b563',x,.51,4.06);stripe.rotation.y=-.4}
+// Storage racks with open fronts.
+const racks=[];for(let r=0;r<2;r++){const g=group(world,8.5,0,-5+r*5);box(g,4.8,.18,2.2,'#879879',0,.2,0);for(const y of [1.5,3])box(g,4.8,.13,2.2,'#b6c4a4',0,y,0);for(const x of [-2.25,2.25])for(const z of [-1,1])box(g,.13,3.8,.13,'#73866a',x,1.9,z);box(g,4.8,.25,2.3,'#718565',0,3.8,0);racks.push(g)}
+text(world,'成果库 / STORAGE',8.4,4.4,-5,.3);
+// Back wall, signage, plant and small service props.
+box(world,24,1.3,.22,'#bccbb0',0,.65,-9.5);box(world,7,1.65,.3,'#4b6551',-5.8,2,-9.4);text(world,'maw  /  RECEIVING YARD',-5.8,2.05,-9.2,.55,'#ecedda');
+for(const x of [-11.7,11.7]){cyl(world,.48,.65,'#c3b491',x,.3,-8);for(let i=0;i<4;i++){const leaf=new THREE.Mesh(new THREE.SphereGeometry(.55,8,6),mat('#829566'));leaf.position.set(x+Math.sin(i)*.25,1+i*.2,-8+Math.cos(i)*.2);world.add(leaf)}}
+for(const x of [-11.7,11.7]){cyl(world,.07,4.5,'#8b9a7e',x,2.25,3);box(world,.8,.15,.5,'#f5f0d5',x,4.5,3)}
+const benches=[-8,-3,2].map((x,i)=>{const g=group(world,x,0,-3.6);for(const dx of [-1.05,1.05])for(const dz of [-.55,.55])box(g,.12,1.25,.12,'#809177',dx,.65,dz);box(g,2.6,.22,1.65,'#c9b890',0,1.35,0);box(g,.8,.6,.15,'#52665b',-.65,1.8,-.55);box(g,.65,.42,.02,'#b1c797',-.65,1.82,-.46);cyl(g,.13,.15,'#91b470',1,1.56,-.5);text(world,`工位 0${i+1}`,x,.08,-5.2,.25,'#6e8061',true);return g});
+const pickables=[];
+function cargo(parent,x,y,z){const g=group(parent,x,y,z);box(g,.65,.62,.65,'#c7a575',0,.31,0);box(g,.09,.015,.66,'#ead8af',0,.628,0);box(g,.09,.63,.015,'#ead8af',0,.31,.332);box(g,.22,.15,.015,'#f0e6ce',.16,.38,.335);return g}
+function truck(large,x){const g=group(world,x,0,6.2),len=large?4.5:3;const color=large?'#6d8c7a':'#c8a65d';box(g,2.7,.3,len+1.1,'#61705d',0,.65,0);box(g,2.6,1.8,1.5,color,0,1.65,len/2+.1);box(g,2.3,.7,.035,'#bcd1cb',0,1.95,len/2+.87);box(g,2.5,.25,.14,'#e3e7d8',0,.95,len/2+.92);for(const dx of [-.9,.9])box(g,.4,.22,.08,'#fff0c4',dx,1.2,len/2+.9);for(const z of [-len/2+.4,len/2+.25])for(const dx of [-1.38,1.38]){const w=cyl(g,.45,.25,'#405046',dx,.55,z);w.rotation.z=Math.PI/2;const hub=cyl(g,.22,.27,'#b6b9a6',dx,.55,z);hub.rotation.z=Math.PI/2}
+box(g,2.6,.18,len-.3,'#b6ad90',0,.9,-.7);for(const dx of [-1.25,1.25])box(g,.12,.95,len-.3,color,dx,1.45,-.7);box(g,2.6,.95,.1,color,0,1.45,len/2-1);text(g,large?'WARE 025':'WARE 024',0,1.7,len/2+.9,.22,'#f9f3dd');g.userData={type:'ware',id:large?1:0};pickables.push(g);return g}
+const trucks=[truck(false,-8),truck(true,-1)];
+const crates=sim.tasks.map(t=>cargo(world,0,0,0));
+function person(i){const g=group(world,0,0,0);const suit=['#6d8d7a','#c9a45d','#8a90ae'][i];const body=box(g,.58,.62,.4,suit,0,.97,0);box(g,.22,.19,.02,'#e6e4ce',.12,1.06,.215);const head=box(g,.62,.55,.54,'#dfc2a1',0,1.58,0);box(g,.73,.12,.68,suit,0,1.89,0);box(g,.59,.16,.52,suit,0,1.99,0);for(const x of [-.14,.14])box(g,.06,.07,.025,'#35453c',x,1.6,.282);box(g,.1,.025,.025,'#b18c71',0,1.44,.283);
+const legs=[-.17,.17].map(x=>{const a=group(g,x,.64,0);box(a,.22,.5,.25,'#526456',0,-.2,0);box(a,.25,.16,.38,'#344a41',0,-.43,.05);return a});const arms=[-.4,.4].map(x=>{const a=group(g,x,1.21,0);box(a,.18,.43,.2,suit,0,-.16,0);box(a,.17,.17,.19,'#dfc2a1',0,-.43,0);return a});const held=cargo(g,0,.75,.48);g.userData={type:'worker',id:i};pickables.push(g);return{g,legs,arms,held}}
+const people=[0,1,2].map(person);
+const labelObjects=[];for(let i=0;i<3;i++){const el=document.createElement('div');el.className='label';el.textContent=sim.workers[i].name;$('#labels').append(el);labelObjects.push({el,obj:people[i].g,height:2.35})}
+function home(){camera.position.set(25,28,30);camera.zoom=1;controls.target.set(0,0,0);camera.updateProjectionMatrix()}$('#camera').onclick=home;
+$('#pause').onclick=()=>{paused=!paused;$('#pause').textContent=paused?'继续播放':'暂停'};$('#pause').textContent=paused?'继续播放':'暂停';$('#speed').onclick=()=>{speed=speed===1?2:speed===2?4:1;$('#speed').textContent=`速度 ${speed}×`};$('#reset').onclick=()=>{sim=createSimulation();selected=null;updateUI()};$('#unblock').onclick=()=>{releaseBlock(sim);updateUI()};
+const raycaster=new THREE.Raycaster();let down;renderer.domElement.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY]});renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5)return;const r=renderer.domElement.getBoundingClientRect();raycaster.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),camera);const hits=raycaster.intersectObjects(pickables,true);if(hits[0]){let o=hits[0].object;while(o&&!o.userData.type)o=o.parent;selected=o?.userData??null;updateUI()}});
+const statuses={queued:'待卸货',carrying:'搬运中',processing:'处理中',blocked:'阻塞待处理',storing:'运送入库',stored:'已入库'};
+function details(title,copy,rows){return `<div class="detail-title">${title}</div><div class="detail-copy">${copy}</div><div class="facts">${rows.map(([k,v])=>`<span>${k}</span><b>${v}</b>`).join('')}</div>`}
+function updateUI(){const stored=sim.tasks.filter(t=>t.status==='stored').length;$('#stored').textContent=stored;$('#active').textContent=sim.workers.filter(w=>w.task!==null).length;$('#unblock').disabled=!sim.blocked;$('#wares').innerHTML=sim.wares.map((w,i)=>{const n=sim.tasks.filter(t=>t.ware===i&&t.status==='stored').length;return `<button class="ware" data-ware="${i}"><div class="ware-head"><b>${w.title}</b><span class="pill">${w.departed?'已完成':!w.arrived?'即将到厂':'处理中'} · ${n}/${w.total}</span></div><small>${w.id} &nbsp; / &nbsp; ${w.kind}</small><div class="track"><i style="width:${n/w.total*100}%"></i></div></button>`}).join('');document.querySelectorAll('[data-ware]').forEach(b=>b.onclick=()=>{selected={type:'ware',id:Number(b.dataset.ware)};updateUI()});
+if(selected?.type==='ware'){const w=sim.wares[selected.id],ts=sim.tasks.filter(t=>t.ware===selected.id);$('#selection-type').textContent=w.id;$('#inspector').innerHTML=details(w.title,'全部货物经过处理与验收入库，才算完成本批次。',[['车型',w.kind],['待卸货',ts.filter(t=>t.status==='queued').length],['已入库',`${ts.filter(t=>t.status==='stored').length} / ${w.total}`],['阻塞',ts.filter(t=>t.status==='blocked').length]])}else if(selected?.type==='worker'){const w=sim.workers[selected.id],t=sim.tasks.find(t=>t.id===w.task);$('#selection-type').textContent='AGENT';$('#inspector').innerHTML=details(w.name,'固定工位，独立领取货物，协作处理同一批次。',[['当前状态',t?statuses[t.status]:'等待领取'],['货物编号',t?.id??'—'],['所属批次',t?sim.wares[t.ware].id:'—']])}else{$('#selection-type').textContent='OVERVIEW';$('#inspector').innerHTML=details('从待办，到妥善入库。','每辆车是一批 ware，每件货是一个 task。点击货车或工人，查看现场进展。',[['当前模式','模拟任务流'],['已完成批次',`${sim.wares.filter(w=>w.departed).length} / 2`],['需要关注',sim.blocked?'1 件货物阻塞':'暂无阻塞']])}
+$('#events').innerHTML=sim.events.length?sim.events.map(e=>`<div class="event"><time>${String(Math.floor(e.time/60)).padStart(2,'0')}:${String(Math.floor(e.time%60)).padStart(2,'0')}</time><span>${e.text}</span></div>`).join(''):'<div class="detail-copy">货车正在驶入，等待月台接货。</div>';}
+function lerpPosition(g,a,b,t){g.position.set(THREE.MathUtils.lerp(a[0],b[0],t),0,THREE.MathUtils.lerp(a[1],b[1],t));const angle=Math.atan2(b[0]-a[0],b[1]-a[1]);g.rotation.y=angle}
+function renderState(){sim.wares.forEach((w,i)=>{const t=trucks[i];t.position.x=([-8,-1][i])+(w.departed?Math.min(35,(sim.time-w.departedAt)*3):Math.max(0,(1+i*3-sim.time)*6));});
+ sim.tasks.forEach((t,i)=>{const c=crates[i],w=sim.wares[t.ware],local=i-(t.ware?4:0);c.visible=t.status==='queued'||t.status==='stored';if(t.status==='queued'){c.position.set(trucks[t.ware].position.x+(local%2? .48:-.48),1,6.5-Math.floor(local/2)*.50);c.scale.setScalar(t.ware?.7:.85)}else if(t.status==='stored'){c.scale.setScalar(1);const idx=local+(t.ware?4:0);c.position.set(7+(idx%4)*.92,.3+Math.floor(idx/8)*1.45,-5+Math.floor((idx%8)/4)*.8)} });
+ people.forEach((p,i)=>{const w=sim.workers[i],t=sim.tasks.find(t=>t.id===w.task),home=[[-8,-3,2][i],-2.25],pickup=t?[[-8,-1][t.ware],3.8]:home,dest=[6.2,-3.5];let walking=false;p.held.visible=false;
+ if(!t){p.g.position.set(home[0],0,home[1]);p.g.rotation.y=Math.PI;}
+ else if(t.status==='carrying'){lerpPosition(p.g,pickup,home,Math.min(t.stageTime/3,1));walking=true;p.held.visible=true;}
+ else if(t.status==='storing'){const u=Math.min(t.stageTime/3,1);lerpPosition(p.g,home,dest,u);walking=true;p.held.visible=true;}
+ else{p.g.position.set(home[0],0,home[1]);p.g.rotation.y=Math.PI;p.held.visible=t.status==='processing';p.held.position.y=.9+Math.sin(sim.time*5)*.025;}
+ p.legs.forEach((l,j)=>l.rotation.x=walking?Math.sin(sim.time*9+j*Math.PI)*.45:0);p.arms.forEach(a=>a.rotation.x=p.held.visible?-.9:t?.status==='blocked'?-2.5:0);const light=benches[i].children.find(o=>o.geometry?.type==='CylinderGeometry');if(light)light.material=mat(t?.status==='blocked'?'#d37954':t?'#d5b266':'#91b470');labelObjects[i].el.textContent=`${w.name}${t?' · '+statuses[t.status]:''}`;
+ });
+ const v=new THREE.Vector3();for(const l of labelObjects){l.obj.getWorldPosition(v);v.y+=l.height;v.project(camera);l.el.style.left=`${(v.x*.5+.5)*stage.clientWidth}px`;l.el.style.top=`${(-v.y*.5+.5)*stage.clientHeight}px`;l.el.style.display=Math.abs(v.x)>1||Math.abs(v.y)>1?'none':'';}}
+function resize(){const w=stage.clientWidth,h=stage.clientHeight;const size=w<650?19:15;camera.left=-size*w/h;camera.right=size*w/h;camera.top=size;camera.bottom=-size;camera.updateProjectionMatrix();renderer.setSize(w,h,false)}new ResizeObserver(resize).observe(stage);
+let last=performance.now(),ui=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.1);last=now;if(!paused&&!document.hidden)step(sim,dt*speed);controls.update();renderState();renderer.render(scene,camera);ui+=dt;if(ui>.2){updateUI();ui=0}}updateUI();resize();requestAnimationFrame(frame);
