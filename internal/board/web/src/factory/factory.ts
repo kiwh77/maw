@@ -191,16 +191,14 @@ function createFactory(root) {
     for (const t of trucks) truckState.set(t.projectId, t.arrive);
     world.clear(); people = []; trucks = []; pickables = []; clearLabels();
     const shown = groups.slice(0, 6);
-    // Only status=working agents appear in the yard (matches sidebar "执行中").
-    const workingIds = new Set(
-      (agents || []).filter((a) => a && a.status === 'working' && a.id).map((a) => a.id),
-    );
+    // Yard figures follow live task ownership (processing / review / blocked…), not the
+    // agents-rail heartbeat. Idle stand-ins with no active cargo stay off the pad.
     // Pre-size lanes for the densest *active* agent grid so benches stay inside the pad.
     let lanePitch = YARD.laneWidth;
     for (const g of shown) {
       const owners = new Set();
       for (const task of g.tasks.slice(0, 72)) {
-        if (task.owner && workingIds.has(task.owner) && !['stored', 'cancelled'].includes(cargoZone(task.status))) {
+        if (task.owner && !['stored', 'cancelled', 'queued'].includes(cargoZone(task.status))) {
           owners.add(task.owner);
         }
       }
@@ -227,14 +225,15 @@ function createFactory(root) {
       const sample = g.tasks.slice(0, 72);
       for (const task of sample) {
         const zone = cargoZone(task.status);
-        if (task.owner && workingIds.has(task.owner)) {
+        // Skip owners who only hold queued/done cargo — those are not "executing".
+        if (task.owner && !['stored', 'cancelled', 'queued'].includes(zone)) {
           const held = owners.get(task.owner);
           if (!held) owners.set(task.owner, { zone, task });
           else if ((zoneRank[zone] ?? 0) > (zoneRank[held.zone] ?? 0)) { held.zone = zone; held.task = task; }
         }
       }
       // Only agents currently executing work appear in the yard (no idle stand-ins).
-      const active = [...owners].filter(([, o]) => !['stored', 'cancelled'].includes(o.zone));
+      const active = [...owners];
       const roster = active.map(([owner]) => owner);
       const grid = benchGrid(roster.length);
       const rosterIndex = new Map(roster.map((id, i) => [id, i]));

@@ -186,9 +186,10 @@ test('the renderer reuses state, projects labels and never writes task state', (
   // At the station the body yaw stays locked; only arms keep moving.
   assert.ok(/Planted at the station|lock yaw at the bench/.test(source));
   assert.ok(/benchGrid\(/.test(source));
-  // Idle / offline agents stay off the yard; carriers walk the side aisle.
+  // Idle stand-ins stay off the yard; figures follow task ownership; carriers use the aisle.
   assert.ok(/Only agents currently executing/.test(source));
-  assert.ok(/status === 'working'|idle stand-ins/.test(source));
-  assert.ok(/workingIds/.test(source));
+  assert.ok(/idle stand-ins/.test(source));
+  assert.ok(/!\[.stored., .cancelled., .queued.\]/.test(source) || /queued'\]\.includes\(zone\)/.test(source));
+  assert.ok(!/workingIds/.test(source));
   assert.ok(/p\.aisleX/.test(source));
 });
