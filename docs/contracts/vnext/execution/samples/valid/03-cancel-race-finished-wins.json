@@ -1,0 +1,45 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "note": "取消与正常完成竞争：结束事实先被确认，取消只能返回 already_finished；节点槽随进程停止释放，工作目录因产物已冻结而释放。",
+  "auto_execution": { "enabled": false, "managed_execution_limit": 0 },
+  "runs": [
+    {
+      "run_id": "run_c001",
+      "task_instance": "ti_vn003c",
+      "task_version": 2,
+      "generation": 2,
+      "phase": "completed",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": true,
+      "delivery_frozen": true,
+      "started_at": "2026-10-23T05:20:02Z",
+      "finished_at": "2026-10-23T05:31:00Z",
+      "evidence": ["exit_code:0", "final_result:ok", "artifact_manifest"],
+      "phase_history": [
+        { "phase": "reserved", "at": "2026-10-23T05:20:00Z" },
+        { "phase": "preparing", "at": "2026-10-23T05:20:01Z" },
+        { "phase": "launching", "at": "2026-10-23T05:20:02Z" },
+        { "phase": "running", "at": "2026-10-23T05:20:05Z" },
+        { "phase": "completed", "at": "2026-10-23T05:31:00Z" }
+      ]
+    }
+  ],
+  "operations": [
+    { "operation_id": "op_c001", "kind": "dispatch", "target_run": "run_c001", "state": "done", "idempotency_key": "dispatch:ti_vn003c:2:1", "request_digest": "sha256:cccc" },
+    { "operation_id": "op_c002", "kind": "cancel", "target_run": "run_c001", "state": "done", "result": "already_finished", "idempotency_key": "cancel:run_c001", "request_digest": "sha256:cccd" }
+  ],
+  "leases": [
+    { "lease_id": "ls_c001", "kind": "node_slot", "resource_id": "local-slot-2", "holder_run": "run_c001", "generation": 2, "released_at": "2026-10-23T05:31:01Z", "release_generation": 2 },
+    { "lease_id": "ls_c002", "kind": "workspace", "resource_id": ".worktrees/codebuddy-goalagents-1", "holder_run": "run_c001", "generation": 2, "released_at": "2026-10-23T05:31:30Z", "release_generation": 2 }
+  ],
+  "events": [
+    { "event_id": "evt_0021", "cursor": 21, "schema_version": 1, "type": "run.phase", "run_id": "run_c001", "to_phase": "reserved", "occurred_at": "2026-10-23T05:20:00Z", "received_at": "2026-10-23T05:20:00Z", "quality": "observed" },
+    { "event_id": "evt_0022", "cursor": 22, "schema_version": 1, "type": "run.phase", "run_id": "run_c001", "to_phase": "preparing", "occurred_at": "2026-10-23T05:20:01Z", "received_at": "2026-10-23T05:20:01Z", "quality": "observed" },
+    { "event_id": "evt_0023", "cursor": 23, "schema_version": 1, "type": "run.phase", "run_id": "run_c001", "to_phase": "launching", "occurred_at": "2026-10-23T05:20:02Z", "received_at": "2026-10-23T05:20:02Z", "quality": "observed" },
+    { "event_id": "evt_0024", "cursor": 24, "schema_version": 1, "type": "run.phase", "run_id": "run_c001", "to_phase": "running", "occurred_at": "2026-10-23T05:20:05Z", "received_at": "2026-10-23T05:20:05Z", "quality": "observed" },
+    { "event_id": "evt_0025", "cursor": 25, "schema_version": 1, "type": "run.phase", "run_id": "run_c001", "to_phase": "completed", "occurred_at": "2026-10-23T05:31:00Z", "received_at": "2026-10-23T05:31:00Z", "quality": "observed" },
+    { "event_id": "evt_0026", "cursor": 26, "schema_version": 1, "type": "lease.released", "lease_id": "ls_c001", "run_id": "run_c001", "occurred_at": "2026-10-23T05:31:01Z", "received_at": "2026-10-23T05:31:01Z", "quality": "observed" },
+    { "event_id": "evt_0027", "cursor": 27, "schema_version": 1, "type": "lease.released", "lease_id": "ls_c002", "run_id": "run_c001", "occurred_at": "2026-10-23T05:31:30Z", "received_at": "2026-10-23T05:31:30Z", "quality": "observed" }
+  ]
+}

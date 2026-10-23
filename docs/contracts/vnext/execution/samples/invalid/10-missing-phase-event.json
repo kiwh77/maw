@@ -1,0 +1,58 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E260",
+  "note": "状态到了 running 却没有对应事件：状态与事件不在同一事务提交，历史无法重建。",
+  "auto_execution": {
+    "enabled": false,
+    "managed_execution_limit": 0
+  },
+  "runs": [
+    {
+      "run_id": "run_g011",
+      "task_instance": "ti_vn019g",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "running",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": false,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T07:50:01Z",
+      "finished_at": null,
+      "evidence": [],
+      "phase_history": [
+        {
+          "phase": "reserved",
+          "at": "2026-10-23T07:50:00Z"
+        },
+        {
+          "phase": "preparing",
+          "at": "2026-10-23T07:50:01Z"
+        },
+        {
+          "phase": "launching",
+          "at": "2026-10-23T07:50:02Z"
+        },
+        {
+          "phase": "running",
+          "at": "2026-10-23T07:51:00Z"
+        }
+      ]
+    }
+  ],
+  "operations": [],
+  "leases": [],
+  "events": [
+    {
+      "event_id": "evt_0100",
+      "cursor": 100,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g011",
+      "occurred_at": "2026-10-23T07:50:00Z",
+      "received_at": "2026-10-23T07:50:00Z",
+      "quality": "observed",
+      "to_phase": "reserved"
+    }
+  ]
+}

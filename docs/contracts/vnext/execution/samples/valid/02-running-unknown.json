@@ -1,0 +1,40 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "note": "心跳丢失只产生 reconciliation_state=unknown：阶段停在 running，不伪造 failed/cancelled，节点槽与目录继续占用。",
+  "auto_execution": { "enabled": false, "managed_execution_limit": 0 },
+  "runs": [
+    {
+      "run_id": "run_b001",
+      "task_instance": "ti_vn002b",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "running",
+      "reconciliation_state": "unknown",
+      "process_stop_confirmed": false,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T05:10:02Z",
+      "finished_at": null,
+      "evidence": [],
+      "phase_history": [
+        { "phase": "reserved", "at": "2026-10-23T05:10:00Z" },
+        { "phase": "preparing", "at": "2026-10-23T05:10:01Z" },
+        { "phase": "launching", "at": "2026-10-23T05:10:02Z" },
+        { "phase": "running", "at": "2026-10-23T05:10:03Z" }
+      ]
+    }
+  ],
+  "operations": [
+    { "operation_id": "op_b001", "kind": "dispatch", "target_run": "run_b001", "state": "done", "idempotency_key": "dispatch:ti_vn002b:1:1", "request_digest": "sha256:bbbb" }
+  ],
+  "leases": [
+    { "lease_id": "ls_b001", "kind": "node_slot", "resource_id": "local-slot-1", "holder_run": "run_b001", "generation": 1, "released_at": null },
+    { "lease_id": "ls_b002", "kind": "workspace", "resource_id": ".worktrees/codebuddy-goalagents-1", "holder_run": "run_b001", "generation": 1, "released_at": null }
+  ],
+  "events": [
+    { "event_id": "evt_0011", "cursor": 11, "schema_version": 1, "type": "run.phase", "run_id": "run_b001", "to_phase": "reserved", "occurred_at": "2026-10-23T05:10:00Z", "received_at": "2026-10-23T05:10:00Z", "quality": "observed" },
+    { "event_id": "evt_0012", "cursor": 12, "schema_version": 1, "type": "run.phase", "run_id": "run_b001", "to_phase": "preparing", "occurred_at": "2026-10-23T05:10:01Z", "received_at": "2026-10-23T05:10:01Z", "quality": "observed" },
+    { "event_id": "evt_0013", "cursor": 13, "schema_version": 1, "type": "run.phase", "run_id": "run_b001", "to_phase": "launching", "occurred_at": "2026-10-23T05:10:02Z", "received_at": "2026-10-23T05:10:02Z", "quality": "observed" },
+    { "event_id": "evt_0014", "cursor": 14, "schema_version": 1, "type": "run.phase", "run_id": "run_b001", "to_phase": "running", "occurred_at": "2026-10-23T05:10:03Z", "received_at": "2026-10-23T05:10:03Z", "quality": "observed" }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E250",
+  "note": "已确认完成之后仍被追改成 cancelled：结束事实先到，取消只能返回 already_finished。",
+  "auto_execution": {
+    "enabled": false,
+    "managed_execution_limit": 0
+  },
+  "runs": [
+    {
+      "run_id": "run_g010",
+      "task_instance": "ti_vn018g",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "cancelled",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": true,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T07:40:01Z",
+      "finished_at": "2026-10-23T07:51:00Z",
+      "evidence": [
+        "exit_code:0",
+        "stop_confirmed"
+      ],
+      "phase_history": [
+        {
+          "phase": "reserved",
+          "at": "2026-10-23T07:40:00Z"
+        },
+        {
+          "phase": "preparing",
+          "at": "2026-10-23T07:40:01Z"
+        },
+        {
+          "phase": "launching",
+          "at": "2026-10-23T07:40:02Z"
+        },
+        {
+          "phase": "running",
+          "at": "2026-10-23T07:41:00Z"
+        },
+        {
+          "phase": "completed",
+          "at": "2026-10-23T07:50:00Z"
+        },
+        {
+          "phase": "cancelled",
+          "at": "2026-10-23T07:51:00Z"
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "operation_id": "op_g010",
+      "kind": "cancel",
+      "target_run": "run_g010",
+      "state": "done",
+      "result": "applied",
+      "idempotency_key": "cancel:run_g010",
+      "request_digest": "sha256:g010"
+    }
+  ],
+  "leases": [],
+  "events": [
+    {
+      "event_id": "evt_0100",
+      "cursor": 100,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g010",
+      "occurred_at": "2026-10-23T07:40:00Z",
+      "received_at": "2026-10-23T07:40:00Z",
+      "quality": "observed",
+      "to_phase": "reserved"
+    },
+    {
+      "event_id": "evt_0101",
+      "cursor": 101,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g010",
+      "occurred_at": "2026-10-23T07:40:01Z",
+      "received_at": "2026-10-23T07:40:01Z",
+      "quality": "observed",
+      "to_phase": "preparing"
+    },
+    {
+      "event_id": "evt_0102",
+      "cursor": 102,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g010",
+      "occurred_at": "2026-10-23T07:40:02Z",
+      "received_at": "2026-10-23T07:40:02Z",
+      "quality": "observed",
+      "to_phase": "launching"
+    },
+    {
+      "event_id": "evt_0103",
+      "cursor": 103,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g010",
+      "occurred_at": "2026-10-23T07:41:00Z",
+      "received_at": "2026-10-23T07:41:00Z",
+      "quality": "observed",
+      "to_phase": "running"
+    },
+    {
+      "event_id": "evt_0104",
+      "cursor": 104,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g010",
+      "occurred_at": "2026-10-23T07:50:00Z",
+      "received_at": "2026-10-23T07:50:00Z",
+      "quality": "observed",
+      "to_phase": "completed"
+    },
+    {
+      "event_id": "evt_0105",
+      "cursor": 105,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g010",
+      "occurred_at": "2026-10-23T07:51:00Z",
+      "received_at": "2026-10-23T07:51:00Z",
+      "quality": "observed",
+      "to_phase": "cancelled"
+    }
+  ]
+}

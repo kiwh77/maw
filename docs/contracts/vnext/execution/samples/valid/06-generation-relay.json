@@ -1,0 +1,64 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "note": "代际接力：旧代际 Run 已取消并确认停止（不再占用），新代际在同任务实例上重跑；旧代际的迟到状态提交只能被拒，不能改新代际的结果。",
+  "auto_execution": { "enabled": false, "managed_execution_limit": 0 },
+  "runs": [
+    {
+      "run_id": "run_f001",
+      "task_instance": "ti_vn006f",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "cancelled",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": true,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T06:00:01Z",
+      "finished_at": "2026-10-23T06:05:00Z",
+      "evidence": ["stop_requested:user", "process_stop_confirmed"],
+      "phase_history": [
+        { "phase": "reserved", "at": "2026-10-23T06:00:00Z" },
+        { "phase": "preparing", "at": "2026-10-23T06:00:00.500000Z" },
+        { "phase": "launching", "at": "2026-10-23T06:00:01Z" },
+        { "phase": "running", "at": "2026-10-23T06:00:02Z" },
+        { "phase": "stopping", "at": "2026-10-23T06:04:00Z" },
+        { "phase": "cancelled", "at": "2026-10-23T06:05:00Z" }
+      ]
+    },
+    {
+      "run_id": "run_f002",
+      "task_instance": "ti_vn006f",
+      "task_version": 1,
+      "generation": 2,
+      "phase": "running",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": false,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T06:06:01Z",
+      "finished_at": null,
+      "evidence": [],
+      "phase_history": [
+        { "phase": "reserved", "at": "2026-10-23T06:06:00Z" },
+        { "phase": "preparing", "at": "2026-10-23T06:06:00.500000Z" },
+        { "phase": "launching", "at": "2026-10-23T06:06:01Z" },
+        { "phase": "running", "at": "2026-10-23T06:06:02Z" }
+      ]
+    }
+  ],
+  "operations": [
+    { "operation_id": "op_f001", "kind": "dispatch", "target_run": "run_f001", "state": "done", "idempotency_key": "dispatch:ti_vn006f:1:1", "request_digest": "sha256:f001" },
+    { "operation_id": "op_f002", "kind": "cancel", "target_run": "run_f001", "state": "done", "result": "applied", "idempotency_key": "cancel:run_f001", "request_digest": "sha256:f002" },
+    { "operation_id": "op_f003", "kind": "dispatch", "target_run": "run_f002", "state": "done", "idempotency_key": "dispatch:ti_vn006f:1:2", "request_digest": "sha256:f003" }
+  ],
+  "leases": [
+    { "lease_id": "ls_f001", "kind": "node_slot", "resource_id": "local-slot-1", "holder_run": "run_f002", "generation": 2, "released_at": null },
+    { "lease_id": "ls_f002", "kind": "workspace", "resource_id": ".worktrees/codebuddy-goalagents-1", "holder_run": "run_f002", "generation": 2, "released_at": null }
+  ],
+  "events": [
+    { "event_id": "evt_0051", "cursor": 51, "schema_version": 1, "type": "run.phase", "run_id": "run_f001", "to_phase": "reserved", "occurred_at": "2026-10-23T06:00:00Z", "received_at": "2026-10-23T06:00:00Z", "quality": "observed" },
+    { "event_id": "evt_0052", "cursor": 52, "schema_version": 1, "type": "run.phase", "run_id": "run_f001", "to_phase": "running", "occurred_at": "2026-10-23T06:00:02Z", "received_at": "2026-10-23T06:00:02Z", "quality": "observed" },
+    { "event_id": "evt_0053", "cursor": 53, "schema_version": 1, "type": "run.phase", "run_id": "run_f001", "to_phase": "cancelled", "occurred_at": "2026-10-23T06:05:00Z", "received_at": "2026-10-23T06:05:00Z", "quality": "observed" },
+    { "event_id": "evt_0054", "cursor": 54, "schema_version": 1, "type": "run.phase", "run_id": "run_f002", "to_phase": "reserved", "occurred_at": "2026-10-23T06:06:00Z", "received_at": "2026-10-23T06:06:00Z", "quality": "observed" },
+    { "event_id": "evt_0055", "cursor": 55, "schema_version": 1, "type": "run.phase", "run_id": "run_f002", "to_phase": "running", "occurred_at": "2026-10-23T06:06:02Z", "received_at": "2026-10-23T06:06:02Z", "quality": "observed" }
+  ]
+}

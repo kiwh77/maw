@@ -1,0 +1,38 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "auto_execution": { "enabled": false, "managed_execution_limit": 0 },
+  "runs": [
+    {
+      "run_id": "run_a001",
+      "task_instance": "ti_vn001a",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "reserved",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": false,
+      "delivery_frozen": false,
+      "started_at": null,
+      "finished_at": null,
+      "evidence": [],
+      "phase_history": [{ "phase": "reserved", "at": "2026-10-23T05:00:00Z" }]
+    }
+  ],
+  "operations": [
+    {
+      "operation_id": "op_a001",
+      "kind": "dispatch",
+      "target_run": "run_a001",
+      "state": "pending",
+      "idempotency_key": "dispatch:ti_vn001a:1:1",
+      "request_digest": "sha256:aaaa"
+    }
+  ],
+  "leases": [
+    { "lease_id": "ls_a001", "kind": "node_slot", "resource_id": "local-slot-1", "holder_run": "run_a001", "generation": 1, "released_at": null },
+    { "lease_id": "ls_a002", "kind": "workspace", "resource_id": ".worktrees/codebuddy-goalagents-1", "holder_run": "run_a001", "generation": 1, "released_at": null }
+  ],
+  "events": [
+    { "event_id": "evt_0001", "cursor": 1, "schema_version": 1, "type": "run.phase", "run_id": "run_a001", "to_phase": "reserved", "occurred_at": "2026-10-23T05:00:00Z", "received_at": "2026-10-23T05:00:00Z", "quality": "observed" }
+  ]
+}

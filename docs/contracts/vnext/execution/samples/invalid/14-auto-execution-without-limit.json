@@ -1,0 +1,46 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E270",
+  "note": "自动执行开启但受管执行上限是 0/缺省：等于声明了自动派发却没有并发护栏。",
+  "auto_execution": {
+    "enabled": true,
+    "managed_execution_limit": 0
+  },
+  "runs": [
+    {
+      "run_id": "run_g015",
+      "task_instance": "ti_vn023g",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "reserved",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": false,
+      "delivery_frozen": false,
+      "started_at": null,
+      "finished_at": null,
+      "evidence": [],
+      "phase_history": [
+        {
+          "phase": "reserved",
+          "at": "2026-10-23T08:40:00Z"
+        }
+      ]
+    }
+  ],
+  "operations": [],
+  "leases": [],
+  "events": [
+    {
+      "event_id": "evt_0100",
+      "cursor": 100,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g015",
+      "occurred_at": "2026-10-23T08:40:00Z",
+      "received_at": "2026-10-23T08:40:00Z",
+      "quality": "observed",
+      "to_phase": "reserved"
+    }
+  ]
+}
