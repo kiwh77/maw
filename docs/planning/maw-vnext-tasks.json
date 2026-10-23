@@ -4762,7 +4762,9 @@
         "internal/board/page.test.cjs",
         "internal/board/assets/bootstrap/**",
         "internal/board/assets/shell/**",
-        "internal/board/assets/i18n/**"
+        "internal/board/assets/i18n/**",
+        "internal/board/web/**",
+        "internal/board/assets/dist/board-web.js"
       ],
       "read_scope": [
         "docs/ARCHITECTURE_VNEXT.zh-CN.md",
@@ -4856,7 +4858,9 @@
           "internal/board/page.test.cjs",
           "internal/board/assets/bootstrap/**",
           "internal/board/assets/shell/**",
-          "internal/board/assets/i18n/**"
+          "internal/board/assets/i18n/**",
+          "internal/board/web/**",
+          "internal/board/assets/dist/board-web.js"
         ],
         "read_scope": [
           "docs/ARCHITECTURE_VNEXT.zh-CN.md",

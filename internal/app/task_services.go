@@ -237,8 +237,16 @@ func historicalPlanningSnapshot(snap *model.TaskSnapshot, defs []tasks.Desired, 
 		for _, dep := range input {
 			retired := dep.Kind == model.DepInstance && byID[dep.Target] == model.InstanceStateRetired
 			if dep.Kind == model.DepLegacy {
-				hits := byDisplay[dep.Target]
-				retired = len(hits) == 1 && hits[0] == model.InstanceStateRetired
+				// After remove+restore, the same display_id can have both a retired
+				// and a new active instance. Historical frozen edges still refer to
+				// the retired generation; treat any retired namesake as unresolvable
+				// history (explicit new Desired deps are not pruned below).
+				for _, st := range byDisplay[dep.Target] {
+					if st == model.InstanceStateRetired {
+						retired = true
+						break
+					}
+				}
 			}
 			if retired {
 				count++
