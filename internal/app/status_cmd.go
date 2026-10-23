@@ -88,6 +88,25 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 		if p == nil {
 			return i18n.E("err.project_missing", "next.run_init", projectID)
 		}
+		// 先把目标任务读出来：占不占得上，决定这次上报能写什么。
+		var target *db.Task
+		if in.TaskID != "" {
+			var e error
+			target, e = db.GetTask(tx, projectID, in.TaskID)
+			if e != nil {
+				return e
+			}
+		}
+		// 心跳只能续自己持有的任务：旁路／进度上报不取得所有权。
+		// 以前这里在 owner 为空时顺手把任务记给上报者，相当于一条 progress 就能领走
+		// 任务——它既没过依赖与写盘检查，也没人知道它领了。
+		owns := target != nil && target.Owner == actor
+		if target != nil && !owns {
+			data["ownership"] = "not_granted"
+			data["task_owner"] = target.Owner
+			data["task_status"] = target.Status
+		}
+
 		existing, _ := db.GetAgent(tx, projectID, actor)
 		a := &db.Agent{
 			ProjectID:    projectID,
@@ -109,22 +128,20 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 				a.TaskID = existing.TaskID
 			}
 		}
+		// 没拿到所有权就不把自己写成该任务的执行者：看板上不该出现两个人同时在做一件事。
+		if target != nil && !owns {
+			a.TaskID = ""
+			if existing != nil {
+				a.TaskID = existing.TaskID
+			}
+		}
 		if err := db.UpsertAgent(tx, a); err != nil {
 			return err
 		}
-		if in.TaskID != "" {
-			t, e := db.GetTask(tx, projectID, in.TaskID)
-			if e != nil {
-				return e
-			}
-			if t != nil {
-				t.Heartbeat = now
-				if t.Owner == "" {
-					t.Owner = actor
-				}
-				if err := db.UpsertTask(tx, t); err != nil {
-					return err
-				}
+		if owns {
+			target.Heartbeat = now
+			if err := db.UpsertTask(tx, target); err != nil {
+				return err
 			}
 		}
 		if err := db.AppendEvent(tx, projectID, actor, eventType, in.TaskID, data); err != nil {
