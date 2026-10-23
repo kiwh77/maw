@@ -11,11 +11,13 @@ import (
 	"github.com/kiwh77/maw/internal/engine/ports"
 )
 
-// 编译期确认本适配器就是那两个端口的实现。
+// 编译期确认本适配器就是那四个端口的实现。
 // 契约 §1 允许 adapter → port／model 这条边，且只允许这条边的内部依赖。
 var (
-	_ ports.Probe  = (*Adapter)(nil)
-	_ ports.Launch = (*Adapter)(nil)
+	_ ports.Probe     = (*Adapter)(nil)
+	_ ports.Launch    = (*Adapter)(nil)
+	_ ports.Decode    = (*Adapter)(nil)
+	_ ports.Interpret = (*Adapter)(nil)
 )
 
 // DefaultProbeTimeout 是单次 --version／--help 探测的上限。
@@ -29,7 +31,7 @@ const DefaultProbeTimeout = 10 * time.Second
 // 不能沿用旧号「大概兼容」。
 const ProtocolVersion = "1"
 
-// Adapter 是绑定到单个节点的 CodeBuddy 接入器，实现 ports.Probe 与 ports.Launch。
+// Adapter 是绑定到单个节点的 CodeBuddy 接入器，实现 ports.Probe／Launch／Decode／Interpret。
 //
 // 为什么在构造时绑定节点：Launch 端口的签名是 BuildLaunchSpec(RunSpec)，
 // 里面既没有入口也没有版本；而「参数能不能拼」「协议版本写什么」恰恰取决于
@@ -40,6 +42,7 @@ type Adapter struct {
 	runner  commandRunner
 	timeout time.Duration
 	help    bool
+	clock   func() time.Time
 
 	mu   sync.Mutex
 	last *measurement
@@ -75,6 +78,15 @@ func WithHelpProbe(on bool) Option {
 	return func(a *Adapter) { a.help = on }
 }
 
+// WithClock 替换接收时间来源（测试里固定时间，避免断言依赖真实时钟）。
+func WithClock(now func() time.Time) Option {
+	return func(a *Adapter) {
+		if now != nil {
+			a.clock = now
+		}
+	}
+}
+
 // New 创建绑定到 cfg 的接入器。
 //
 // 构造阶段不碰文件系统、不起进程：只检查配置能不能用（适配器种类、绝对入口、平台）。
@@ -88,6 +100,7 @@ func New(cfg model.NodeConfig, opts ...Option) (*Adapter, error) {
 		runner:  execRunner{},
 		timeout: DefaultProbeTimeout,
 		help:    true,
+		clock:   time.Now,
 	}
 	for _, opt := range opts {
 		opt(a)

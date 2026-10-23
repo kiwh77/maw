@@ -161,5 +161,10 @@ func firstLine(b []byte) string {
 	return strings.TrimSpace(s)
 }
 
-// now 让测试可以固定时间源（当前只有 measurement.at 使用）。
-func (a *Adapter) now() time.Time { return time.Now() }
+// now 是接收时间的唯一来源；测试用 WithClock 固定它。
+func (a *Adapter) now() time.Time {
+	if a.clock != nil {
+		return a.clock()
+	}
+	return time.Now()
+}
