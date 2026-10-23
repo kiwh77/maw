@@ -44,6 +44,15 @@ type InstanceDraft struct {
 //
 // 用随机数而不是从编号派生：同一编号被重建时必须拿到新身份（契约 §1「永不复用」）。
 func NewInstanceID() (model.InstanceID, error) {
+	id, err := newID("ti")
+	if err != nil {
+		return "", err
+	}
+	return model.InstanceID(id), nil
+}
+
+// newID 生成 <prefix>_<12 位小写字母数字> 的随机身份，供实例与占用共用。
+func newID(prefix string) (string, error) {
 	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
 	buf := make([]byte, 12)
 	if _, err := rand.Read(buf); err != nil {
@@ -52,7 +61,7 @@ func NewInstanceID() (model.InstanceID, error) {
 	for i := range buf {
 		buf[i] = alphabet[int(buf[i])%len(alphabet)]
 	}
-	return model.InstanceID("ti_" + string(buf)), nil
+	return prefix + "_" + string(buf), nil
 }
 
 // legacyInstanceID 为存量行生成确定性身份，供迁移重放保持幂等。

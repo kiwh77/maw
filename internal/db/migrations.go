@@ -172,6 +172,49 @@ WHEN NEW.instance_id IS NULL OR NEW.instance_id = ''
 BEGIN SELECT RAISE(ABORT, 'tasks.instance_id: 当前任务必须有实例身份'); END;
 `
 
+// resourceDDL 是 v5：节点记录与资源占用。
+//
+// 唯一有效持有者落在库里：未释放的 resource_key 上有部分唯一索引，
+// 因此「同一目录/同一槽位两个持有者」不需要靠调用方自觉。
+const resourceDDL = `
+CREATE TABLE IF NOT EXISTS nodes (
+    node_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    label TEXT NOT NULL DEFAULT '',
+    slot_limit INTEGER NOT NULL DEFAULT 0,
+    account_quota INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    CHECK (slot_limit >= 0 AND account_quota >= 0)
+);
+CREATE TABLE IF NOT EXISTS resource_leases (
+    lease_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    resource_key TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    generation INTEGER NOT NULL,
+    holder TEXT NOT NULL DEFAULT '',
+    acquired_at TEXT NOT NULL,
+    released_at TEXT,
+    release_generation INTEGER,
+    release_reason TEXT,
+    CHECK (kind IN ('node_slot', 'workspace', 'merge')),
+    CHECK (generation >= 1),
+    CHECK (released_at IS NULL OR release_generation IS NOT NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS resource_leases_one_holder
+    ON resource_leases(resource_key) WHERE released_at IS NULL;
+CREATE INDEX IF NOT EXISTS resource_leases_project_kind
+    ON resource_leases(project_id, kind, released_at);
+CREATE TRIGGER IF NOT EXISTS resource_leases_release_once
+BEFORE UPDATE ON resource_leases
+WHEN OLD.released_at IS NOT NULL AND NEW.released_at IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'resource_leases: 占用已释放，不能再次释放'); END;
+`
+
 // migrations 是显式迁移序列：版本号唯一、升序执行、只往前走。
 //
 // 版本号从 3 起：3 是 vnext 基线（沿用旧 0.x 把 schema_version 写成 3 的数值），
@@ -184,6 +227,7 @@ BEGIN SELECT RAISE(ABORT, 'tasks.instance_id: 当前任务必须有实例身份'
 var migrations = []Migration{
 	{Version: 3, Name: "baseline_core_tables", SQL: schema},
 	{Version: 4, Name: "task_identity", SQL: identityDDL, Apply: backfillTaskIdentity},
+	{Version: 5, Name: "resource_leases", SQL: resourceDDL},
 }
 
 const (
