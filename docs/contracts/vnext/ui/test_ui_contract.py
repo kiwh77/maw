@@ -143,15 +143,37 @@ class ContractStatusTest(unittest.TestCase):
                 rows[match.group(1)] = (match.group(2).strip(), match.group(3).strip())
         return rows
 
+    def _zh_labels(self):
+        """取 I18N 中的中文文案（英文条目不含 CJK，天然被过滤）。"""
+        block = re.search(r"const I18N = \{(.*?)\n\};", self.page, re.S)
+        if not block:
+            return {}
+        pairs = re.findall(r'"([a-z_.]+)":\s*"([^"]*)"', block.group(1))
+        return {key: value for key, value in pairs if re.search(r"[\u4e00-\u9fff]", value)}
+
     def _page_columns(self):
+        # 新版 Board 由 I18N 生成标签；旧版直接写在 COLUMNS 字面量里。
+        statuses = re.findall(r'\["([a-z_]+)",\s*"status\.([a-z_]+)"\]', self.page)
+        if statuses:
+            labels = self._zh_labels()
+            return {status: labels["status." + key] for status, key in statuses}
         block = re.search(r"const COLUMNS = \[(.*?)\];", self.page, re.S).group(1)
         return dict(re.findall(r'\["([a-z_]+)","([^"]+)"\]', block))
 
     def _page_lanes(self):
-        block = re.search(r"const LANES = \[(.*?)\];", self.page, re.S).group(1)
         lanes = {}
+        for lane_id, _label_key, statuses in re.findall(
+            r'\{ id: "(\w+)", label: "lane\.([a-z]+)", statuses: \[([^\]]+)\]', self.page
+        ):
+            lanes[lane_id] = (
+                self._zh_labels()["lane." + lane_id],
+                re.findall(r'"([a-z_]+)"', statuses),
+            )
+        if lanes:
+            return lanes
+        block = re.search(r"const LANES = \[(.*?)\];", self.page, re.S).group(1)
         for lane_id, label, statuses in re.findall(
-            r'id: "(\w+)",\s*label: "([^"]+)",\s*statuses: \[([^\]]+)\]', block
+            r'id: "(\w+)", label: "([^"]+)", statuses: \[([^\]]+)\]', block
         ):
             lanes[lane_id] = (label, re.findall(r'"([a-z_]+)"', statuses))
         return lanes
