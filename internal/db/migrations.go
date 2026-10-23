@@ -215,6 +215,72 @@ WHEN OLD.released_at IS NOT NULL AND NEW.released_at IS NOT NULL
 BEGIN SELECT RAISE(ABORT, 'resource_leases: 占用已释放，不能再次释放'); END;
 `
 
+// runtimeDDL 是 v6：Run、持久操作与标准事件流。
+//
+// 三条硬约束：同一实例同一代际只能有一个 Run；同工程同类型同幂等键只能有一个操作；
+// 事件游标是 AUTOINCREMENT 入库序号（回滚过的号不复用），event_id 唯一（补交去重）。
+const runtimeDDL = `
+CREATE TABLE IF NOT EXISTS runs (
+    run_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    version_no INTEGER NOT NULL,
+    generation INTEGER NOT NULL,
+    phase TEXT NOT NULL,
+    reconciliation_state TEXT NOT NULL,
+    desired_action TEXT NOT NULL DEFAULT 'none',
+    process_stop_confirmed INTEGER NOT NULL DEFAULT 0,
+    delivery_frozen INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT,
+    finished_at TEXT,
+    phase_history_json TEXT NOT NULL DEFAULT '[]',
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    leases_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (generation >= 1),
+    UNIQUE (instance_id, generation)
+);
+CREATE INDEX IF NOT EXISTS runs_instance ON runs(instance_id, generation);
+CREATE TABLE IF NOT EXISTS operations (
+    operation_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    target_phase TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL,
+    coordinator TEXT NOT NULL DEFAULT '',
+    lease_expires_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (kind IN ('dispatch', 'cancel', 'verify')),
+    CHECK (result IN ('pending', 'applied', 'already_finished', 'rejected')),
+    UNIQUE (project_id, kind, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS operations_pending ON operations(result, lease_expires_at);
+CREATE TABLE IF NOT EXISTS run_events (
+    cursor INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    phase TEXT NOT NULL DEFAULT '',
+    lease_id TEXT NOT NULL DEFAULT '',
+    schema_version INTEGER NOT NULL,
+    quality TEXT NOT NULL DEFAULT 'observed',
+    occurred_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    CHECK (schema_version > 0),
+    CHECK (quality IN ('observed', 'estimated', 'unknown'))
+);
+CREATE INDEX IF NOT EXISTS run_events_project_cursor ON run_events(project_id, cursor);
+`
+
 // migrations 是显式迁移序列：版本号唯一、升序执行、只往前走。
 //
 // 版本号从 3 起：3 是 vnext 基线（沿用旧 0.x 把 schema_version 写成 3 的数值），
@@ -228,6 +294,7 @@ var migrations = []Migration{
 	{Version: 3, Name: "baseline_core_tables", SQL: schema},
 	{Version: 4, Name: "task_identity", SQL: identityDDL, Apply: backfillTaskIdentity},
 	{Version: 5, Name: "resource_leases", SQL: resourceDDL},
+	{Version: 6, Name: "run_and_operations", SQL: runtimeDDL},
 }
 
 const (
