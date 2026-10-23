@@ -68,5 +68,21 @@ owners; idle registered agents have no invented assignment. Motion is decorative
 and never writes to task state. The canvas stops rendering when its view is hidden.
 WebGL failures retain a live task list. System reduced-motion disables idle motions.
 
-Checks: `node --test src/factory/model.test.cjs`, `npm run build`,
-`node --test ../page.test.cjs`, `go test ./internal/board` from repository root.
+### Yard motion (RF-003)
+
+- Trucks enter along the road with the nose leading, then reverse so the tail stops
+  over the unloading dock; waiting cargo is stacked in truck space, so it arrives and
+  parks with the vehicle instead of staying behind.
+- An owner holding executing work gets one carrier: empty walk to the tail, load,
+  carry to the bench, a visible working phase, then the walk back. Other states wait
+  at the dock, the inspection station or the blocked bay.
+- Nameplates render the complete Agent id and are re-projected every frame, so they
+  follow both the worker and the camera.
+- Pose and carry helpers live in `src/factory/model.mjs` and are pure functions of
+  elapsed time and progress, so polling never restarts a walk-in or a carry cycle:
+  `update()` only rebuilds when `sceneSignature()` changes, and rebuilds keep truck
+  progress, worker position and cycle clock.
+
+Checks: `node --test src/factory/model.test.cjs`, `node --test src/factory/yard.test.cjs`,
+`npm run build`, `node --test ../page.test.cjs`, `go test ./internal/board` from
+repository root.
