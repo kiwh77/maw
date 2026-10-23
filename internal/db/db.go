@@ -4,102 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
-
-	"github.com/kiwh77/maw/internal/version"
 )
-
-const schema = `
-CREATE TABLE IF NOT EXISTS meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    path TEXT NOT NULL UNIQUE,
-    main_branch TEXT NOT NULL DEFAULT 'main',
-    max_parallel INTEGER NOT NULL DEFAULT 4,
-    created_at TEXT NOT NULL,
-    last_seen TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS tasks (
-    project_id TEXT NOT NULL,
-    id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    status TEXT NOT NULL,
-    priority INTEGER NOT NULL DEFAULT 100,
-    merge_order INTEGER NOT NULL DEFAULT 100,
-    owner TEXT,
-    deps_json TEXT NOT NULL DEFAULT '[]',
-    write_scope_json TEXT NOT NULL DEFAULT '[]',
-    read_scope_json TEXT NOT NULL DEFAULT '[]',
-    acceptance_json TEXT NOT NULL DEFAULT '[]',
-    branch TEXT,
-    worktree TEXT,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    blocked_reason TEXT,
-    heartbeat TEXT,
-    prev_status TEXT,
-    revision INTEGER NOT NULL DEFAULT 0,
-    extra_json TEXT NOT NULL DEFAULT '{}',
-    PRIMARY KEY (project_id, id)
-);
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts TEXT NOT NULL,
-    project_id TEXT,
-    actor TEXT NOT NULL,
-    type TEXT NOT NULL,
-    task_id TEXT,
-    data_json TEXT NOT NULL DEFAULT '{}'
-);
-CREATE TABLE IF NOT EXISTS locks (
-    project_id TEXT NOT NULL,
-    path TEXT NOT NULL,
-    owner TEXT NOT NULL,
-    task_id TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    PRIMARY KEY (project_id, path)
-);
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts TEXT NOT NULL,
-    project_id TEXT,
-    sender TEXT NOT NULL,
-    recipient TEXT NOT NULL,
-    type TEXT NOT NULL,
-    task_id TEXT,
-    body_json TEXT NOT NULL DEFAULT '{}',
-    read INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS shared_files (
-    project_id TEXT NOT NULL,
-    path TEXT NOT NULL,
-    owner_task TEXT NOT NULL,
-    PRIMARY KEY (project_id, path)
-);
-CREATE TABLE IF NOT EXISTS agents (
-    project_id TEXT NOT NULL,
-    id TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'worker',
-    status TEXT NOT NULL DEFAULT 'idle',
-    task_id TEXT,
-    worktree TEXT,
-    branch TEXT,
-    registered_at TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    meta_json TEXT NOT NULL DEFAULT '{}',
-    PRIMARY KEY (project_id, id)
-);
-`
 
 type Project struct {
 	ID          string `json:"id"`
@@ -163,46 +73,6 @@ func UTCNow() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05Z")
 }
 
-// sqliteDSN builds a modernc DSN with busy_timeout (wait for locks) and
-// BEGIN IMMEDIATE so writers queue instead of racing deferred upgrades.
-func sqliteDSN(path string) string {
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
-	q := u.Query()
-	q.Add("_pragma", "busy_timeout(30000)")
-	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "foreign_keys(ON)")
-	q.Set("_txlock", "immediate")
-	u.RawQuery = q.Encode()
-	return u.String()
-}
-
-func openSQLite(path string) (*sql.DB, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	db, err := sql.Open("sqlite", sqliteDSN(path))
-	if err != nil {
-		return nil, err
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(0)
-	// Belt-and-suspenders: DSN already sets these on each new connection.
-	if _, err := db.Exec("PRAGMA busy_timeout=30000"); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	return db, nil
-}
-
 // IsBusy reports SQLITE_BUSY / SQLITE_LOCKED (incl. extended codes) or the
 // common "database is locked" message from drivers that wrap the code away.
 func IsBusy(err error) bool {
@@ -223,37 +93,38 @@ func IsBusy(err error) bool {
 		strings.Contains(msg, "sqlite_locked")
 }
 
+// Open 打开并推进迁移，返回裸连接（旧入口，需要自行 Close）。
+//
+// 它会改 schema，所以只给「本来就是写入口」的调用方用；纯查询请走
+// OpenReadOnly／WithReadTx，那条路径不建表、不升级、不加写锁。
 func Open(path string) (*sql.DB, error) {
-	db, err := openSQLite(path)
+	if err := ensureParentDir(path); err != nil {
+		return nil, err
+	}
+	db, err := openConn(path, writeConnOptions())
 	if err != nil {
 		return nil, err
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := MigrateDB(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return db, nil
 }
 
-// OpenRaw 打开数据库但不跑 schema 迁移（用于读取旧库）
+// OpenRaw 打开数据库但不跑 schema 迁移（用于读取旧库）。
 func OpenRaw(path string) (*sql.DB, error) {
-	return openSQLite(path)
+	return openConn(path, readConnOptions())
 }
 
+// EnsureSchema 兼容旧名：等价于 MigrateDB，已是最新时不做任何写操作。
 func EnsureSchema(db *sql.DB) error {
-	if _, err := db.Exec(schema); err != nil {
-		return err
-	}
-	_, err := db.Exec(`INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)`, version.SchemaVersion)
-	return err
+	return MigrateDB(db)
 }
 
+// Init 建目录、建库并把 schema 推进到最新版本。
 func Init(path string) error {
-	db, err := Open(path)
-	if err != nil {
-		return err
-	}
-	return db.Close()
+	return Migrate(path)
 }
 
 func mustJSON(v any) string {
@@ -280,51 +151,21 @@ func nullStr(s string) any {
 	return s
 }
 
-const (
-	withTxMaxAttempts = 8
-	withTxBackoffMin  = 50 * time.Millisecond
-	withTxBackoffMax  = 2 * time.Second
-)
-
-func withTxOnce(path string, fn func(*sql.Tx) error) error {
-	db, err := Open(path)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	tx, err := db.Begin() // _txlock=immediate → BEGIN IMMEDIATE
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
-}
-
-// WithTx runs fn in a write transaction. On SQLITE_BUSY it retries with
-// exponential backoff (busy_timeout already waits up to 30s per attempt).
+// WithTx 是旧的一次性写入口：一次调用＝一个写事务。
+//
+// 迁移在重试循环之外、每次调用至多尝试一次补齐（已最新时只是两条只读查询）；
+// 重试循环内只有 BEGIN IMMEDIATE 与业务语句，不建目录、不跑 DDL、不起进程。
+// 需要复用的调用方应改用 OpenStore。
 func WithTx(path string, fn func(*sql.Tx) error) error {
-	backoff := withTxBackoffMin
-	var last error
-	for attempt := 0; attempt < withTxMaxAttempts; attempt++ {
-		last = withTxOnce(path, fn)
-		if last == nil || !IsBusy(last) {
-			return last
-		}
-		if attempt+1 == withTxMaxAttempts {
-			break
-		}
-		time.Sleep(backoff)
-		if backoff < withTxBackoffMax {
-			backoff *= 2
-			if backoff > withTxBackoffMax {
-				backoff = withTxBackoffMax
-			}
-		}
+	s, err := OpenStore(path)
+	if err != nil {
+		return err
 	}
-	return last
+	defer s.Close()
+	if err := s.Migrate(); err != nil {
+		return err
+	}
+	return s.Write(fn)
 }
 
 func UpsertProject(tx *sql.Tx, p *Project) error {
