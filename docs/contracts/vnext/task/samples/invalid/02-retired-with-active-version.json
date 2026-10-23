@@ -1,0 +1,26 @@
+{
+  "contract": "maw.task.instance/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E140",
+  "note": "退役实例仍保留活跃版本指针：退役后调用方只能读快照，不能再把它当作可执行定义。",
+  "instances": [
+    {
+      "instance_id": "ti_retptr01",
+      "display_id": "VN-005",
+      "state": "retired",
+      "created_at": "2026-10-20T08:00:00Z",
+      "retired_at": "2026-10-22T09:00:00Z",
+      "retired_reason": "removed_from_plan",
+      "active_version": 1,
+      "versions": [
+        { "version_no": 1, "frozen_at": "2026-10-20T08:00:00Z", "title": "冻结端口契约", "deps": [] }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-005",
+        "primary_key": "716c30878ba1b95f/VN-005",
+        "ambiguous": false
+      }
+    }
+  ]
+}

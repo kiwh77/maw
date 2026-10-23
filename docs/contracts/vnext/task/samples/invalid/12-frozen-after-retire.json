@@ -1,0 +1,27 @@
+{
+  "contract": "maw.task.instance/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E142",
+  "note": "退役之后又冻结了新版本：退役快照必须不可变，否则锚点会随着后来者改动而漂移。",
+  "instances": [
+    {
+      "instance_id": "ti_postret1",
+      "display_id": "VN-015",
+      "state": "retired",
+      "created_at": "2026-10-18T08:00:00Z",
+      "retired_at": "2026-10-20T08:00:00Z",
+      "retired_reason": "removed_from_plan",
+      "active_version": null,
+      "versions": [
+        { "version_no": 1, "frozen_at": "2026-10-18T08:00:00Z", "title": "退役前", "deps": [] },
+        { "version_no": 2, "frozen_at": "2026-10-21T08:00:00Z", "title": "退役后又改", "deps": [] }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-015",
+        "primary_key": "716c30878ba1b95f/VN-015",
+        "ambiguous": false
+      }
+    }
+  ]
+}

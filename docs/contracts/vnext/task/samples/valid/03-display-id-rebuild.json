@@ -1,0 +1,75 @@
+{
+  "contract": "maw.task.instance/v1",
+  "project_id": "716c30878ba1b95f",
+  "generated_at": "2026-10-23T04:00:00Z",
+  "note": "同一显示编号 VN-005 在旧实例退役后被新实例重新占用：instance_id 必须新建，旧实例保留旧主键别名。",
+  "instances": [
+    {
+      "instance_id": "ti_vn005old",
+      "display_id": "VN-005",
+      "state": "retired",
+      "created_at": "2026-10-20T08:00:00Z",
+      "retired_at": "2026-10-22T09:00:00Z",
+      "retired_reason": "removed_from_plan",
+      "active_version": null,
+      "versions": [
+        {
+          "version_no": 1,
+          "frozen_at": "2026-10-20T08:00:00Z",
+          "title": "冻结端口契约",
+          "deps": []
+        }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-005",
+        "primary_key": "716c30878ba1b95f/VN-005",
+        "ambiguous": false
+      }
+    },
+    {
+      "instance_id": "ti_vn005new",
+      "display_id": "VN-005",
+      "state": "active",
+      "created_at": "2026-10-23T03:40:00Z",
+      "active_version": 1,
+      "versions": [
+        {
+          "version_no": 1,
+          "frozen_at": "2026-10-23T03:40:00Z",
+          "title": "冻结 HTTP 契约",
+          "deps": []
+        }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-005",
+        "primary_key": "716c30878ba1b95f/VN-005",
+        "ambiguous": false
+      }
+    },
+    {
+      "instance_id": "ti_vn006c",
+      "display_id": "VN-006",
+      "state": "active",
+      "created_at": "2026-10-23T03:45:00Z",
+      "active_version": 1,
+      "versions": [
+        {
+          "version_no": 1,
+          "frozen_at": "2026-10-23T03:45:00Z",
+          "title": "冻结可观测字段边界",
+          "deps": [
+            { "kind": "instance", "target": "ti_vn005new" }
+          ]
+        }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-006",
+        "primary_key": "716c30878ba1b95f/VN-006",
+        "ambiguous": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "contract": "maw.task.instance/v1",
+  "project_id": "716c30878ba1b95f",
+  "generated_at": "2026-10-23T05:00:00Z",
+  "note": "旧 deps_json 里存的是显示编号字符串：只要该编号只对应一个实例，按 legacy 形式解析；新写入一律用 instance 形式。",
+  "instances": [
+    {
+      "instance_id": "ti_vn101a",
+      "display_id": "VN-101",
+      "state": "active",
+      "created_at": "2026-10-23T04:40:00Z",
+      "active_version": 1,
+      "versions": [
+        {
+          "version_no": 1,
+          "frozen_at": "2026-10-23T04:40:00Z",
+          "title": "建立任务实例表与唯一引用",
+          "deps": []
+        }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-101",
+        "primary_key": "716c30878ba1b95f/VN-101",
+        "ambiguous": false
+      }
+    },
+    {
+      "instance_id": "ti_vn102a",
+      "display_id": "VN-102",
+      "state": "active",
+      "created_at": "2026-10-23T04:45:00Z",
+      "active_version": 1,
+      "versions": [
+        {
+          "version_no": 1,
+          "frozen_at": "2026-10-23T04:45:00Z",
+          "title": "回填实例身份并保留旧主键",
+          "deps": [
+            { "kind": "legacy", "target": "VN-101" }
+          ]
+        }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-102",
+        "primary_key": "716c30878ba1b95f/VN-102",
+        "ambiguous": false
+      }
+    }
+  ]
+}
