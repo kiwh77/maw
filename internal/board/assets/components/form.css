@@ -9,7 +9,9 @@
 
 .field > label,
 .field-label {
-  font: var(--font-meta)/1.4 var(--sans);
+  font-size: var(--font-meta, 12px);
+  line-height: 1.4;
+  font-family: var(--sans, sans-serif);
   color: var(--muted);
 }
 

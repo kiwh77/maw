@@ -1,11 +1,12 @@
 /**
  * 波次依赖拓扑画布（X6）。
  *
- * 布局由 legacy `layoutTopoBands` 计算（波次列 = 依赖深度；纵轴并行轨道），本模块只负责渲染：
+ * 布局由 legacy `layoutTopoBands` 计算（波次列 = 未完成依赖深度；纵轴并行轨道），本模块只负责渲染：
  * - 平滑曲线连接 + 中点圆点；
  * - 空白拖拽平移、Ctrl／⌘ + 滚轮缩放、适应画布／重布局；
  * - 悬停高亮相邻依赖，其余节点与边降透明度；
  * - 筛选外依赖以虚线 stub 表示；多工程 band 纵向堆叠并保留标题。
+ * - 状态文案由调用方 `statusLabels` 注入（中文／英文 i18n）。
  *
  * 颜色全部来自 `board.css` 的语义 token，节点为 HTML 节点，主题切换即时生效。
  */
@@ -59,6 +60,8 @@ export interface TopologyOptions {
   selected?: { tid: string; pid: string } | null
   onOpen?: (tid: string, pid: string) => void
   strings?: Partial<TopologyStrings>
+  /** 状态码 → 展示名（如 ready → 可领取）。 */
+  statusLabels?: Record<string, string>
   /** 强制重建（重布局按钮）。 */
   force?: boolean
 }
@@ -92,7 +95,10 @@ interface CardPayload {
   id: string
   pid: string
   title: string
+  /** 英文状态键，供 data-status / CSS。 */
   status: string
+  /** 本地化展示名。 */
+  statusLabel: string
   owner: string
   priority: string
   stub: boolean
@@ -123,14 +129,14 @@ function cardElement(payload: CardPayload): HTMLElement {
     el.dataset.status = payload.status
     el.tabIndex = 0
     el.setAttribute('role', 'button')
-    el.setAttribute('aria-label', payload.id + ' ' + payload.title + '，' + payload.status)
+    el.setAttribute('aria-label', payload.id + ' ' + payload.title + '，' + payload.statusLabel)
   }
   el.innerHTML = payload.stub
     ? '<div class="node-head"><span class="id">' + esc(payload.id) + '</span></div>' +
       '<h4 class="task-title">' + esc(payload.stubTitle) + '</h4>' +
       '<div class="node-meta"><span>' + esc(payload.stubHint) + '</span></div>'
     : '<div class="node-head"><span class="id">' + esc(payload.id) + '</span>' +
-      '<span class="status">' + esc(payload.status) + '</span></div>' +
+      '<span class="status">' + esc(payload.statusLabel) + '</span></div>' +
       '<h4 class="task-title">' + esc(payload.title) + '</h4>' +
       '<div class="node-meta"><span class="owner">' + esc(payload.owner) + '</span>' +
       '<span class="priority">' + esc(payload.priority) + '</span></div>'
@@ -201,7 +207,11 @@ interface Instance {
 const instances = new WeakMap<HTMLElement, Instance>()
 
 function signature(options: TopologyOptions): string {
-  const parts: string[] = [document.documentElement.dataset.theme || '', options.selected ? options.selected.pid + '/' + options.selected.tid : '']
+  const parts: string[] = [
+    document.documentElement.dataset.theme || '',
+    options.selected ? options.selected.pid + '/' + options.selected.tid : '',
+    'SL:' + JSON.stringify(options.statusLabels || {}),
+  ]
   for (const band of options.bands) {
     parts.push('B:' + band.pid + '/' + band.name + '/' + band.width + 'x' + band.height)
     for (const task of band.tasks) {
@@ -213,6 +223,13 @@ function signature(options: TopologyOptions): string {
     for (const [id, pos] of band.positions) parts.push('P:' + id + '@' + pos.x + ',' + pos.y + (pos.stub ? '~' : ''))
   }
   return parts.join('\n')
+}
+
+function formatStatus(options: TopologyOptions, status: string): string {
+  if (!status) return '—'
+  const labels = options.statusLabels
+  if (labels && labels[status]) return labels[status]
+  return status
 }
 
 function buildShell(container: HTMLElement, strings: TopologyStrings): { shell: HTMLElement; canvas: HTMLElement; bar: HTMLElement } {
@@ -288,6 +305,7 @@ function addNodes(instance: Instance, strings: TopologyStrings): void {
       const task = band.byId.get(id) || { id, project_id: band.pid }
       const stub = !!pos.stub || !band.byId.has(id)
       const active = !!selected && selected.tid === id && selected.pid === (task.project_id || band.pid)
+      const status = task.status || ''
       graph.addNode({
         id: nodeKey(band.pid, id),
         shape: CARD_SHAPE,
@@ -300,7 +318,8 @@ function addNodes(instance: Instance, strings: TopologyStrings): void {
           kind: 'card',
           id,
           title: task.title || '',
-          status: task.status || '',
+          status,
+          statusLabel: formatStatus(instance.options, status),
           owner: task.owner || '',
           priority: task.priority === undefined ? 'P—' : 'P' + task.priority,
           stub,
@@ -423,6 +442,29 @@ function wireInteractions(instance: Instance): void {
   })
 }
 
+const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'self_check'])
+const READY_STATUSES = new Set(['ready', 'backlog'])
+
+function pickFocusCell(instance: Instance): ReturnType<Graph['getCellById']> | null {
+  const { graph, options } = instance
+  const selected = options.selected
+  if (selected) {
+    const cell = graph.getCellById(nodeKey(selected.pid, selected.tid))
+    if (cell) return cell
+  }
+  const pick = (want: Set<string>) => {
+    for (const band of options.bands) {
+      for (const task of band.tasks) {
+        if (!want.has(task.status || '')) continue
+        const cell = graph.getCellById(nodeKey(band.pid, task.id))
+        if (cell) return cell
+      }
+    }
+    return null
+  }
+  return pick(RUNNING_STATUSES) || pick(READY_STATUSES)
+}
+
 function fitView(instance: Instance): void {
   // 视图切换时容器可能仍是 display:none（0×0），等到有实际尺寸再定位。
   let tries = 0
@@ -433,8 +475,11 @@ function fitView(instance: Instance): void {
       if (tries++ < 40 && typeof requestAnimationFrame === 'function') requestAnimationFrame(attempt)
       return
     }
-    graph.zoomToFit({ padding: 24, maxScale: 1 })
-    graph.centerContent()
+    // 与滚轮 minScale 对齐，避免大图缩成「毛线球」。
+    graph.zoomToFit({ padding: 24, maxScale: 1, minScale: 0.3 })
+    const focus = pickFocusCell(instance)
+    if (focus) graph.centerCell(focus)
+    else graph.centerContent()
   }
   attempt()
 }

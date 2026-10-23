@@ -1101,9 +1101,38 @@ function topoMedian(values) {
   return s.length % 2 === 1 ? s[mid] : (s[mid] + s[mid + 1]) / 2;
 }
 
+/** 轨道取整：多依赖中位可能为 .5，落到最近整数行。 */
+function topoTrackRound(v) {
+  if (v == null || Number.isNaN(v)) return null;
+  return Math.round(v);
+}
+
 /**
- * 同工程内分层：依赖在左，依赖方在右；缺失依赖以虚线 stub 占位。
- * 纵轴用并行轨道：barycenter 减交叉，链式节点尽量水平对齐，分叉/汇合居中。
+ * 在 used 集合中找离 want 最近的空闲轨道（同行优先，再上下对称扩展）。
+ * 保证有依赖关系的节点尽量同一行，冲突时也彼此靠近。
+ */
+function topoNearestFreeTrack(want, used) {
+  let t = Math.max(0, want | 0);
+  if (!used.has(t)) return t;
+  for (let delta = 1; delta < 10000; delta++) {
+    const up = t - delta;
+    const down = t + delta;
+    if (up >= 0 && !used.has(up)) return up;
+    if (!used.has(down)) return down;
+  }
+  return t;
+}
+
+/** 已结束态：不阻塞后续，不抬升波次深度。 */
+function topoDepDone(task) {
+  const st = task && task.status;
+  return st === "done" || st === "cancelled";
+}
+
+/**
+ * 同工程内分层：可单独开始（无未完成前置）在最左，再向右延伸。
+ * 深度按「未完成依赖」最长路径；已完成／筛选外依赖不抬升。
+ * 纵轴：barycenter 减交叉；单链尽量同一行；多依赖取中位行；冲突选最近空闲行。
  */
 function layoutTopoBands(tasks) {
   const groups = new Map();
@@ -1128,15 +1157,18 @@ function layoutTopoBands(tasks) {
       let L = 0;
       if (task) {
         for (const d of (task.deps || [])) {
-          if (!d) continue;
-          L = Math.max(L, (byId.has(d) || stubs.has(d) ? walk(d, stack) : -1) + 1);
+          if (!d || !byId.has(d)) continue; // 筛选外 stub：视为已满足，不抬升
+          const dep = byId.get(d);
+          if (topoDepDone(dep)) continue;
+          L = Math.max(L, walk(d, stack) + 1);
         }
       }
       level.set(id, L);
       stack.delete(id);
       return L;
     };
-    for (const id of stubs) walk(id, new Set());
+    // stub 仅作虚线端点：落在波次 0，不参与未完成深度抬升。
+    for (const id of stubs) level.set(id, 0);
     for (const t of group) walk(t.id, new Set());
     const layers = [];
     for (const [id, L] of level) {
@@ -1202,52 +1234,104 @@ function layoutTopoBands(tasks) {
       }
     }
 
-    // 水平轨道：有前驱则取前驱 track 中位；同列保序推开。
+    // 水平轨道：单链同行；多依赖取前驱轨道中位；冲突选最近空闲行（而非整列下推）。
     const track = new Map();
-    let nextFree = 0;
-    for (let li = 0; li < layers.length; li++) {
-      const layer = layers[li];
-      if (!layer) continue;
-      let prevTrack = -1;
+    const desiredOf = (id) => {
+      const up = (preds.get(id) || []).filter((p) => track.has(p)).map((p) => track.get(p));
+      const down = (succs.get(id) || []).filter((s) => track.has(s)).map((s) => track.get(s));
+      // 单前驱：优先与前驱同一行（链式对齐）。
+      if (up.length === 1) return up[0];
+      // 多前驱：取离它们都近的中位行。
+      if (up.length >= 2) {
+        const m = topoTrackRound(topoMedian(up));
+        if (m != null) return m;
+      }
+      // 仅有后继时（回溯），靠后继中位。
+      if (down.length === 1) return down[0];
+      if (down.length >= 2) {
+        const m = topoTrackRound(topoMedian(down));
+        if (m != null) return m;
+      }
+      return null;
+    };
+
+    const assignLayer = (layer, fallbackStart) => {
+      if (!layer || !layer.length) return fallbackStart;
+      const wants = new Map();
+      let fb = fallbackStart;
       for (const id of layer) {
-        const upstream = (preds.get(id) || []).filter((p) => track.has(p)).map((p) => track.get(p));
-        let desired = topoMedian(upstream);
-        if (desired == null) desired = nextFree++;
-        if (desired <= prevTrack) desired = prevTrack + 1;
-        track.set(id, desired);
-        prevTrack = desired;
-        nextFree = Math.max(nextFree, desired + 1);
+        let w = desiredOf(id);
+        if (w == null) w = fb++;
+        wants.set(id, w);
       }
-    }
-
-    // 分叉源 / 汇合点落到相连轨道的中线（菱形起止）。
-    for (const id of level.keys()) {
-      const outs = (succs.get(id) || []).filter((s) => track.has(s)).map((s) => track.get(s));
-      const ins = (preds.get(id) || []).filter((p) => track.has(p)).map((p) => track.get(p));
-      if (outs.length >= 2) {
-        const m = topoMedian(outs);
-        if (m != null) track.set(id, m);
-      } else if (ins.length >= 2) {
-        const m = topoMedian(ins);
-        if (m != null) track.set(id, m);
-      }
-    }
-
-    // 居中后再消解同列重叠，并按 track 重排层序。
-    for (const layer of layers) {
-      if (!layer) continue;
       const ordered = layer.slice().sort((a, b) => {
-        const d = track.get(a) - track.get(b);
+        const d = wants.get(a) - wants.get(b);
         if (d !== 0) return d;
-        return layer.indexOf(a) - layer.indexOf(b);
+        return tieBreak(a, b);
       });
-      for (let i = 1; i < ordered.length; i++) {
-        if (track.get(ordered[i]) <= track.get(ordered[i - 1])) {
-          track.set(ordered[i], track.get(ordered[i - 1]) + 1);
-        }
+      const used = new Set();
+      for (const id of ordered) {
+        const got = topoNearestFreeTrack(wants.get(id), used);
+        track.set(id, got);
+        used.add(got);
       }
       layer.length = 0;
-      layer.push(...ordered);
+      layer.push(...ordered.sort((a, b) => track.get(a) - track.get(b) || tieBreak(a, b)));
+      let maxT = fallbackStart;
+      for (const id of layer) maxT = Math.max(maxT, track.get(id) + 1);
+      return maxT;
+    };
+
+    // 前向：按波次落到靠近前驱的行。
+    let nextFree = 0;
+    for (let li = 0; li < layers.length; li++) {
+      nextFree = Math.max(nextFree, assignLayer(layers[li], nextFree));
+    }
+
+    // 回溯 2 轮：把分叉源 / 汇合点拉到相连轨道中位，再按层消冲突，保持靠近。
+    for (let pass = 0; pass < 2; pass++) {
+      for (let li = layers.length - 1; li >= 0; li--) {
+        const layer = layers[li];
+        if (!layer) continue;
+        for (const id of layer) {
+          const outs = (succs.get(id) || []).filter((s) => track.has(s)).map((s) => track.get(s));
+          const ins = (preds.get(id) || []).filter((p) => track.has(p)).map((p) => track.get(p));
+          if (outs.length >= 1) {
+            const m = outs.length === 1 ? outs[0] : topoTrackRound(topoMedian(outs));
+            if (m != null) track.set(id, m);
+          } else if (ins.length >= 2) {
+            const m = topoTrackRound(topoMedian(ins));
+            if (m != null) track.set(id, m);
+          }
+        }
+        const used = new Set();
+        const ordered = layer.slice().sort((a, b) => track.get(a) - track.get(b) || tieBreak(a, b));
+        for (const id of ordered) {
+          const got = topoNearestFreeTrack(track.get(id), used);
+          track.set(id, got);
+          used.add(got);
+        }
+        layer.length = 0;
+        layer.push(...ordered.sort((a, b) => track.get(a) - track.get(b) || tieBreak(a, b)));
+      }
+      // 再前向一次，让后继重新贴齐前驱。
+      for (let li = 1; li < layers.length; li++) {
+        const layer = layers[li];
+        if (!layer) continue;
+        for (const id of layer) {
+          const w = desiredOf(id);
+          if (w != null) track.set(id, w);
+        }
+        const used = new Set();
+        const ordered = layer.slice().sort((a, b) => track.get(a) - track.get(b) || tieBreak(a, b));
+        for (const id of ordered) {
+          const got = topoNearestFreeTrack(track.get(id), used);
+          track.set(id, got);
+          used.add(got);
+        }
+        layer.length = 0;
+        layer.push(...ordered.sort((a, b) => track.get(a) - track.get(b) || tieBreak(a, b)));
+      }
     }
 
     const positions = new Map();
@@ -1316,8 +1400,9 @@ function renderTopoNode(task, pos, indeg, outdeg) {
   const deps = task.deps || [];
   const inN = indeg.get(task.id) || 0;
   const outN = outdeg.get(task.id) || 0;
-  return '<article class="topo-node clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(task.id)+'" data-pid="'+esc(task.project_id||'')+'" style="left:'+pos.x+'px;top:'+pos.y+'px" aria-label="'+esc(task.id+' '+task.title+'，'+statusLabel(task.status))+'">'+
-    '<div class="card-top"><span class="id">'+esc(task.id)+'</span>'+statusBadge(task.status)+'</div>'+
+  const st = task.status || "";
+  return '<article class="topo-node clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(task.id)+'" data-pid="'+esc(task.project_id||'')+'" data-status="'+esc(st)+'" style="left:'+pos.x+'px;top:'+pos.y+'px" aria-label="'+esc(task.id+' '+task.title+'，'+statusLabel(st))+'">'+
+    '<div class="card-top"><span class="id">'+esc(task.id)+'</span>'+statusBadge(st)+'</div>'+
     '<h4 class="task-title">'+esc(task.title || t("no_title"))+'</h4>'+
     '<div class="topo-meta">'+
       '<span class="owner">'+esc(task.owner || t("unassigned"))+'</span>'+
@@ -1339,11 +1424,13 @@ function bandCountText(band) {
 
 function renderTopoCanvas(root, bands) {
   const bundle = topoCanvas();
+  const statusLabels = Object.fromEntries(COLUMNS);
   bundle.renderTopology({
     container: root,
     bands,
     selected: selectedTid ? { tid: selectedTid, pid: selectedPid || "" } : null,
     onOpen: (tid, pid) => openDrawer(tid, pid),
+    statusLabels,
     strings: {
       fit: t("topo.fit"),
       relayout: t("topo.relayout"),

@@ -9,7 +9,10 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font: var(--font-meta)/1.4 var(--sans);
+  /* 拆开写：--font-meta 空值时 font 简写整条失效会导致字号异常 */
+  font-size: var(--font-meta, 12px);
+  line-height: 1.4;
+  font-family: var(--sans, sans-serif);
   color: var(--muted);
   white-space: nowrap;
 }
@@ -42,7 +45,8 @@
 
 /* 来源标记（工程、应用、Agent、分支、任务 ID）不分配色相，统一 muted + mono。 */
 .source-mark {
-  font: var(--font-meta) var(--mono);
+  font-size: var(--font-meta, 12px);
+  font-family: var(--mono, ui-monospace, monospace);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
