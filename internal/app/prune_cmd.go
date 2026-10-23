@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/gitops"
 	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/machine"
@@ -14,6 +15,7 @@ import (
 
 // Prune lists or removes leftover worktrees and agent/* branches.
 // Keeps: ActiveOwner task worktrees/branches, and per-agent trees for non-offline agents.
+// Also keeps directories still held by unknown / stop-unconfirmed / pending-acceptance runs.
 // Default is dry-run (yes=false); pass yes=true to delete.
 func Prune(cwd string, yes, dryRun bool) (Result, error) {
 	pc, err := resolveProject(cwd)
@@ -40,6 +42,7 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 
 	protectedWT := map[string]bool{}
 	protectedBranch := map[string]bool{}
+	blockedHolds := []string{}
 	for _, t := range tasks {
 		if t == nil || !machine.ActiveOwner[t.Status] {
 			continue
@@ -75,8 +78,26 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 			if protectedWT[abs] {
 				continue
 			}
+			holdReason := ""
+			_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+				if reason, blocked := workspaceHoldReason(tx, abs); blocked {
+					holdReason = reason
+				}
+				return nil
+			})
+			if holdReason != "" {
+				protectedWT[abs] = true
+				blockedHolds = append(blockedHolds, holdReason)
+				continue
+			}
 			removeWTs = append(removeWTs, abs)
 		}
+	}
+
+	// 真正删除前再次确认：若仍有占用阻塞，拒绝（避免 --yes 误清）。
+	if !preview && len(blockedHolds) > 0 && len(removeWTs) == 0 {
+		return nil, errx.New("prune blocked by workspace hold",
+			"unknown／残留进程／待验收占用解除前不能 prune："+strings.Join(blockedHolds, "; "))
 	}
 
 	var removeBranches []string
@@ -97,6 +118,18 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 	removedBranches := []string{}
 	if !preview {
 		for _, wt := range removeWTs {
+			// 删除瞬间再查一次占用，证据不匹配则跳过该目录。
+			skip := false
+			_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+				if _, blocked := workspaceHoldReason(tx, wt); blocked {
+					skip = true
+				}
+				return nil
+			})
+			if skip {
+				blockedHolds = append(blockedHolds, "skipped occupied "+wt)
+				continue
+			}
 			gitops.RemoveWorktree(pc.Repo, wt)
 			removedWT = append(removedWT, wt)
 		}
@@ -126,6 +159,9 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 	}
 	if len(removeWTs) == 0 && len(removeBranches) == 0 {
 		next = "无残留可清"
+		if len(blockedHolds) > 0 {
+			next = "占用未解除，无法 prune"
+		}
 	}
 
 	return Result{
@@ -137,6 +173,7 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 		"removed_worktrees": removedWT,
 		"removed_branches":  removedBranches,
 		"kept_worktrees":    len(protectedWT),
+		"blocked_holds":     blockedHolds,
 		"next":              next,
 	}, nil
 }

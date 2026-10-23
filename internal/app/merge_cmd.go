@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/errx"
@@ -68,6 +69,10 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 		tid := task.ID
 		wt := filepath.Join(pc.Repo, task.Worktree)
 		mergeErr := func() error {
+			// 与 submit/review 同一验收用例：证据不齐、unknown／残留进程时拒绝合入。
+			if err := assertDeliveryMergeReady(pc, task); err != nil {
+				return err
+			}
 			if st, err := os.Stat(wt); err == nil && st.IsDir() {
 				if err := gitops.RebaseOntoMain(wt, pc.Config.Project.MainBranch); err != nil {
 					return err
@@ -164,6 +169,7 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 		}
 		// 合入成功：保留 per-agent worktree（依赖可复用），仅 detach 后删除题分支
 		gitops.CleanupMergedTask(pc.Repo, task.Worktree, task.Branch, true)
+		mergedCommit, _ := home.Git(pc.Repo, "rev-parse", "HEAD")
 		mergeOK := false
 		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 			t, _ := db.GetTask(tx, pc.ID(), tid)
@@ -206,6 +212,12 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 			return promoteReady(tx, pc.ID())
 		})
 		if mergeOK {
+			_, _ = applyDeliveryCase(pc, deliveryCaseInput{
+				Action:       deliveryActionMerge,
+				TaskID:       tid,
+				Actor:        who,
+				MergedCommit: strings.TrimSpace(mergedCommit),
+			})
 			results = append(results, map[string]any{
 				"id": tid, "status": "done",
 				"worktree_kept":  task.Worktree != "",

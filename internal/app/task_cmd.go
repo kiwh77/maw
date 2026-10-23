@@ -57,27 +57,20 @@ func Block(cwd, message, taskID string) (Result, error) {
 			return nil, err
 		}
 	}
-	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
-		t, err := db.GetTask(tx, pc.ID(), taskID)
-		if err != nil || t == nil {
-			return i18n.E("err.unknown_task", "", taskID)
-		}
-		if err := identity.RequireOwner(who, t); err != nil {
-			return err
-		}
-		from := t.Status
-		t.PrevStatus = t.Status
-		t.Status = "blocked"
-		t.BlockedReason = message
-		t.Revision++
-		_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", taskID, map[string]any{"from": from, "to": "blocked", "reason": message})
-		return db.UpsertTask(tx, t)
+	out, err := applyDeliveryCase(pc, deliveryCaseInput{
+		Action:  deliveryActionBlock,
+		TaskID:  taskID,
+		Actor:   who,
+		Message: message,
 	})
 	if err != nil {
 		return nil, err
 	}
 	_, _ = refreshBoard(pc)
-	return Result{"ok": true, "task_id": taskID, "project_id": pc.ID(), "next": i18n.T("next.task_unblock", taskID)}, nil
+	return Result{
+		"ok": true, "task_id": taskID, "delivery_id": out.DeliveryID,
+		"project_id": pc.ID(), "next": i18n.T("next.task_unblock", taskID),
+	}, nil
 }
 
 func Unblock(cwd, taskID string) (Result, error) {

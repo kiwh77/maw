@@ -1,12 +1,19 @@
 package app
 
 import (
+	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/delivery"
 	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/gitops"
@@ -16,6 +23,8 @@ import (
 	"github.com/kiwh77/maw/internal/machine"
 	"github.com/kiwh77/maw/internal/schedule"
 	"github.com/kiwh77/maw/internal/scope"
+	"github.com/kiwh77/maw/internal/verification"
+	"github.com/kiwh77/maw/internal/workspace"
 )
 
 func Next(cwd, agentFlag string, dryRun bool) (Result, error) {
@@ -623,7 +632,6 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	files = filterScopeFiles(files)
 
 	var fromStatus string
-	var writeScope []string
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
 		if err != nil || t == nil {
@@ -636,7 +644,6 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 			return i18n.E("err.cannot_submit", "next.only_in_progress", taskID, t.Status)
 		}
 		fromStatus = t.Status
-		writeScope = t.WriteScope
 		if bad := scope.OutOfScopeFiles(files, t.WriteScope); len(bad) > 0 {
 			_ = db.AppendEvent(tx, pc.ID(), who, "scope_violation", taskID, map[string]any{
 				"files": files, "out_of_scope": bad, "write_scope": t.WriteScope,
@@ -657,78 +664,13 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	}
 
 	auto := pc.Config.Approvals.Review == "auto"
-	var gateResults []gitops.GateResult
-	if auto && len(pc.Config.Gates.Commands) > 0 {
-		gateCwd := wt
-		var gateErr error
-		gateResults, gateErr = gitops.RunGatesDetailed(pc.Config.Gates.Commands, gateCwd, pc.Config.Gates.TimeoutSec)
-		if gateErr != nil {
-			msg := gateErr.Error()
-			if e, ok := gateErr.(*errx.Error); ok {
-				msg = e.Msg
-			}
-			envFail := gitops.IsEnvFailure(msg)
-			_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
-				ev := map[string]any{"error": msg, "gates": gateResults, "env_failure": envFail, "phase": "submit"}
-				typ := "gate_failed"
-				if envFail {
-					typ = "gate_env_failed"
-				}
-				_ = db.AppendEvent(tx, pc.ID(), who, typ, taskID, ev)
-				if !envFail {
-					t, _ := db.GetTask(tx, pc.ID(), taskID)
-					if t != nil {
-						t.Attempts++
-						t.Revision++
-						_ = db.UpsertTask(tx, t)
-					}
-				}
-				return nil
-			})
-			return nil, gateErr
-		}
-	}
-
-	var status string
-	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
-		t, err := db.GetTask(tx, pc.ID(), taskID)
-		if err != nil || t == nil {
-			return i18n.E("err.unknown_task", "next.task_list", taskID)
-		}
-		if err := identity.RequireOwner(who, t); err != nil {
-			return err
-		}
-		from := t.Status
-		if err := machine.AssertTransition(t.Status, "in_review"); err != nil {
-			return err
-		}
-		t.Status = "in_review"
-		t.Heartbeat = db.UTCNow()
-		t.Revision++
-		_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", taskID, map[string]any{
-			"from": from, "to": "in_review", "files": files,
-		})
-		if auto {
-			if err := machine.AssertTransition(t.Status, "merging"); err != nil {
-				return err
-			}
-			from2 := t.Status
-			t.Status = "merging"
-			t.Revision++
-			evidence := map[string]any{
-				"files": files, "file_count": len(files), "write_scope": writeScope,
-				"gates": gateResults, "review": "auto",
-			}
-			_ = db.AppendEvent(tx, pc.ID(), "system", "review_auto_approved", taskID, evidence)
-			_ = db.AppendEvent(tx, pc.ID(), "system", "status_changed", taskID, map[string]any{
-				"from": from2, "to": "merging",
-			})
-		}
-		status = t.Status
-		if err := db.UpsertTask(tx, t); err != nil {
-			return err
-		}
-		return bindAgent(tx, pc.ID(), who, "worker", "working", t.ID, t.Worktree, t.Branch)
+	out, err := applyDeliveryCase(pc, deliveryCaseInput{
+		Action: deliveryActionSubmit,
+		TaskID: taskID,
+		Actor:  who,
+		WT:     wt,
+		Files:  files,
+		Auto:   auto,
 	})
 	if err != nil {
 		return nil, err
@@ -738,7 +680,10 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	if !auto {
 		next = "maw review --approve " + taskID
 	}
-	return Result{"ok": true, "task_id": taskID, "agent": who, "files": files, "status": status, "project_id": pc.ID(), "next": next}, nil
+	return Result{
+		"ok": true, "task_id": taskID, "agent": who, "files": out.Files, "status": out.Status,
+		"delivery_id": out.DeliveryID, "strategy": out.Strategy, "project_id": pc.ID(), "next": next,
+	}, nil
 }
 
 func Review(cwd, taskID string, approve bool, message string) (Result, error) {
@@ -758,46 +703,17 @@ func Review(cwd, taskID string, approve bool, message string) (Result, error) {
 	if fl, ferr := gitops.ChangedFiles(wt, pc.Config.Project.MainBranch); ferr == nil {
 		files = filterScopeFiles(fl)
 	}
-	var status string
-	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
-		t, err := db.GetTask(tx, pc.ID(), taskID)
-		if err != nil || t == nil {
-			return i18n.E("err.unknown_task", "", taskID)
-		}
-		if t.Owner == who {
-			return i18n.E("err.author_review", "next.other_agent")
-		}
-		if t.Status != "in_review" {
-			return i18n.E("err.not_in_review", "", t.Status)
-		}
-		from := t.Status
-		if approve {
-			if err := machine.AssertTransition(t.Status, "merging"); err != nil {
-				return err
-			}
-			t.Status = "merging"
-			_ = db.AppendEvent(tx, pc.ID(), who, "review_result", taskID, map[string]any{
-				"result": "approve", "message": message,
-				"files": files, "file_count": len(files),
-			})
-			_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", taskID, map[string]any{
-				"from": from, "to": "merging",
-			})
-		} else {
-			if err := machine.AssertTransition(t.Status, "in_progress"); err != nil {
-				return err
-			}
-			t.Status = "in_progress"
-			_ = db.AppendEvent(tx, pc.ID(), who, "review_result", taskID, map[string]any{
-				"result": "request_changes", "message": message,
-			})
-			_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", taskID, map[string]any{
-				"from": from, "to": "in_progress",
-			})
-		}
-		t.Revision++
-		status = t.Status
-		return db.UpsertTask(tx, t)
+	action := deliveryActionReject
+	if approve {
+		action = deliveryActionApprove
+	}
+	out, err := applyDeliveryCase(pc, deliveryCaseInput{
+		Action:  action,
+		TaskID:  taskID,
+		Actor:   who,
+		WT:      wt,
+		Files:   files,
+		Message: message,
 	})
 	if err != nil {
 		return nil, err
@@ -807,5 +723,695 @@ func Review(cwd, taskID string, approve bool, message string) (Result, error) {
 	if approve {
 		next = "maw merge --yes"
 	}
-	return Result{"ok": true, "task_id": taskID, "status": status, "project_id": pc.ID(), "next": next}, nil
+	return Result{
+		"ok": true, "task_id": taskID, "status": out.Status, "delivery_id": out.DeliveryID,
+		"project_id": pc.ID(), "next": next,
+	}, nil
+}
+
+// —— 交付／验收共用用例（CLI 与后续 HTTP 命令的唯一写入点）——
+
+const (
+	manualCompatNode     = "manual-compat"
+	manualCompatStrategy = "manual_client_compat"
+	extraDeliveryID      = "delivery_id"
+	extraDeliveryStrat   = "delivery_strategy"
+	extraRunID           = "run_id"
+)
+
+type deliveryAction string
+
+const (
+	deliveryActionSubmit  deliveryAction = "submit"
+	deliveryActionApprove deliveryAction = "approve"
+	deliveryActionReject  deliveryAction = "reject"
+	deliveryActionBlock   deliveryAction = "block"
+	deliveryActionMerge   deliveryAction = "merge"
+)
+
+type deliveryCaseInput struct {
+	Action       deliveryAction
+	TaskID       string
+	Actor        string
+	WT           string
+	Files        []string
+	Message      string
+	Auto         bool
+	MergedCommit string
+}
+
+type deliveryCaseResult struct {
+	DeliveryID string
+	Status     string
+	Files      []string
+	Strategy   string
+}
+
+// applyDeliveryCase 是提交／拒绝／阻塞／合入的唯一验收入口；CLI 不得绕过它直接改状态。
+func applyDeliveryCase(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, error) {
+	switch in.Action {
+	case deliveryActionSubmit:
+		return deliverySubmit(pc, in)
+	case deliveryActionApprove, deliveryActionReject:
+		return deliveryReview(pc, in)
+	case deliveryActionBlock:
+		return deliveryBlock(pc, in)
+	case deliveryActionMerge:
+		return deliveryMergeRecord(pc, in)
+	default:
+		return deliveryCaseResult{}, errx.New("unknown delivery action "+string(in.Action), "")
+	}
+}
+
+func deliverySubmit(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, error) {
+	task, err := getTask(pc, in.TaskID)
+	if err != nil || task == nil {
+		return deliveryCaseResult{}, i18n.E("err.unknown_task", "next.task_list", in.TaskID)
+	}
+	if err := identity.RequireOwner(in.Actor, task); err != nil {
+		return deliveryCaseResult{}, err
+	}
+
+	frozen, verifyOut, err := freezeManualCompatDelivery(pc, task, in.Actor, in.WT, in.Files)
+	if err != nil {
+		return deliveryCaseResult{}, err
+	}
+	if verifyOut.EnvFailed {
+		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "gate_env_failed", in.TaskID, map[string]any{
+				"error": verifyOut.Reason, "phase": "submit", "delivery_id": string(frozen.Delivery.DeliveryID),
+			})
+			return nil
+		})
+		return deliveryCaseResult{}, errx.New(verifyOut.Reason, "检查验证环境后重试 maw submit")
+	}
+	if !verifyOut.SupportsDone && verifyOut.Kind == verification.KindMachine && verifyOut.Verification.Result == model.VerifyFail {
+		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+			t, _ := db.GetTask(tx, pc.ID(), in.TaskID)
+			if t != nil {
+				t.Attempts++
+				t.Revision++
+				_ = db.UpsertTask(tx, t)
+			}
+			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "gate_failed", in.TaskID, map[string]any{
+				"error": verifyOut.Reason, "phase": "submit", "delivery_id": string(frozen.Delivery.DeliveryID),
+			})
+			return nil
+		})
+		return deliveryCaseResult{}, errx.New(verifyOut.Reason, "修复验证失败后重试 maw submit")
+	}
+
+	var status string
+	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		t, err := db.GetTask(tx, pc.ID(), in.TaskID)
+		if err != nil || t == nil {
+			return i18n.E("err.unknown_task", "next.task_list", in.TaskID)
+		}
+		if err := identity.RequireOwner(in.Actor, t); err != nil {
+			return err
+		}
+		if err := db.AddVerification(tx, string(frozen.Delivery.DeliveryID), verifyOut.Verification); err != nil {
+			return err
+		}
+		if in.Auto {
+			now := time.Now().UTC()
+			if err := db.AddReview(tx, string(frozen.Delivery.DeliveryID), model.Review{
+				Required: true, Verdict: model.VerdictApproved, Reviewer: "system", ReviewedAt: &now,
+			}); err != nil {
+				return err
+			}
+		}
+		from := t.Status
+		if err := machine.AssertTransition(t.Status, "in_review"); err != nil {
+			return err
+		}
+		t.Status = "in_review"
+		t.Heartbeat = db.UTCNow()
+		t.Revision++
+		if t.Extra == nil {
+			t.Extra = map[string]any{}
+		}
+		t.Extra[extraDeliveryID] = string(frozen.Delivery.DeliveryID)
+		t.Extra[extraDeliveryStrat] = manualCompatStrategy
+		t.Extra[extraRunID] = string(frozen.Delivery.RunID)
+		_ = db.AppendEvent(tx, pc.ID(), in.Actor, "status_changed", in.TaskID, map[string]any{
+			"from": from, "to": "in_review", "files": in.Files,
+			"delivery_id": string(frozen.Delivery.DeliveryID), "strategy": manualCompatStrategy,
+		})
+		if in.Auto {
+			if err := machine.AssertTransition(t.Status, "merging"); err != nil {
+				return err
+			}
+			from2 := t.Status
+			t.Status = "merging"
+			t.Revision++
+			_ = db.AppendEvent(tx, pc.ID(), "system", "review_auto_approved", in.TaskID, map[string]any{
+				"files": in.Files, "file_count": len(in.Files), "write_scope": t.WriteScope,
+				"review": "auto", "delivery_id": string(frozen.Delivery.DeliveryID),
+			})
+			_ = db.AppendEvent(tx, pc.ID(), "system", "status_changed", in.TaskID, map[string]any{
+				"from": from2, "to": "merging",
+			})
+		}
+		status = t.Status
+		if err := db.UpsertTask(tx, t); err != nil {
+			return err
+		}
+		return bindAgent(tx, pc.ID(), in.Actor, "worker", "working", t.ID, t.Worktree, t.Branch)
+	})
+	if err != nil {
+		return deliveryCaseResult{}, err
+	}
+	return deliveryCaseResult{
+		DeliveryID: string(frozen.Delivery.DeliveryID),
+		Status:     status,
+		Files:      in.Files,
+		Strategy:   manualCompatStrategy,
+	}, nil
+}
+
+type frozenDelivery struct {
+	Delivery model.Delivery
+}
+
+func freezeManualCompatDelivery(pc *projCtx, task *db.Task, actor, wt string, files []string) (frozenDelivery, verification.Outcome, error) {
+	var out verification.Outcome
+	if strings.TrimSpace(task.InstanceID) == "" {
+		return frozenDelivery{}, out, errx.New("task missing instance_id", "重新 plan apply 绑定实例后再 submit")
+	}
+	head, err := home.Git(wt, "rev-parse", "HEAD")
+	if err != nil || strings.TrimSpace(head) == "" {
+		return frozenDelivery{}, out, errx.New("无法读取候选提交", "确认 worktree 已 commit")
+	}
+	head = strings.TrimSpace(head)
+	base, err := home.Git(pc.Repo, "rev-parse", pc.Config.Project.MainBranch)
+	if err != nil || strings.TrimSpace(base) == "" {
+		return frozenDelivery{}, out, errx.New("无法读取基线提交", "检查主干分支 "+pc.Config.Project.MainBranch)
+	}
+	base = strings.TrimSpace(base)
+	candCommit := model.Commit(head)
+	baseline := model.Commit(base)
+
+	var run *db.Run
+	var version model.VersionNo
+	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		var e error
+		run, version, e = ensureManualCompatRun(tx, pc, task, actor, wt)
+		return e
+	})
+	if err != nil {
+		return frozenDelivery{}, out, err
+	}
+
+	arts := []model.ArtifactCandidate{{
+		Kind: model.ArtifactCommit, Ref: head, DeclaredBy: model.DeclaredByCLI,
+	}}
+	for _, f := range files {
+		arts = append(arts, model.ArtifactCandidate{
+			Kind: model.ArtifactFile, Ref: f, DeclaredBy: model.DeclaredByCLI,
+		})
+	}
+	var supersedes *model.DeliveryID
+	_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		list, e := db.ListDeliveries(tx, pc.ID(), task.InstanceID)
+		if e != nil || len(list) == 0 {
+			return e
+		}
+		prev := list[len(list)-1].Delivery.DeliveryID
+		supersedes = &prev
+		return nil
+	})
+
+	collector, err := delivery.New(model.ProjectID(pc.ID()), pc.Repo, task.WriteScope, delivery.NewMemoryStore())
+	if err != nil {
+		return frozenDelivery{}, out, err
+	}
+	cand := delivery.Candidate{
+		TaskInstance:    model.InstanceID(task.InstanceID),
+		TaskVersion:     version,
+		RunID:           model.RunID(run.ID),
+		Mode:            model.DeliveryCode,
+		BaselineCommit:  baseline,
+		CandidateCommit: &candCommit,
+		Worktree:        wt,
+		RunOutcome:      model.OutcomeCompleted,
+		Artifacts:       arts,
+		Review:          model.Review{Required: true},
+		Merge:           model.Merge{Required: true},
+		Supersedes:      supersedes,
+	}
+	d, collErr := collector.Collect(cand)
+	if collErr != nil {
+		if hard := deliveryHardFail(collErr); hard != nil {
+			return frozenDelivery{}, out, hard
+		}
+		// pending 完成条件不足是提交阶段的常态；硬问题（越界／缺提交）才拦截。
+		if d.DeliveryID == "" {
+			return frozenDelivery{}, out, collErr
+		}
+	}
+	d.Review.Required = true
+	d.Merge.Required = true
+
+	policy := verification.Policy{Kind: verification.KindManual, TimeoutSec: pc.Config.Gates.TimeoutSec}
+	if len(pc.Config.Gates.Commands) > 0 {
+		policy = verification.Policy{
+			Kind: verification.KindMachine, Commands: pc.Config.Gates.Commands,
+			TimeoutSec: pc.Config.Gates.TimeoutSec,
+		}
+	}
+	svc := &verification.Service{
+		Runner: gatesRunnerAt(wt),
+	}
+	out, err = svc.Run(context.Background(), policy, verification.Target{
+		DeliveryID:  string(d.DeliveryID),
+		TaskVersion: version,
+		Commit:      candCommit,
+		ScopeOK:     true,
+	})
+	if err != nil {
+		return frozenDelivery{}, out, err
+	}
+
+	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		if _, _, e := db.SaveDelivery(tx, pc.ID(), d, "manual-compat:submit:"+string(d.DeliveryID)); e != nil {
+			return e
+		}
+		return completeCompatRun(tx, pc.ID(), run, task.InstanceID, true)
+	})
+	if err != nil {
+		return frozenDelivery{}, out, err
+	}
+	return frozenDelivery{Delivery: d}, out, nil
+}
+
+func deliveryHardFail(err error) error {
+	vs, ok := err.(delivery.Violations)
+	if !ok {
+		return err
+	}
+	for _, v := range vs {
+		if v == nil {
+			continue
+		}
+		switch v.Code {
+		case model.CodeArtifactOutOfScope, model.CodeCommitRefInvalid, model.CodeArtifactMissing,
+			model.CodeDeliveryTaskMissing, model.CodeDeliveryRunMissing, model.CodeDeliveryVersionMissing:
+			return errx.New(v.Error(), "按交付契约修正后重试 maw submit")
+		}
+	}
+	return nil
+}
+
+func gatesRunnerAt(wt string) verification.Runner {
+	return func(ctx context.Context, commands []string, timeoutSec int) ([]verification.CommandResult, error) {
+		_ = ctx
+		results, err := gitops.RunGatesDetailed(commands, wt, timeoutSec)
+		out := make([]verification.CommandResult, 0, len(results))
+		for _, g := range results {
+			cr := verification.CommandResult{Command: g.Command, OK: g.OK, Output: g.Output, EnvFail: g.EnvFailure}
+			if !g.OK && !cr.EnvFail && gitops.IsEnvFailure(g.Output) {
+				cr.EnvFail = true
+			}
+			out = append(out, cr)
+		}
+		return out, err
+	}
+}
+
+// ensureManualCompatRun 为人工 CLI 路径显式建立／复用 Run（策略 manual_client_compat）。
+//
+// 没有 Run 就无法绑定交付；这条路径与受管 ClaimExecution 共用同一套占用与冻结语义，
+// 只是节点固定为 manual-compat，不走厂商进程。
+func ensureManualCompatRun(tx *sql.Tx, pc *projCtx, task *db.Task, actor, wt string) (*db.Run, model.VersionNo, error) {
+	inst, err := db.GetInstance(tx, task.InstanceID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if inst == nil {
+		inst, err = db.ActiveInstance(tx, pc.ID(), task.ID)
+		if err != nil || inst == nil {
+			return nil, 0, errx.New("missing task instance "+task.ID, "maw plan apply")
+		}
+		task.InstanceID = string(inst.InstanceID)
+	}
+	if inst.ActiveVersion == nil {
+		return nil, 0, errx.New("instance has no active version", "maw plan apply")
+	}
+	version := *inst.ActiveVersion
+
+	if active, err := db.ActiveRunForInstance(tx, task.InstanceID); err != nil {
+		return nil, 0, err
+	} else if active != nil {
+		return active, version, nil
+	}
+	runs, err := db.ListRuns(tx, pc.ID())
+	if err != nil {
+		return nil, 0, err
+	}
+	var gen model.Generation = 1
+	for _, r := range runs {
+		if r == nil || r.InstanceID != task.InstanceID {
+			continue
+		}
+		if r.Generation >= gen {
+			gen = r.Generation + 1
+		}
+		// 已冻结的完成 Run 可复用：同实例再次 submit 只追加新交付。
+		if r.Phase == model.PhaseCompleted && r.DeliveryFrozen {
+			return r, version, nil
+		}
+	}
+
+	if err := db.UpsertNode(tx, &db.Node{
+		ID: manualCompatNode, ProjectID: pc.ID(), Label: "manual CLI compat", SlotLimit: 64,
+		Meta: map[string]any{"strategy": manualCompatStrategy},
+	}); err != nil {
+		return nil, 0, err
+	}
+	absWT := wt
+	if !filepath.IsAbs(absWT) {
+		absWT = filepath.Join(pc.Repo, absWT)
+	}
+	absWT = filepath.Clean(absWT)
+	out, err := db.ClaimRun(tx, db.ClaimSpec{
+		ProjectID:      pc.ID(),
+		InstanceID:     task.InstanceID,
+		VersionNo:      version,
+		Generation:     gen,
+		NodeID:         manualCompatNode,
+		Workspace:      absWT,
+		Coordinator:    actor,
+		IdempotencyKey: fmt.Sprintf("manual-compat:%s:%d", task.InstanceID, gen),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out.Run, version, nil
+}
+
+func completeCompatRun(tx *sql.Tx, projectID string, run *db.Run, instanceID string, deliveryFrozen bool) error {
+	if run == nil {
+		return nil
+	}
+	if run.Phase == model.PhaseCompleted && run.ProcessStopConfirmed && (!deliveryFrozen || run.DeliveryFrozen) {
+		return nil
+	}
+	// 合法阶段链：reserved → preparing → launching → running → completed
+	path := []model.RunPhase{
+		model.PhasePreparing, model.PhaseLaunching, model.PhaseRunning, model.PhaseCompleted,
+	}
+	for _, next := range path {
+		if run.Phase == model.PhaseCompleted {
+			break
+		}
+		if !model.CanTransition(run.Phase, next) {
+			continue
+		}
+		eid := compatEventID(run.ID, string(next))
+		if _, _, err := db.AppendRunEvent(tx, db.RunEventSpec{
+			ID: eid, ProjectID: projectID, RunID: run.ID, InstanceID: instanceID,
+			Kind: db.EventRunPhase, Phase: next, SchemaVersion: db.RunEventSchemaVersion,
+			Payload: map[string]any{"strategy": manualCompatStrategy},
+		}); err != nil {
+			return err
+		}
+		stop := next == model.PhaseCompleted
+		frozen := deliveryFrozen && next == model.PhaseCompleted
+		updated, err := db.UpdateRunProgress(tx, run.ID, next, stop, frozen, []string{
+			"strategy:" + manualCompatStrategy, "manual_compat:completed",
+		})
+		if err != nil {
+			return err
+		}
+		run = updated
+	}
+	if run != nil && !run.ProcessStopConfirmed {
+		if err := db.ConfirmProcessStop(tx, run.ID, "manual_compat:cli_submit"); err != nil {
+			return err
+		}
+	}
+	if run != nil && deliveryFrozen && run.Phase == model.PhaseCompleted && !run.DeliveryFrozen {
+		return errx.New("run completed without delivery_frozen", "重新 submit 以冻结交付")
+	}
+	return nil
+}
+
+func compatEventID(runID, phase string) model.EventID {
+	sum := sha256.Sum256([]byte(runID + "|" + phase + "|manual-compat"))
+	return model.EventID("evt_" + hex.EncodeToString(sum[:8]))
+}
+
+func deliveryReview(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, error) {
+	var status string
+	var deliveryID string
+	err := db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		t, err := db.GetTask(tx, pc.ID(), in.TaskID)
+		if err != nil || t == nil {
+			return i18n.E("err.unknown_task", "", in.TaskID)
+		}
+		if t.Owner == in.Actor {
+			return i18n.E("err.author_review", "next.other_agent")
+		}
+		if t.Status != "in_review" {
+			return i18n.E("err.not_in_review", "", t.Status)
+		}
+		rec, err := latestDelivery(tx, pc.ID(), t)
+		if err != nil {
+			return err
+		}
+		if rec == nil {
+			return errx.New("delivery missing for review", "作者需先 maw submit 冻结交付")
+		}
+		deliveryID = string(rec.Delivery.DeliveryID)
+		ready, err := db.DeliveryReadiness(tx, deliveryID)
+		if err != nil {
+			return err
+		}
+		if ready.StaleVerifications > 0 || ready.ReviewStale {
+			return errx.New("delivery evidence mismatch", "证据与当前交付指纹不一致，请重新 submit")
+		}
+		if !ready.PassingVerification {
+			return errx.New("delivery verification incomplete", "缺少有效验证结论，不能评审")
+		}
+		now := time.Now().UTC()
+		verdict := model.VerdictChangesRequired
+		if in.Action == deliveryActionApprove {
+			verdict = model.VerdictApproved
+		}
+		if err := db.AddReview(tx, deliveryID, model.Review{
+			Required: true, Verdict: verdict, Reviewer: in.Actor, ReviewedAt: &now,
+		}); err != nil {
+			return err
+		}
+		from := t.Status
+		if in.Action == deliveryActionApprove {
+			if err := machine.AssertTransition(t.Status, "merging"); err != nil {
+				return err
+			}
+			t.Status = "merging"
+			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "review_result", in.TaskID, map[string]any{
+				"result": "approve", "message": in.Message,
+				"files": in.Files, "file_count": len(in.Files), "delivery_id": deliveryID,
+			})
+			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "status_changed", in.TaskID, map[string]any{
+				"from": from, "to": "merging",
+			})
+		} else {
+			if err := machine.AssertTransition(t.Status, "in_progress"); err != nil {
+				return err
+			}
+			t.Status = "in_progress"
+			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "review_result", in.TaskID, map[string]any{
+				"result": "request_changes", "message": in.Message, "delivery_id": deliveryID,
+			})
+			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "status_changed", in.TaskID, map[string]any{
+				"from": from, "to": "in_progress",
+			})
+		}
+		t.Revision++
+		status = t.Status
+		return db.UpsertTask(tx, t)
+	})
+	if err != nil {
+		return deliveryCaseResult{}, err
+	}
+	return deliveryCaseResult{DeliveryID: deliveryID, Status: status, Files: in.Files, Strategy: manualCompatStrategy}, nil
+}
+
+func deliveryBlock(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, error) {
+	var deliveryID string
+	err := db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		t, err := db.GetTask(tx, pc.ID(), in.TaskID)
+		if err != nil || t == nil {
+			return i18n.E("err.unknown_task", "", in.TaskID)
+		}
+		if err := identity.RequireOwner(in.Actor, t); err != nil {
+			return err
+		}
+		if rec, err := latestDelivery(tx, pc.ID(), t); err != nil {
+			return err
+		} else if rec != nil {
+			deliveryID = string(rec.Delivery.DeliveryID)
+			now := time.Now().UTC()
+			// 阻塞走同一评审表：记 changes_requested，避免 CLI 只改任务行绕过验收。
+			if err := db.AddReview(tx, deliveryID, model.Review{
+				Required: true, Verdict: model.VerdictChangesRequired,
+				Reviewer: in.Actor, ReviewedAt: &now,
+			}); err != nil {
+				return err
+			}
+		}
+		from := t.Status
+		t.PrevStatus = t.Status
+		t.Status = "blocked"
+		t.BlockedReason = in.Message
+		t.Revision++
+		_ = db.AppendEvent(tx, pc.ID(), in.Actor, "status_changed", in.TaskID, map[string]any{
+			"from": from, "to": "blocked", "reason": in.Message,
+			"delivery_id": deliveryID, "strategy": manualCompatStrategy,
+		})
+		return db.UpsertTask(tx, t)
+	})
+	if err != nil {
+		return deliveryCaseResult{}, err
+	}
+	return deliveryCaseResult{DeliveryID: deliveryID, Status: "blocked", Strategy: manualCompatStrategy}, nil
+}
+
+func deliveryMergeRecord(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, error) {
+	err := db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		t, err := db.GetTask(tx, pc.ID(), in.TaskID)
+		if err != nil || t == nil {
+			return i18n.E("err.unknown_task", "", in.TaskID)
+		}
+		rec, err := latestDelivery(tx, pc.ID(), t)
+		if err != nil {
+			return err
+		}
+		if rec == nil {
+			return errx.New("delivery missing for merge", "先 maw submit / review")
+		}
+		d := rec.Delivery
+		now := time.Now().UTC()
+		var merged *model.Commit
+		if c := model.Commit(strings.TrimSpace(in.MergedCommit)); c.Valid() {
+			merged = &c
+		}
+		d.Merge = model.Merge{Required: true, Merged: true, MergedCommit: merged, MergedAt: &now}
+		d.Review.Required = true
+		if d.Review.Verdict == "" {
+			d.Review.Verdict = model.VerdictApproved
+		}
+		if _, err := db.UpdateDeliveryManifest(tx, d); err != nil {
+			return err
+		}
+		// 释放占用：产物已冻结且进程已停。
+		if runID := extraString(t, extraRunID); runID != "" {
+			if run, _ := db.GetRun(tx, runID); run != nil {
+				for _, l := range run.Leases {
+					if l.Released {
+						continue
+					}
+					cond := db.ReleaseCondition{}
+					switch l.Kind {
+					case model.LeaseWorkspace:
+						cond.DeliveryFrozen = true
+					case model.LeaseNodeSlot:
+						cond.ProcessStopConfirmed = true
+					}
+					_ = db.ReleaseLease(tx, string(l.LeaseID), run.Generation, "merged", cond)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return deliveryCaseResult{}, err
+	}
+	return deliveryCaseResult{DeliveryID: "", Status: "done", Strategy: manualCompatStrategy}, nil
+}
+
+func latestDelivery(tx *sql.Tx, projectID string, t *db.Task) (*db.DeliveryRecord, error) {
+	if id := extraString(t, extraDeliveryID); id != "" {
+		return db.GetDelivery(tx, id)
+	}
+	if t.InstanceID == "" {
+		return nil, nil
+	}
+	list, err := db.ListDeliveries(tx, projectID, t.InstanceID)
+	if err != nil || len(list) == 0 {
+		return nil, err
+	}
+	return list[len(list)-1], nil
+}
+
+// assertDeliveryMergeReady 合入前检查：验证／评审齐全，且无指纹漂移、无残留占用风险。
+func assertDeliveryMergeReady(pc *projCtx, task *db.Task) error {
+	return db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		rec, err := latestDelivery(tx, pc.ID(), task)
+		if err != nil {
+			return err
+		}
+		if rec == nil {
+			return errx.New("delivery missing for merge", "先 maw submit 并完成评审")
+		}
+		ready, err := db.DeliveryReadiness(tx, string(rec.Delivery.DeliveryID))
+		if err != nil {
+			return err
+		}
+		if ready.StaleVerifications > 0 || ready.ReviewStale {
+			return errx.New("delivery evidence mismatch", "验证／评审指纹已过期，请重新 submit")
+		}
+		if !ready.PassingVerification || !ready.ApprovedReview {
+			return errx.New("delivery not accepted", "缺少有效验证或评审通过结论")
+		}
+		if wt := absWorktree(pc.Repo, task.Worktree); wt != "" {
+			if reason, blocked := workspaceHoldReason(tx, wt); blocked {
+				return errx.New(reason, "占用解除前不能 merge")
+			}
+		}
+		if runID := extraString(task, extraRunID); runID != "" {
+			run, err := db.GetRun(tx, runID)
+			if err != nil {
+				return err
+			}
+			if run != nil {
+				if run.Reconciliation == model.ReconciliationUnknown {
+					return errx.New("run reconciliation unknown", "核实状态未知时不能 merge")
+				}
+				if (run.Phase == model.PhaseFailed || run.Phase == model.PhaseCancelled) && !run.ProcessStopConfirmed {
+					return errx.New("process stop unconfirmed", "残留进程未确认停止时不能 merge")
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// workspaceHoldReason 用工作空间占用分类判断目录能否清理／合入重置。
+func workspaceHoldReason(tx *sql.Tx, absPath string) (string, bool) {
+	key, err := (db.Resource{Kind: model.LeaseWorkspace, Path: filepath.Clean(absPath)}).Key()
+	if err != nil {
+		return "", false
+	}
+	lease, err := db.ActiveLease(tx, key)
+	if err != nil || lease == nil {
+		return "", false
+	}
+	if lease.RunID == "" {
+		return fmt.Sprintf("workspace %s still leased (no run)", absPath), true
+	}
+	run, err := db.GetRun(tx, lease.RunID)
+	if err != nil || run == nil {
+		return fmt.Sprintf("workspace %s lease run missing", absPath), true
+	}
+	occ := workspace.Occupant{
+		Instance: model.InstanceID(run.InstanceID),
+		Run:      run.Model(),
+	}
+	if !occ.Blocks() {
+		return "", false
+	}
+	return occ.Describe() + "：不得 prune/reset/merge", true
 }
