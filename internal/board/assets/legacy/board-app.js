@@ -703,9 +703,9 @@ function takenAgentNames() {
   return [...seen].sort();
 }
 
-function buildTaskPrompt(t) {
-  const p = findProject(t.project_id) || {};
-  const projName = t.project_name || p.name || t.project_id || t("unknown_project");
+function buildTaskPrompt(task) {
+  const p = findProject(task.project_id) || {};
+  const projName = task.project_name || p.name || task.project_id || t("unknown_project");
   const projPath = p.path || t("unknown_path");
   const mainBranch = p.main_branch || "main";
   const taken = takenAgentNames();
@@ -714,44 +714,44 @@ function buildTaskPrompt(t) {
   lines.push("");
   lines.push("## 工程信息");
   lines.push("- 名称：" + projName);
-  lines.push("- 工程 ID：" + (t.project_id || p.id || "—"));
+  lines.push("- 工程 ID：" + (task.project_id || p.id || "—"));
   lines.push("- 本地路径：" + projPath);
   lines.push("- 主干分支：" + mainBranch);
   lines.push("");
   lines.push("## 目标任务");
-  lines.push("- 任务 ID：" + t.id);
-  lines.push("- 标题：" + (t.title || "—"));
-  lines.push("- 状态：" + statusLabel(t.status) + "（" + (t.status || "—") + "）");
-  lines.push("- 优先级：" + (t.priority ?? "—") + " · merge_order：" + (t.merge_order ?? "—"));
-  lines.push("- 依赖：" + ((t.deps && t.deps.length) ? t.deps.join(", ") : t("none")));
-  if (t.owner) lines.push("- 当前负责人：" + t.owner);
-  if (t.worktree) lines.push("- Worktree（相对仓库）：" + t.worktree);
-  if (t.branch) lines.push("- 任务分支：" + t.branch);
-  if (t.blocked_reason) lines.push("- 阻塞原因：" + t.blocked_reason);
+  lines.push("- 任务 ID：" + task.id);
+  lines.push("- 标题：" + (task.title || "—"));
+  lines.push("- 状态：" + statusLabel(task.status) + "（" + (task.status || "—") + "）");
+  lines.push("- 优先级：" + (task.priority ?? "—") + " · merge_order：" + (task.merge_order ?? "—"));
+  lines.push("- 依赖：" + ((task.deps && task.deps.length) ? task.deps.join(", ") : t("none")));
+  if (task.owner) lines.push("- 当前负责人：" + task.owner);
+  if (task.worktree) lines.push("- Worktree（相对仓库）：" + task.worktree);
+  if (task.branch) lines.push("- 任务分支：" + task.branch);
+  if (task.blocked_reason) lines.push("- 阻塞原因：" + task.blocked_reason);
   lines.push("- 可写范围 write_scope（只改这些）：");
-  lines.push(fmtBullet(t.write_scope, "- （空；先运行 maw task show " + t.id + " 确认）"));
+  lines.push(fmtBullet(task.write_scope, "- （空；先运行 maw task show " + task.id + " 确认）"));
   lines.push("- 只读范围 read_scope：");
-  lines.push(fmtBullet(t.read_scope, "- （无）"));
+  lines.push(fmtBullet(task.read_scope, "- （无）"));
   lines.push("- 验收标准 acceptance：");
-  lines.push(fmtBullet(t.acceptance, "- （无；以 worktree 内任务卡为准）"));
+  lines.push(fmtBullet(task.acceptance, "- （无；以 worktree 内任务卡为准）"));
   lines.push("");
   lines.push("## 接入与执行步骤");
   lines.push("1. 终端进入工程目录：");
   lines.push("   cd " + projPath);
-  if (t.status === "in_progress" || t.status === "claimed" || t.status === "self_check" || t.status === "conflict") {
+  if (task.status === "in_progress" || task.status === "claimed" || task.status === "self_check" || task.status === "conflict") {
     lines.push("2. 若你接续同一负责人，复用其 Agent 名；否则另选看板未占用的唯一名。");
-    if (t.owner) lines.push("   当前负责人：" + t.owner + (t.worktree ? "；worktree：" + t.worktree : ""));
+    if (task.owner) lines.push("   当前负责人：" + task.owner + (task.worktree ? "；worktree：" + task.worktree : ""));
     lines.push("   export MAW_AGENT=<唯一名>");
     lines.push("3. 若任务已有 worktree：直接进入该目录继续改代码；需要重新绑定可再执行 maw next（同名 agent 幂等）。");
-    lines.push("   " + (t.worktree ? ("cd " + projPath.replace(/\\/g,"/") + "/" + t.worktree) : "maw next"));
-    lines.push("4. 目标任务保持为 " + t.id + "；勿改其他 agent 的 worktree。");
+    lines.push("   " + (task.worktree ? ("cd " + projPath.replace(/\\/g,"/") + "/" + task.worktree) : "maw next"));
+    lines.push("4. 目标任务保持为 " + task.id + "；勿改其他 agent 的 worktree。");
   } else {
     lines.push("2. 设定本会话唯一 Agent 名（勿与已注册冲突" + (taken.length ? "；已占用：" + taken.join(", ") : "") + "）：");
     lines.push("   export MAW_AGENT=<唯一名>");
     lines.push("3. 注册并领取下一道 ready 任务（按 priority / merge_order）：");
     lines.push("   maw register && maw next");
     lines.push("   或：maw next --agent <唯一名>");
-    lines.push("4. 核对输出的任务 ID。期望领取：" + t.id + "（" + (t.title || "") + "）。");
+    lines.push("4. 核对输出的任务 ID。期望领取：" + task.id + "（" + (task.title || "") + "）。");
     lines.push("   - 若正是该任务：进入输出的 worktree 目录工作。");
     lines.push("   - 若领到其他任务：以实际领到的任务为准继续（队列按优先级）；或查看看板后再调度，勿改他人 worktree。");
   }
@@ -765,7 +765,7 @@ function buildTaskPrompt(t) {
   lines.push("- 状态库在本机 ~/.maw/maw.db；本仓库 .multiagent/ 仅存配置与蓝图。");
   lines.push("- 换人或中断前：maw handoff；本会话无更多可领任务时再 maw unregister。");
   lines.push("- 出错时先读 maw 输出的「下一步」提示，不要绕过。");
-  lines.push("- 开始前建议：maw task show " + t.id);
+  lines.push("- 开始前建议：maw task show " + task.id);
   return lines.join("\n");
 }
 
@@ -906,22 +906,22 @@ function secCopy(title, btnId, label) {
 }
 
 function renderDrawerBody() {
-  const t = findTask(selectedTid, selectedPid);
-  if (!t) {
+  const task = findTask(selectedTid, selectedPid);
+  if (!task) {
     document.getElementById("d-id").textContent = "";
     document.getElementById("d-title").textContent = t("task_missing");
     document.getElementById("drawer-body").innerHTML = '<p class="empty">当前筛选下找不到该任务</p>';
     return;
   }
-  selectedPid = t.project_id || selectedPid;
-  const p = findProject(t.project_id) || {};
-  const cmd = "maw task show " + t.id;
-  const prompt = buildTaskPrompt(t);
-  const cdWt = t.worktree
-    ? "cd " + ((p.path || "<工程路径>").replace(/\\/g, "/") + "/" + t.worktree)
+  selectedPid = task.project_id || selectedPid;
+  const p = findProject(task.project_id) || {};
+  const cmd = "maw task show " + task.id;
+  const prompt = buildTaskPrompt(task);
+  const cdWt = task.worktree
+    ? "cd " + ((p.path || "<工程路径>").replace(/\\/g, "/") + "/" + task.worktree)
     : "";
-  document.getElementById("d-id").textContent = t.id;
-  document.getElementById("d-title").textContent = t.title || t("no_title");
+  document.getElementById("d-id").textContent = task.id;
+  document.getElementById("d-title").textContent = task.title || t("no_title");
 
   let logsHtml;
   if (drawerLoading) {
@@ -941,7 +941,7 @@ function renderDrawerBody() {
   }
 
   const agent = (lastSnap?.agents || []).find(a =>
-    a.task_id === t.id && (!t.project_id || a.project_id === t.project_id)
+    a.task_id === task.id && (!task.project_id || a.project_id === task.project_id)
   );
 
   document.getElementById("drawer-body").innerHTML =
@@ -951,24 +951,24 @@ function renderDrawerBody() {
       (cdWt ? '<button type="button" class="copy" id="d-copy-wt">复制进入 worktree</button>' : "") +
     '</div>' +
     '<div class="drawer-section"><h3>基本信息</h3><dl class="kv">' +
-      '<dt>状态</dt><dd>' + statusBadge(t.status) + '<code style="font-size:.68rem;color:var(--muted)">' + esc(t.status) + '</code></dd>' +
-      '<dt>优先级</dt><dd>' + esc(t.priority ?? "—") + ' · merge_order ' + esc(t.merge_order ?? "—") + '</dd>' +
-      '<dt>负责人</dt><dd>' + esc(t.owner || t("unassigned")) + '</dd>' +
-      '<dt>依赖</dt><dd>' + esc((t.deps && t.deps.length) ? t.deps.join(", ") : t("none")) + '</dd>' +
-      '<dt>尝试次数</dt><dd>' + esc(t.attempts ?? 0) + ' · 修订 ' + esc(t.revision ?? 0) + '</dd>' +
-      '<dt>心跳</dt><dd>' + esc(fmtTime(t.heartbeat) || "—") + '</dd>' +
-      (t.blocked_reason ? '<dt>阻塞原因</dt><dd>' + esc(t.blocked_reason) + '</dd>' : "") +
+      '<dt>状态</dt><dd>' + statusBadge(task.status) + '<code style="font-size:.68rem;color:var(--muted)">' + esc(task.status) + '</code></dd>' +
+      '<dt>优先级</dt><dd>' + esc(task.priority ?? "—") + ' · merge_order ' + esc(task.merge_order ?? "—") + '</dd>' +
+      '<dt>负责人</dt><dd>' + esc(task.owner || t("unassigned")) + '</dd>' +
+      '<dt>依赖</dt><dd>' + esc((task.deps && task.deps.length) ? task.deps.join(", ") : t("none")) + '</dd>' +
+      '<dt>尝试次数</dt><dd>' + esc(task.attempts ?? 0) + ' · 修订 ' + esc(task.revision ?? 0) + '</dd>' +
+      '<dt>心跳</dt><dd>' + esc(fmtTime(task.heartbeat) || "—") + '</dd>' +
+      (task.blocked_reason ? '<dt>阻塞原因</dt><dd>' + esc(task.blocked_reason) + '</dd>' : "") +
     '</dl></div>' +
     '<div class="drawer-section"><h3>执行节点</h3><dl class="kv">' +
-      '<dt>工程</dt><dd>' + esc(t.project_name || p.name || "—") + '</dd>' +
+      '<dt>工程</dt><dd>' + esc(task.project_name || p.name || "—") + '</dd>' +
       '<dt>工程路径</dt><dd>' + esc(p.path || "—") + '</dd>' +
-      '<dt>Worktree</dt><dd>' + esc(t.worktree || "—") + '</dd>' +
-      '<dt>分支</dt><dd>' + esc(t.branch || "—") + '</dd>' +
-      '<dt>Agent</dt><dd>' + esc(agent ? (agent.id + " · " + (agent.status || "") + " · " + (fmtTime(agent.last_seen) || "")) : (t.owner || "—")) + '</dd>' +
+      '<dt>Worktree</dt><dd>' + esc(task.worktree || "—") + '</dd>' +
+      '<dt>分支</dt><dd>' + esc(task.branch || "—") + '</dd>' +
+      '<dt>Agent</dt><dd>' + esc(agent ? (agent.id + " · " + (agent.status || "") + " · " + (fmtTime(agent.last_seen) || "")) : (task.owner || "—")) + '</dd>' +
     '</dl></div>' +
-    '<div class="drawer-section"><h3>write_scope</h3>' + listBullets(t.write_scope, t("empty")) + '</div>' +
-    '<div class="drawer-section"><h3>read_scope</h3>' + listBullets(t.read_scope, t("none")) + '</div>' +
-    '<div class="drawer-section"><h3>acceptance</h3>' + listBullets(t.acceptance, t("none")) + '</div>' +
+    '<div class="drawer-section"><h3>write_scope</h3>' + listBullets(task.write_scope, t("empty")) + '</div>' +
+    '<div class="drawer-section"><h3>read_scope</h3>' + listBullets(task.read_scope, t("none")) + '</div>' +
+    '<div class="drawer-section"><h3>acceptance</h3>' + listBullets(task.acceptance, t("none")) + '</div>' +
     '<div class="drawer-section">' + secCopy(t("show_cmd"), "d-copy-cmd", t("one_click_copy")) +
       '<div class="cmd-box">' + esc(cmd) + '</div></div>' +
     '<div class="drawer-section">' + secCopy(t("join_prompt"), "d-copy-prompt", t("one_click_copy")) +
@@ -987,7 +987,7 @@ function renderDrawerBody() {
   bind("d-copy-wt", cdWt, t("copied"));
 
   document.querySelectorAll(".card.clickable").forEach(el => {
-    const on = el.dataset.tid === t.id && (!selectedPid || el.dataset.pid === selectedPid);
+    const on = el.dataset.tid === task.id && (!selectedPid || el.dataset.pid === selectedPid);
     el.classList.toggle("active", on);
   });
 }
@@ -1154,17 +1154,17 @@ function topoEdgePath(from, to) {
   return "M " + x1 + " " + y1 + " C " + mx + " " + y1 + ", " + mx + " " + y2 + ", " + x2 + " " + y2;
 }
 
-function renderTopoNode(t, pos, indeg, outdeg) {
-  const active = selectedTid === t.id && selectedPid === (t.project_id || "");
-  const deps = t.deps || [];
-  const inN = indeg.get(t.id) || 0;
-  const outN = outdeg.get(t.id) || 0;
-  return '<article class="topo-node clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(t.id)+'" data-pid="'+esc(t.project_id||'')+'" style="left:'+pos.x+'px;top:'+pos.y+'px" aria-label="'+esc(t.id+' '+t.title+'，'+statusLabel(t.status))+'">'+
-    '<div class="card-top"><span class="id">'+esc(t.id)+'</span>'+statusBadge(t.status)+'</div>'+
-    '<h4 class="task-title">'+esc(t.title || t("no_title"))+'</h4>'+
+function renderTopoNode(task, pos, indeg, outdeg) {
+  const active = selectedTid === task.id && selectedPid === (task.project_id || "");
+  const deps = task.deps || [];
+  const inN = indeg.get(task.id) || 0;
+  const outN = outdeg.get(task.id) || 0;
+  return '<article class="topo-node clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(task.id)+'" data-pid="'+esc(task.project_id||'')+'" style="left:'+pos.x+'px;top:'+pos.y+'px" aria-label="'+esc(task.id+' '+task.title+'，'+statusLabel(task.status))+'">'+
+    '<div class="card-top"><span class="id">'+esc(task.id)+'</span>'+statusBadge(task.status)+'</div>'+
+    '<h4 class="task-title">'+esc(task.title || t("no_title"))+'</h4>'+
     '<div class="topo-meta">'+
-      '<span class="owner">'+esc(t.owner || t("unassigned"))+'</span>'+
-      '<span class="priority" title=t("prio_title")>P'+esc(t.priority ?? "—")+'</span>'+
+      '<span class="owner">'+esc(task.owner || t("unassigned"))+'</span>'+
+      '<span class="priority" title="'+esc(t("prio_title"))+'">P'+esc(task.priority ?? "—")+'</span>'+
       '<span title="入度 / 出度">←'+inN+' · '+outN+'→</span>'+
     '</div>'+
     (deps.length ? '<div class="topo-deps">deps: '+esc(deps.join(", "))+'</div>' : '')+
@@ -1190,11 +1190,11 @@ function renderTopology(s) {
         return '<path class="'+(e.cross ? "cross" : "")+'" d="'+topoEdgePath(a, b)+'" marker-end="url(#'+markerId+')"/>';
       }).join("");
       const nodes = [...band.positions.entries()].map(([id, pos]) => {
-        const t = band.byId.get(id);
-        if (pos.stub || !t) {
+        const task = band.byId.get(id);
+        if (pos.stub || !task) {
           return '<article class="topo-node stub" style="left:'+pos.x+'px;top:'+pos.y+'px" aria-label="缺失依赖 '+esc(id)+'"><div class="id">'+esc(id)+'</div><h4 class="task-title">筛选外 / 历史依赖</h4><div class="topo-meta"><span>不在当前视图</span></div></article>';
         }
-        return renderTopoNode(t, pos, band.indeg, band.outdeg);
+        return renderTopoNode(task, pos, band.indeg, band.outdeg);
       }).join("");
       return '<section class="topo-band" data-project="'+esc(band.pid)+'">'+
         '<div class="topo-band-label"><span>'+esc(band.name)+'</span><span class="count">'+band.tasks.length+' 任务 · '+band.edgeCount+' 边</span></div>'+
@@ -1236,15 +1236,15 @@ function renderBoard(s) {
   }
   const html = lanes.map((lane, i) => {
     const items = tasks.filter(t => lane.statuses.includes(t.status));
-    const cards = items.map(t => {
-      const active = selectedTid === t.id && selectedPid === (t.project_id || "");
-      return '<article class="card clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(t.id)+'" data-pid="'+esc(t.project_id||'')+'" aria-label="'+esc(t.id+' '+t.title+'，'+statusLabel(t.status))+'">'+
-        '<div class="card-top"><span class="id">'+esc(t.id)+'</span>'+statusBadge(t.status)+'</div>'+
-        '<h4 class="task-title">'+esc(t.title)+'</h4>'+
-        '<div class="card-project">'+esc(t.project_name || t.project_id || t("unknown_project"))+'</div>'+
-        (t.blocked_reason ? '<div class="task-reason">'+esc(t.blocked_reason)+'</div>' : '')+
-        '<div class="card-bottom"><span class="owner">'+esc(t.owner || t("unassigned"))+'</span><span class="priority" title=t("prio_title")>P'+esc(t.priority ?? "—")+'</span></div>'+
-        '<div class="actions"><button type="button" class="copy primary" data-action="prompt" aria-label="'+esc('复制 '+t.id+' 接入提示词')+'">接入提示词 ↗</button><button type="button" class="copy" data-action="command" aria-label="'+esc('复制 '+t.id+' 查看命令')+'">⌘ 命令</button></div></article>';
+    const cards = items.map(task => {
+      const active = selectedTid === task.id && selectedPid === (task.project_id || "");
+      return '<article class="card clickable'+(active?' active':'')+'" tabindex="0" data-tid="'+esc(task.id)+'" data-pid="'+esc(task.project_id||'')+'" aria-label="'+esc(task.id+' '+task.title+'，'+statusLabel(task.status))+'">'+
+        '<div class="card-top"><span class="id">'+esc(task.id)+'</span>'+statusBadge(task.status)+'</div>'+
+        '<h4 class="task-title">'+esc(task.title)+'</h4>'+
+        '<div class="card-project">'+esc(task.project_name || task.project_id || t("unknown_project"))+'</div>'+
+        (task.blocked_reason ? '<div class="task-reason">'+esc(task.blocked_reason)+'</div>' : '')+
+        '<div class="card-bottom"><span class="owner">'+esc(task.owner || t("unassigned"))+'</span><span class="priority" title="'+esc(t("prio_title"))+'">P'+esc(task.priority ?? "—")+'</span></div>'+
+        '<div class="actions"><button type="button" class="copy primary" data-action="prompt" aria-label="'+esc('复制 '+task.id+' 接入提示词')+'">接入提示词 ↗</button><button type="button" class="copy" data-action="command" aria-label="'+esc('复制 '+task.id+' 查看命令')+'">⌘ 命令</button></div></article>';
     }).join("");
     return '<section class="col" data-lane="'+lane.id+'" aria-label="'+lane.label+'"><h3><span class="lane-index">'+String(i+1).padStart(2,"0")+'</span>'+lane.label+'<span class="count">'+items.length+'</span><span class="lane-symbol" aria-hidden="true">'+lane.symbol+'</span></h3><div class="col-body">'+(cards || '<div class="lane-empty"><span aria-hidden="true">'+lane.symbol+'</span>'+lane.empty+'</div>')+'</div></section>';
   }).join("");
@@ -1289,7 +1289,7 @@ function render(s) {
     '<div class="stat" title="'+esc(title)+'"><div class="stat-label">'+label+'</div><div class="stat-value '+cls+'">'+value+'</div>'+extra+'</div>';
   document.getElementById("stats").innerHTML =
     stat(t("progress"), pct+'<small>% · '+esc(s.done || 0)+' / '+esc(s.total || 0)+'</small>', t("progress"),
-      '<div class="bar-wrap" role="progressbar" aria-label=t("progress") aria-valuenow="'+pct+'" aria-valuemin="0" aria-valuemax="100"><span class="bar" style="width:'+pct+'%"></span></div>', "accent")+
+      '<div class="bar-wrap" role="progressbar" aria-label="'+esc(t("progress"))+'" aria-valuenow="'+pct+'" aria-valuemin="0" aria-valuemax="100"><span class="bar" style="width:'+pct+'%"></span></div>', "accent")+
     stat(t("flow"), esc(s.active || 0), t("flow_hint"))+
     stat("可领取", esc(s.counts?.ready || 0), t("deps_ready"))+
     stat("需处理", attention, t("blocked_conflict"), "", attention ? "danger" : "");
@@ -1373,8 +1373,8 @@ document.getElementById("columns").addEventListener("click", async e => {
   if (!card) return;
   const btn = e.target.closest("button[data-action]");
   if (btn) {
-    const t = findTask(card.dataset.tid, card.dataset.pid);
-    if (t) await copyText(btn, btn.dataset.action === "prompt" ? buildTaskPrompt(t) : "maw task show " + t.id, t("copied"));
+    const task = findTask(card.dataset.tid, card.dataset.pid);
+    if (task) await copyText(btn, btn.dataset.action === "prompt" ? buildTaskPrompt(task) : "maw task show " + task.id, t("copied"));
   } else openDrawer(card.dataset.tid, card.dataset.pid);
 });
 document.getElementById("columns").addEventListener("keydown", e => {
