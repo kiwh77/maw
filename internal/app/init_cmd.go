@@ -51,7 +51,8 @@ func Init(cwd string, dryRun, upgrade bool) (Result, error) {
 	if _, err := os.Stat(bp); os.IsNotExist(err) {
 		_ = os.WriteFile(bp, []byte(blueprint.Example), 0o644)
 	}
-	if err := db.Init(gdb); err != nil {
+	// 有状态升级走停写 + 备份；新建库无备份。
+	if err := ensureWritableDB(gdb); err != nil {
 		return nil, err
 	}
 	cfg, err := config.Load(cfgPath)

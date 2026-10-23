@@ -37,16 +37,16 @@ func PlanCheck(path, cwd string) (Result, error) {
 	}, nil
 }
 
-// PlanApply 把蓝图增量合入工程任务表。
+// PlanApply 把蓝图增量合入工程任务表，并接通稳定任务实例身份。
 //
 // 默认（reset=false）：
 //   - 保留 done / cancelled / blocked / 进行中（ActiveOwner）任务记录与状态
-//   - 蓝图内新题：插入为 backlog
+//   - 蓝图内新题：插入为 backlog，绑定新 instance_id
 //   - 蓝图内已有 idle（backlog/ready）题：按蓝图字段覆盖并置回 backlog，再 promoteReady
-//   - 蓝图内已有保留态题：只刷新标题/优先级/deps/scope/acceptance，不改状态与领取字段
-//   - 蓝图外的 idle 题：删除（表示从计划中拿掉）；蓝图外的保留态题：不动
+//   - 蓝图内已有保留态题：只刷新计划字段；定义（标题／依赖）变化时追加冻结版本
+//   - 蓝图外的 idle 题：退役实例并释放别名（不是 soft-cancel）；蓝图外的保留态题：不动
 //
-// reset=true（--reset）：恢复旧行为，清空该工程全部任务后再灌入蓝图（显式销毁历史）。
+// reset=true（--reset）：显式退役全部活跃实例后重建；若仍有占用 Run／进行中任务则拒绝。
 func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 	pc, err := resolveProject(cwd)
 	if err != nil {
@@ -65,8 +65,8 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 			return nil, err
 		}
 	}
-	tasks := blueprint.TasksForDB(f)
-	for _, t := range tasks {
+	planTasks := blueprint.TasksForDB(f)
+	for _, t := range planTasks {
 		t.ProjectID = pc.ID()
 	}
 	effectiveMain := pc.Config.Project.MainBranch
@@ -76,7 +76,7 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 	if dryRun {
 		return Result{
 			"ok": true, "dry_run": true, "reset": reset,
-			"tasks": tasks, "project_id": pc.ID(),
+			"tasks": planTasks, "project_id": pc.ID(),
 			"main_branch": effectiveMain,
 			"note":        i18n.T("plan.note_incremental"),
 		}, nil
@@ -108,8 +108,10 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 
 	var (
 		created, updated, preserved, removed int
+		identityNotes                        []string
+		pinned                               int
 	)
-	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+	err = withGlobalWrite(pc.GlobalDB, func(tx *sql.Tx) error {
 		if mainBranch != "" {
 			pc.Project.MainBranch = mainBranch
 			pc.Project.MaxParallel = pc.Config.Project.MaxParallel
@@ -117,19 +119,37 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 				return err
 			}
 		}
+
+		// 契约形态 DisplayID 时先跑身份规划，校验重建／冻结／退役与 pinned Run。
+		if contractualDisplayIDs(planTasks) {
+			ip, err := planTaskIdentity(tx, pc.ID(), planTasks, reset)
+			if err != nil {
+				return err
+			}
+			if ip != nil {
+				identityNotes = append(identityNotes, ip.Notes...)
+				pinned = len(ip.Pinned)
+			}
+		}
+
 		if reset {
+			if err := refuseResetIfOccupied(tx, pc.ID()); err != nil {
+				return err
+			}
 			if err := db.DeleteTasks(tx, pc.ID()); err != nil {
 				return err
 			}
 			if err := db.DeleteSharedFiles(tx, pc.ID()); err != nil {
 				return err
 			}
-			for _, t := range tasks {
+			for _, t := range planTasks {
 				if err := db.UpsertTask(tx, t); err != nil {
 					return err
 				}
 				created++
-				_ = db.AppendEvent(tx, pc.ID(), agent, "task_created", t.ID, map[string]any{"status": t.Status})
+				_ = db.AppendEvent(tx, pc.ID(), agent, "task_created", t.ID, map[string]any{
+					"status": t.Status, "instance_id": t.InstanceID,
+				})
 			}
 		} else {
 			existing, err := db.ListTasks(tx, pc.ID())
@@ -140,8 +160,8 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 			for _, t := range existing {
 				byID[t.ID] = t
 			}
-			inPlan := make(map[string]bool, len(tasks))
-			for _, nt := range tasks {
+			inPlan := make(map[string]bool, len(planTasks))
+			for _, nt := range planTasks {
 				inPlan[nt.ID] = true
 				old := byID[nt.ID]
 				if old != nil && machine.PreserveOnPlanApply(old.Status) {
@@ -149,9 +169,12 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 					if err := db.UpsertTask(tx, old); err != nil {
 						return err
 					}
+					if err := freezeIfDefinitionChanged(tx, old); err != nil {
+						return err
+					}
 					preserved++
 					_ = db.AppendEvent(tx, pc.ID(), agent, "task_plan_updated", old.ID, map[string]any{
-						"status": old.Status, "kept": true,
+						"status": old.Status, "kept": true, "instance_id": old.InstanceID,
 					})
 					continue
 				}
@@ -160,15 +183,20 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 					if err := db.UpsertTask(tx, nt); err != nil {
 						return err
 					}
-					_ = db.AppendEvent(tx, pc.ID(), agent, "task_created", nt.ID, map[string]any{"status": nt.Status})
+					_ = db.AppendEvent(tx, pc.ID(), agent, "task_created", nt.ID, map[string]any{
+						"status": nt.Status, "instance_id": nt.InstanceID,
+					})
 				} else {
 					updated++
+					nt.InstanceID = old.InstanceID
 					if err := db.UpsertTask(tx, nt); err != nil {
 						return err
 					}
-					// B2：更新已有题发 task_updated，不再误报 task_created
+					if err := freezeIfDefinitionChanged(tx, nt); err != nil {
+						return err
+					}
 					_ = db.AppendEvent(tx, pc.ID(), agent, "task_updated", nt.ID, map[string]any{
-						"status": nt.Status, "from_status": old.Status,
+						"status": nt.Status, "from_status": old.Status, "instance_id": nt.InstanceID,
 					})
 				}
 			}
@@ -180,26 +208,11 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 					preserved++
 					continue
 				}
-				// B3：软删除为 cancelled，保留事件链；不再物理 DeleteTask
-				from := old.Status
-				old.Status = "cancelled"
-				old.BlockedReason = "removed_from_plan"
-				old.Owner = ""
-				old.Branch = ""
-				old.Worktree = ""
-				old.Revision++
-				if err := db.UpsertTask(tx, old); err != nil {
+				if err := retireIdleRemoved(tx, pc.ID(), old, agent); err != nil {
 					return err
 				}
 				removed++
-				_ = db.AppendEvent(tx, pc.ID(), agent, "task_removed_from_plan", old.ID, map[string]any{
-					"from": from, "to": "cancelled",
-				})
-				_ = db.AppendEvent(tx, pc.ID(), agent, "status_changed", old.ID, map[string]any{
-					"from": from, "to": "cancelled", "reason": "removed_from_plan",
-				})
 			}
-			// shared_files 是计划配置，按蓝图全量替换（与任务历史无关）
 			if err := db.DeleteSharedFiles(tx, pc.ID()); err != nil {
 				return err
 			}
@@ -215,25 +228,31 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 		return db.AppendEvent(tx, pc.ID(), agent, "plan_applied", "", map[string]any{
 			"path": path, "reset": reset,
 			"created": created, "updated": updated, "preserved": preserved, "removed": removed,
+			"pinned_runs": pinned,
 		})
 	})
 	if err != nil {
 		return nil, err
 	}
 	var out []*db.Task
-	_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+	_ = withGlobalRead(pc.GlobalDB, func(tx *sql.Tx) error {
 		out, err = db.ListTasks(tx, pc.ID())
 		return err
 	})
 	html, _ := refreshBoard(pc)
-	return Result{
+	res := Result{
 		"ok": true, "project_id": pc.ID(), "project_name": pc.Project.Name,
 		"reset":       reset,
 		"main_branch": pc.Config.Project.MainBranch,
 		"created":     created, "updated": updated, "preserved": preserved, "removed": removed,
-		"tasks": out, "board": html,
-		"next": i18n.T("next.after_apply"),
-	}, nil
+		"pinned_runs": pinned,
+		"tasks":       out, "board": html,
+		"next":        i18n.T("next.after_apply"),
+	}
+	if len(identityNotes) > 0 {
+		res["identity_notes"] = identityNotes
+	}
+	return res, nil
 }
 
 // mergePlanFields 把蓝图里的「计划字段」刷到已有保留态任务上，不碰领取/进度字段。

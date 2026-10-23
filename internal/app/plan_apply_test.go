@@ -189,8 +189,8 @@ merge_order = 20
 			by[tsk.ID] = tsk
 		}
 		idle := by["T-IDLE"]
-		if idle == nil || idle.Status != "cancelled" {
-			t.Fatalf("T-IDLE 应软删除为 cancelled，实际 %#v", idle)
+		if idle != nil {
+			t.Fatalf("T-IDLE 应从计划退役（tasks 行释放），实际 %#v", idle)
 		}
 		if by["T-DONE"] == nil || by["T-DONE"].Status != "done" {
 			t.Fatalf("T-DONE 应保留 done，实际 %#v", by["T-DONE"])

@@ -306,7 +306,8 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 	if maxP <= 0 {
 		maxP = 4
 	}
-	err := db.WithTx(gdb, func(tx *sql.Tx) error {
+	// 看板查询是只读：不得隐式升级 schema。
+	err := withGlobalRead(gdb, func(tx *sql.Tx) error {
 		var e error
 		projects, e = db.ListProjects(tx)
 		if e != nil {
@@ -343,7 +344,7 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 
 func loadTaskDetail(gdb, projectID, taskID string) (board.TaskDetail, error) {
 	var out board.TaskDetail
-	err := db.WithTx(gdb, func(tx *sql.Tx) error {
+	err := withGlobalRead(gdb, func(tx *sql.Tx) error {
 		t, e := db.FindTask(tx, projectID, taskID)
 		if e != nil {
 			return e

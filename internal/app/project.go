@@ -45,7 +45,8 @@ func resolveProject(cwd string) (*projCtx, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.Init(gdb); err != nil {
+	// 写路径：升级必须走停写与备份入口，禁止只读查询顺手 Migrate。
+	if err := ensureWritableDB(gdb); err != nil {
 		return nil, err
 	}
 	cfg, err := config.Load(home.ConfigPath(local))
