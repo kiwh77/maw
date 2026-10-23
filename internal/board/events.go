@@ -25,6 +25,14 @@ type eventHub struct {
 type hubUpdate struct {
 	boardChanged bool
 	eventsJSON   []string // pre-marshaled event payloads
+	// catchup 非空时表示积压超过单次 SSE 突发上限：客户端须按 since 游标补拉，禁止跳过。
+	catchup *catchupHint
+}
+
+type catchupHint struct {
+	Since     int64 `json:"since"`
+	Watermark int64 `json:"watermark"`
+	Hint      string `json:"hint"`
 }
 
 func newEventHub(load LoadFunc, feed FeedFunc, interval time.Duration) *eventHub {
@@ -112,11 +120,17 @@ func (h *eventHub) watch(ctx context.Context) {
 						lastEventID = e.ID
 					}
 				}
+				// 一页打满且水位仍落后：发 catchup，水位只推进到已推送的最后一条，禁止跳到 EventID。
+				if len(evs) >= MaxSSEEventBurst && snapshot.EventID > lastEventID {
+					u.catchup = &catchupHint{
+						Since:     lastEventID,
+						Watermark: snapshot.EventID,
+						Hint:      "backlog exceeds SSE burst; pull /api/feed or /api/v1/events without skipping",
+					}
+				}
 			}
 		}
-		if snapshot.EventID > lastEventID {
-			lastEventID = snapshot.EventID
-		}
+		// 故意不把 lastEventID 跳到 snapshot.EventID：未投递的事件必须经 feed／v1 补拉。
 		last = fingerprint
 		valid = true
 		if ctx.Err() != nil {
@@ -171,6 +185,12 @@ func (h *eventHub) handler(heartbeat time.Duration) http.Handler {
 			case u := <-updates:
 				for _, payload := range u.eventsJSON {
 					if err := write("event: event\ndata: " + payload + "\n\n"); err != nil {
+						return
+					}
+				}
+				if u.catchup != nil {
+					b, _ := json.Marshal(u.catchup)
+					if err := write("event: catchup\ndata: " + string(b) + "\n\n"); err != nil {
 						return
 					}
 				}

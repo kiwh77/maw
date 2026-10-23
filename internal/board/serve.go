@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/localauth"
 )
 
 // StatusReport is the write payload for POST /api/status.
@@ -31,13 +32,24 @@ type StatusFunc func(StatusReport) (map[string]any, error)
 // FeedFunc returns events with id > since (optional project/agent filters).
 type FeedFunc func(since int64, projectID, agent string) ([]*db.Event, error)
 
+// RuntimeViewFunc 返回受管／自动执行配置视图（自动模式默认关闭）。
+type RuntimeViewFunc func() map[string]any
+
 // ServeOpts configures the local status hub HTTP server.
 type ServeOpts struct {
-	Load   LoadFunc
-	Detail TaskDetailFunc
-	Status StatusFunc // nil → POST /api/status returns 501
-	Feed   FeedFunc   // nil → GET /api/feed returns 501; SSE stays invalidation-only
+	Load    LoadFunc
+	Detail  TaskDetailFunc
+	Status  StatusFunc // nil → POST /api/status returns 501
+	Feed    FeedFunc   // nil → GET /api/feed returns 501; SSE stays invalidation-only
+	Runtime RuntimeViewFunc
+	// Auth 非空时：旧写入口与 /api/v1 共用一次接入授权；匿名 POST /api/status 被拒绝。
+	Auth *localauth.Authenticator
+	// V1 挂载版本化 API（events／read／commands 等）；路径须自带 /api/v1 前缀。
+	V1 http.Handler
 }
+
+// MaxSSEEventBurst 是单次 SSE／feed 页的事件上限；更大积压走 catchup，禁止跳过。
+const MaxSSEEventBurst = 200
 
 // assetHandler 提供嵌入的前端构建产物（assets/dist）。
 // 只暴露真实文件：不做目录列举，且与页面一致使用 no-store 避免旧 bundle 残留。
@@ -74,11 +86,19 @@ func isLoopback(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
 func newHandlerOpts(opts ServeOpts) http.Handler {
 	mux := http.NewServeMux()
 	events := newEventHub(opts.Load, opts.Feed, 500*time.Millisecond)
 	mux.Handle("/api/events", events.handler(15*time.Second))
 	mux.Handle("/assets/", assetHandler())
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
 			http.NotFound(w, r)
@@ -88,6 +108,7 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write([]byte(PageHTML()))
 	})
+
 	mux.HandleFunc("/api/board", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		snap, err := opts.Load(q.Get("project"), q.Get("agent"), q.Get("status"))
@@ -95,10 +116,46 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(snap)
+		out := map[string]any{
+			"updated_at":     snap.UpdatedAt,
+			"max_parallel":   snap.MaxParallel,
+			"total":          snap.Total,
+			"done":           snap.Done,
+			"active":         snap.Active,
+			"blocked":        snap.Blocked,
+			"percent":        snap.Percent,
+			"next_hint":      snap.NextHint,
+			"risks":          snap.Risks,
+			"counts":         snap.Counts,
+			"tasks":          snap.Tasks,
+			"agents":         snap.Agents,
+			"projects":       snap.Projects,
+			"filter_project": snap.FilterProject,
+			"filter_agent":   snap.FilterAgent,
+			"filter_status":  snap.FilterStatus,
+			"global":         snap.Global,
+			// 旧只读响应保持字段兼容；附带契约视图（自动模式默认关闭）。
+			"auto_execution": defaultAutoExecution(opts),
+			"api_compat":     "board-v1",
+		}
+		writeJSON(w, http.StatusOK, out)
 	})
+
+	mux.HandleFunc("/api/runtime", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":             true,
+			"auto_execution": defaultAutoExecution(opts),
+			// 静态页／导出 HTML 不得发起受管写操作；受管入口只走受权 CLI／v1。
+			"managed_via":           "cli_or_api_v1",
+			"static_export_managed": false,
+		})
+	})
+
 	mux.HandleFunc("/api/task", func(w http.ResponseWriter, r *http.Request) {
 		if opts.Detail == nil {
 			http.Error(w, "task detail unavailable", http.StatusNotImplemented)
@@ -123,11 +180,10 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		if d.Events == nil {
 			d.Events = []*db.Event{}
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(d)
+		writeJSON(w, http.StatusOK, d)
 	})
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+
+	statusHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -148,14 +204,59 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		}
 		rep.Actor = strings.TrimSpace(rep.Actor)
 		rep.ProjectID = strings.TrimSpace(rep.ProjectID)
+		if id, ok := localauth.IdentityFrom(r.Context()); ok {
+			if rep.Actor == "" {
+				rep.Actor = id.Actor
+			} else if id.Via == "token" && id.Actor != "" && id.Actor != rep.Actor {
+				localauth.WriteJSONError(w, http.StatusForbidden, "actor_mismatch",
+					"actor 必须与令牌主体一致", nil)
+				return
+			}
+		}
 		out, err := opts.Status(rep)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(out)
+		writeJSON(w, http.StatusOK, out)
 	})
+	if opts.Auth != nil {
+		mux.Handle("/api/status", opts.Auth.Middleware(opts.Auth.RequireScope(localauth.ScopeWrite, statusHandler)))
+	} else {
+		// 未注入 Auth 时拒绝写：避免匿名写通道；装配层必须显式注入。
+		mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+			localauth.WriteJSONError(w, http.StatusUnauthorized, "unauthenticated",
+				"旧 POST /api/status 需要本机令牌或会话；请先完成授权引导", nil)
+		})
+	}
+
+	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if opts.Auth == nil || opts.Auth.Sessions == nil {
+			localauth.WriteJSONError(w, http.StatusNotImplemented, "session_unavailable",
+				"会话引导未装配", nil)
+			return
+		}
+		if !isLoopback(r) || !localauth.IsLoopbackHost(r.Host) {
+			localauth.WriteJSONError(w, http.StatusForbidden, "loopback_required",
+				"会话只在本机下发", nil)
+			return
+		}
+		sess, err := opts.Auth.Sessions.Issue(w, r.Host)
+		if err != nil {
+			localauth.WriteJSONError(w, http.StatusForbidden, "session_issue_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "session_id": sess.ID, "csrf": sess.CSRFToken(),
+			"next": "浏览器写请求带 CSRF；CLI 写请求用 Authorization: Bearer",
+		})
+	})
+
 	mux.HandleFunc("/api/feed", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
@@ -176,14 +277,46 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		if evs == nil {
 			evs = []*db.Event{}
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "events": evs})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "events": evs,
+			"has_more": len(evs) >= MaxSSEEventBurst,
+			"next_since": func() int64 {
+				if len(evs) == 0 {
+					return since
+				}
+				return evs[len(evs)-1].ID
+			}(),
+		})
 	})
+
 	mux.HandleFunc("/snapshot.json", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/api/board?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
 	})
-	return mux
+
+	var root http.Handler = mux
+	if opts.V1 != nil {
+		root = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+				opts.V1.ServeHTTP(w, r)
+				return
+			}
+			mux.ServeHTTP(w, r)
+		})
+	}
+	return root
+}
+
+func defaultAutoExecution(opts ServeOpts) map[string]any {
+	if opts.Runtime != nil {
+		if v := opts.Runtime(); v != nil {
+			return v
+		}
+	}
+	return map[string]any{
+		"enabled":                 false,
+		"managed_execution_limit": 1,
+		"config_version":          1,
+	}
 }
 
 // Serve starts the local hub. Prefer ServeWith for status inject + feed.
