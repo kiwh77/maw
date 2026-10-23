@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kiwh77/maw/internal/version"
@@ -369,5 +370,88 @@ func TestCompareVersions(t *testing.T) {
 		if got := compareVersions(c.a, c.b); got != c.want {
 			t.Fatalf("compareVersions(%q,%q)=%d want %d", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+func hasBlockerKind(blockers []UpgradeBlocker, kind string) bool {
+	for _, b := range blockers {
+		if b.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// TestVerifyBackupCoversRuntimeTables 锁定 vnext 表的比对范围：
+// 备份之后新写入的实例/Run/租约必须被校验发现（只比旧表会漏掉）。
+func TestVerifyBackupCoversRuntimeTables(t *testing.T) {
+	path := freshPath(t)
+	if err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+	instanceID := seedClaim(t, path)
+	mustWithTx(t, path, func(tx *sql.Tx) error {
+		_, err := ClaimRun(tx, claimSpec(instanceID, "backup-1", "/tmp/ws/backup-1", 1))
+		return err
+	})
+
+	backup := filepath.Join(t.TempDir(), "maw.db.bak")
+	if err := Backup(path, backup); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyBackup(path, backup); err != nil {
+		t.Fatalf("同步状态下应通过: %v", err)
+	}
+
+	// 再领一次，只有 runs/resource_leases/task_instances 会变。
+	mustWithTx(t, path, func(tx *sql.Tx) error {
+		inst, err := CreateInstance(tx, testProject, "VN-601", InstanceDraft{Title: "第二条"})
+		if err != nil {
+			return err
+		}
+		_, err = ClaimRun(tx, claimSpec(string(inst.InstanceID), "backup-2", "/tmp/ws/backup-2", 1))
+		return err
+	})
+	err := VerifyBackup(path, backup)
+	if err == nil {
+		t.Fatal("新增 Run/租约后，备份校验必须报不一致")
+	}
+	if !strings.Contains(err.Error(), "数据不一致") {
+		t.Fatalf("期望行数不一致，实际 %v", err)
+	}
+}
+
+// TestAssertSafeToUpgradeBlocksOnRun 锁定「未排空运行」判据来自 Run 与租约，
+// 而不是只看旧表的任务状态。
+func TestAssertSafeToUpgradeBlocksOnRun(t *testing.T) {
+	path := freshPath(t)
+	if err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+	instanceID := seedClaim(t, path)
+	conn, err := OpenRaw(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	if err := AssertSafeToUpgrade(conn); err != nil {
+		t.Fatalf("领取前应可升级: %v", err)
+	}
+
+	mustWithTx(t, path, func(tx *sql.Tx) error {
+		_, err := ClaimRun(tx, claimSpec(instanceID, "drain-1", "/tmp/ws/drain", 1))
+		return err
+	})
+	err = AssertSafeToUpgrade(conn)
+	var nd *NotDrainedError
+	if !errors.As(err, &nd) {
+		t.Fatalf("存在占用中的 Run 时应拒绝升级，实际 %v", err)
+	}
+	if !hasBlockerKind(nd.Blockers, "run") {
+		t.Fatalf("缺少 run 类阻断项: %+v", nd.Blockers)
+	}
+	if !hasBlockerKind(nd.Blockers, "lease") {
+		t.Fatalf("缺少 lease 类阻断项: %+v", nd.Blockers)
 	}
 }

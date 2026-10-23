@@ -335,21 +335,20 @@ func ClaimRun(tx *sql.Tx, spec ClaimSpec) (*ClaimOutcome, error) {
 	return &ClaimOutcome{Run: run, Operation: op, Leases: leases, Cursor: cursor}, nil
 }
 
+// runCols 是 scanRun 期望的列顺序；多处查询共用一份，避免列清单各自漂移。
+const runCols = `run_id, project_id, instance_id, version_no, generation, phase,
+  reconciliation_state, desired_action, process_stop_confirmed, delivery_frozen,
+  started_at, finished_at, phase_history_json, evidence_json, leases_json, created_at, updated_at`
+
 // GetRun 按 id 返回 Run；不存在返回 nil。
 func GetRun(tx *sql.Tx, id string) (*Run, error) {
-	row := tx.QueryRow(`SELECT run_id, project_id, instance_id, version_no, generation, phase,
-  reconciliation_state, desired_action, process_stop_confirmed, delivery_frozen,
-  started_at, finished_at, phase_history_json, evidence_json, leases_json, created_at, updated_at
-FROM runs WHERE run_id = ?`, id)
+	row := tx.QueryRow(`SELECT `+runCols+` FROM runs WHERE run_id = ?`, id)
 	return scanRun(row)
 }
 
 // ListRuns 按代际返回某工程的 Run。
 func ListRuns(tx *sql.Tx, projectID string) ([]*Run, error) {
-	q := `SELECT run_id, project_id, instance_id, version_no, generation, phase,
-  reconciliation_state, desired_action, process_stop_confirmed, delivery_frozen,
-  started_at, finished_at, phase_history_json, evidence_json, leases_json, created_at, updated_at
-FROM runs`
+	q := `SELECT ` + runCols + ` FROM runs`
 	var args []any
 	if projectID != "" {
 		q += ` WHERE project_id = ?`
@@ -374,9 +373,7 @@ FROM runs`
 
 // ActiveRunForInstance 返回仍计入占用的 Run（含 unknown、失败但停止未确认）。
 func ActiveRunForInstance(tx *sql.Tx, instanceID string) (*Run, error) {
-	rows, err := tx.Query(`SELECT run_id, project_id, instance_id, version_no, generation, phase,
-  reconciliation_state, desired_action, process_stop_confirmed, delivery_frozen,
-  started_at, finished_at, phase_history_json, evidence_json, leases_json, created_at, updated_at
+	rows, err := tx.Query(`SELECT `+runCols+`
 FROM runs WHERE instance_id = ? ORDER BY generation DESC`, instanceID)
 	if err != nil {
 		return nil, err

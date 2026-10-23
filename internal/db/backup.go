@@ -124,16 +124,13 @@ func (e *NotDrainedError) Error() string {
 	return b.String()
 }
 
-// queryer 让断言同时适配 *sql.DB 与 *sql.Tx。
-type queryer interface {
-	Query(query string, args ...any) (*sql.Rows, error)
-}
-
 // AssertSafeToUpgrade 断言当前没有会与新写者并发写库的运行。
 //
-// 判据（宁可误报也不放过）：未结束的任务、非 idle 或仍挂任务的 agent、
-// 尚未过期的路径锁。旧二进制不识别本断言，升级窗口仍须人工停掉所有旧进程。
-func AssertSafeToUpgrade(q queryer) error {
+// 判据（宁可误报也不放过）：仍计入占用的 Run（含 unknown、失败但进程停止
+// 未确认，见 Run.Occupies）、未释放的资源占用（节点槽/工作目录/合并锁），
+// 以及旧表里的在飞任务、非 idle 的 agent 与未过期的路径锁。
+// 旧二进制不识别本断言，升级窗口仍须人工停掉所有旧进程。
+func AssertSafeToUpgrade(q querier) error {
 	blockers, err := UpgradeBlockers(q)
 	if err != nil {
 		return err
@@ -145,8 +142,64 @@ func AssertSafeToUpgrade(q queryer) error {
 }
 
 // UpgradeBlockers 列出阻止破坏性升级的占用者。
-func UpgradeBlockers(q queryer) ([]UpgradeBlocker, error) {
+func UpgradeBlockers(q querier) ([]UpgradeBlocker, error) {
 	var out []UpgradeBlocker
+
+	// vnext 的权威占用是 Run：只看任务状态会漏掉「已失败但进程未确认停止」。
+	// 迁移前的老库可能还没有 runs/resource_leases，缺表就跳过这一类。
+	if ok, err := tableExistsQ(q, "runs"); err != nil {
+		return nil, err
+	} else if ok {
+		rows, err := q.Query(`SELECT ` + runCols + ` FROM runs ORDER BY project_id, run_id`)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			r, err := scanRun(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if !r.Occupies() {
+				continue
+			}
+			out = append(out, UpgradeBlocker{
+				Kind:   "run",
+				ID:     r.ProjectID + "/" + r.ID,
+				Detail: fmt.Sprintf("phase=%s reconciliation=%s", r.Phase, r.Reconciliation),
+			})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	if ok, err := tableExistsQ(q, "resource_leases"); err != nil {
+		return nil, err
+	} else if ok {
+		rows, err := q.Query(`SELECT lease_id, resource_key, project_id, instance_id
+			FROM resource_leases WHERE released_at IS NULL ORDER BY project_id, resource_key`)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id, key, projectID, instanceID string
+			if err := rows.Scan(&id, &key, &projectID, &instanceID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, UpgradeBlocker{
+				Kind:   "lease",
+				ID:     projectID + "/" + id,
+				Detail: key + " instance=" + instanceID,
+			})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
 
 	rows, err := q.Query(`SELECT project_id, id, status, owner FROM tasks
 		WHERE status IN ('in_progress', 'self_check', 'conflict')
@@ -291,7 +344,18 @@ func VerifyBackup(source, backupPath string) error {
 	if srcVer != bakVer {
 		return fmt.Errorf("db: 备份 schema 版本不一致：源 v%d，备份 v%d", srcVer, bakVer)
 	}
-	for _, t := range backupTables {
+	srcTables, err := schemaTableNames(src)
+	if err != nil {
+		return err
+	}
+	bakTables, err := schemaTableNames(bak)
+	if err != nil {
+		return err
+	}
+	if !sameStrings(srcTables, bakTables) {
+		return fmt.Errorf("db: 备份表清单不一致：源 %v，备份 %v", srcTables, bakTables)
+	}
+	for _, t := range srcTables {
 		srcN, err := tableCount(src, t)
 		if err != nil {
 			return err
@@ -387,11 +451,6 @@ func MigrateWithBackup(path, backupPath string) error {
 	return fmt.Errorf("db: 迁移失败，已用备份 %s 回滚: %w", backupPath, err)
 }
 
-// backupTables 是备份校验比对的表清单，与 schema 保持同步。
-var backupTables = []string{
-	"meta", "projects", "tasks", "events", "locks", "messages", "shared_files", "agents",
-}
-
 func verifyBackupFile(path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return err
@@ -485,9 +544,11 @@ func tableCount(d *sql.DB, table string) (int, error) {
 	return n, nil
 }
 
-func tableExists(d *sql.DB, table string) (bool, error) {
+func tableExists(d *sql.DB, table string) (bool, error) { return tableExistsQ(d, table) }
+
+func tableExistsQ(q querier, table string) (bool, error) {
 	var name string
-	err := d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&name)
+	err := q.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -495,6 +556,26 @@ func tableExists(d *sql.DB, table string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// tableNames 列出库里的表（升序，排除 sqlite 内部表）。
+// 用它驱动备份比对，新迁移加表后无需再改清单。
+func schemaTableNames(d *sql.DB) ([]string, error) {
+	rows, err := d.Query(`SELECT name FROM sqlite_master
+WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 // referenceProblems 用逻辑外键检查数据一致性（schema 未声明 FK，
@@ -523,6 +604,28 @@ func referenceProblems(d *sql.DB) ([]string, error) {
 			  AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = a.project_id AND t.id = a.task_id)`},
 		{"shared_files.owner_task", `SELECT COUNT(*) FROM shared_files s
 			WHERE NOT EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = s.project_id AND t.id = s.owner_task)`},
+		// vnext 的身份/运行/交付链：跨表指针只靠触发器与应用层维持，
+		// 备份必须单独验一遍，否则「行数对得上、引用断了」也看不出来。
+		{"tasks.instance_id", `SELECT COUNT(*) FROM tasks t
+			WHERE COALESCE(t.instance_id, '') <> ''
+			  AND NOT EXISTS (SELECT 1 FROM task_instances i WHERE i.instance_id = t.instance_id)`},
+		{"task_versions.instance_id", `SELECT COUNT(*) FROM task_versions v
+			WHERE NOT EXISTS (SELECT 1 FROM task_instances i WHERE i.instance_id = v.instance_id)`},
+		{"task_instances.active_version", `SELECT COUNT(*) FROM task_instances i
+			WHERE i.active_version IS NOT NULL
+			  AND NOT EXISTS (SELECT 1 FROM task_versions v
+			                 WHERE v.instance_id = i.instance_id AND v.version_no = i.active_version)`},
+		{"task_instances.multi_active", `SELECT COUNT(*) FROM (
+			SELECT 1 FROM task_instances WHERE state = 'active'
+			GROUP BY project_id, display_id HAVING COUNT(*) > 1)`},
+		{"resource_leases.instance_id", `SELECT COUNT(*) FROM resource_leases l
+			WHERE NOT EXISTS (SELECT 1 FROM task_instances i WHERE i.instance_id = l.instance_id)`},
+		{"runs.instance_id", `SELECT COUNT(*) FROM runs r
+			WHERE NOT EXISTS (SELECT 1 FROM task_instances i WHERE i.instance_id = r.instance_id)`},
+		{"deliveries.run_id", `SELECT COUNT(*) FROM deliveries d
+			WHERE NOT EXISTS (SELECT 1 FROM runs r WHERE r.run_id = d.run_id)`},
+		{"deliveries.instance_id", `SELECT COUNT(*) FROM deliveries d
+			WHERE NOT EXISTS (SELECT 1 FROM task_instances i WHERE i.instance_id = d.instance_id)`},
 	}
 	var out []string
 	for _, c := range checks {
