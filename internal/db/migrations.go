@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/kiwh77/maw/internal/version"
 )
 
 // Migration 是一条按版本号升序、只执行一次的 schema 变更。
@@ -363,6 +365,8 @@ const (
 
 	// metaSchemaVersionKey 是旧读法的兼容键，只由 MigrateDB 推进。
 	metaSchemaVersionKey = "schema_version"
+	// metaMinWriterVersionKey 是新写者门槛；INSERT OR IGNORE，绝不把门槛降回去。
+	metaMinWriterVersionKey = "min_writer_version"
 )
 
 var (
@@ -506,9 +510,14 @@ func Migrate(path string) error {
 
 // MigrateDB 在已有连接上按序补齐未应用的迁移。
 //
-// 已是最新时只做只读体检、不发任何 DDL；需要补账时全部迁移与台账写入落在同一个
+// 顺序：先过写者闸门，再动 schema。库被更新的二进制升级过时返回 ErrSchemaAhead，
+// 绝不会把 schema_version 写回旧值。已是最新时不发 DDL，但仍会盖章
+// min_writer_version（INSERT OR IGNORE）。需要补账时全部迁移与台账写入落在同一个
 // 写事务里，中断即整体回滚，不留「表建了一半、台账没记」的中间态。
 func MigrateDB(conn *sql.DB) error {
+	if _, err := checkWriterGate(conn); err != nil {
+		return err
+	}
 	st, err := InspectSchema(conn)
 	if err != nil {
 		return err
@@ -517,7 +526,7 @@ func MigrateDB(conn *sql.DB) error {
 		return fmt.Errorf("%w: 版本 %v", ErrSchemaDrift, st.Drift)
 	}
 	if st.HasLedger && len(st.Pending) == 0 {
-		return nil
+		return stampMinWriterVersion(conn)
 	}
 
 	tx, err := conn.Begin() // _txlock=immediate → BEGIN IMMEDIATE
@@ -562,7 +571,20 @@ func MigrateDB(conn *sql.DB) error {
 		_ = tx.Rollback()
 		return err
 	}
+	// 首次由新写者打开时盖章；已盖章则保留（不把门槛降回去）。
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)`,
+		metaMinWriterVersionKey, version.Version); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	return tx.Commit()
+}
+
+// stampMinWriterVersion 在已最新的库上补盖写者门槛（不改 schema_version）。
+func stampMinWriterVersion(conn *sql.DB) error {
+	_, err := conn.Exec(`INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)`,
+		metaMinWriterVersionKey, version.Version)
+	return err
 }
 
 func appliedVersions(q querier) (map[int]bool, error) {

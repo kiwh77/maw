@@ -7,5 +7,6 @@ var Version = "0.4.0"
 
 const (
 	ProtocolVersion = 7
-	SchemaVersion   = 3
+	// SchemaVersion 跟随迁移台账末端（见 internal/db.LatestVersion）。
+	SchemaVersion = 7
 )

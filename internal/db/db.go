@@ -122,7 +122,10 @@ func OpenRaw(path string) (*sql.DB, error) {
 	return openConn(path, readConnOptions())
 }
 
-// EnsureSchema 兼容旧名：等价于 MigrateDB，已是最新时不做任何写操作。
+// EnsureSchema 兼容旧名：等价于 MigrateDB。
+//
+// 写者闸门与 min_writer_version 盖章由 MigrateDB 负责：库比二进制新时
+// 返回 ErrSchemaAhead，绝不会把 schema_version 写回旧值。
 func EnsureSchema(db *sql.DB) error {
 	return MigrateDB(db)
 }
