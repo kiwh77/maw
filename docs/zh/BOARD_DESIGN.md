@@ -55,7 +55,16 @@ Board 是只读的多工程 Agent 调度工作台。首屏需要回答：任务�
 
 ## 视图
 
-工作区支持「看板」与「依赖拓扑」切换，选择保存在本地浏览器（`maw-board-view`）。看板按状态泳道展示流转；拓扑按工程分层绘制 DAG（前置任务在左、依赖方在右），节点展示编号、标题、状态、负责人、优先级与出入度，虚线边表示当前筛选外的依赖。筛选与搜索同时作用于两种视图；点击节点同样打开详情抽屉。
+工作区支持「看板」与「依赖拓扑」切换，选择保存在本地浏览器（`maw-board-view`）。看板按状态泳道展示流转。
+
+依赖拓扑使用 X6 画布按波次排布：波次即依赖深度，前置任务在左、依赖方在右。每个工程一条横带，带内按波次列绘制节点与正交圆角连线；节点展示编号、标题、状态、负责人、优先级与出入度，虚线边与 stub 节点表示当前筛选外的依赖。画布是自由视图：空白处拖拽平移，Ctrl／⌘ + 滚轮缩放，工具条提供「适应画布」与「重布局」；悬停高亮相邻依赖并淡化其余节点与边，深浅主题切换即时重绘。筛选与搜索同时作用于两种视图；点击、Enter 或 Space 同样打开详情抽屉。
+
+### 工程化约定：构建与发布
+
+- 前端工程位于 `internal/board/web`（Vite + TypeScript + `@antv/x6`），入口 `src/main.ts`，拓扑渲染在 `src/topology.ts`。
+- `npm run build --prefix internal/board/web` 产出 IIFE bundle `internal/board/assets/dist/board-web.js`（全局名 `MawBoard`，不生成 sourcemap）；根 `.gitignore` 的 `dist/` 会命中该目录，产物需 `git add -f` 显式入库。
+- Go 侧以 `//go:embed assets/dist` 嵌入产物，HTTP 在 `/assets/*` 提供文件（`no-store`，不列目录、目录请求回 404）；`page.html` 通过 `<script id="board-web" src="assets/board-web.js" defer>` 加载。
+- bundle 未加载时页面回退到 legacy SVG 拓扑；颜色只取自 `page.html` 的 `:root` 语义 token，构建包内不写死色值。
 
 ## 交互约定
 

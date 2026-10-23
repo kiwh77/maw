@@ -49,7 +49,16 @@ Cards keep exact status labels; filters support every status. Hide the attention
 
 ## Views
 
-Workspace toggles **Board** vs **Dependency topology** (`maw-board-view`). Topology is a per-project DAG. Filters and search apply to both; clicking a node opens the drawer.
+The workspace toggles **Board** vs **Dependency topology** (`maw-board-view`); the board keeps rendering status lanes.
+
+Dependency topology is drawn with **X6** on a free canvas, ordered by **wave**: a wave is the dependency depth, so prerequisites sit on the left and dependents on the right. Each project gets a horizontal band with wave columns, orthogonal rounded edges, and nodes showing ID, title, status, owner, priority, and in/out degree; dashed edges and stub nodes mark dependencies outside the current filter. The canvas pans by dragging empty space, zooms with Ctrl/⌘ + wheel, and the toolbar offers fit and relayout; hovering highlights neighbouring dependencies and dims the rest, and theme switches redraw immediately. Filters and search apply to both views; click, Enter, or Space opens the drawer.
+
+### Build and assets
+
+- Front-end lives in `internal/board/web` (**Vite** + TypeScript + `@antv/x6`): entry `src/main.ts`, topology rendering in `src/topology.ts`.
+- `npm run build --prefix internal/board/web` emits the IIFE bundle `internal/board/assets/dist/board-web.js` (global `MawBoard`, no sourcemap). The root `.gitignore` rule for `dist/` also matches this directory, so the output must be added explicitly with `git add -f`.
+- Go embeds it via `//go:embed assets/dist` and serves it under `/assets/*` with `no-store`, no directory listing, and 404 for directory requests; `page.html` loads it through `<script id="board-web" src="assets/board-web.js" defer>`.
+- When the bundle is unavailable the page falls back to the legacy SVG topology. Colours come only from `page.html` `:root` semantic tokens; the bundle never hard-codes them.
 
 ## Interaction
 
