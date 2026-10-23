@@ -1,22 +1,13 @@
 package machine
 
-import "github.com/kiwh77/maw/internal/i18n"
+import (
+	"github.com/kiwh77/maw/internal/engine/state"
+	"github.com/kiwh77/maw/internal/i18n"
+)
 
-var transitions = map[string]map[string]bool{
-	"backlog":     {"ready": true, "cancelled": true, "blocked": true},
-	"ready":       {"claimed": true, "in_progress": true, "cancelled": true, "blocked": true, "backlog": true},
-	"claimed":     {"in_progress": true, "ready": true, "cancelled": true, "blocked": true},
-	"in_progress": {"self_check": true, "in_review": true, "blocked": true, "cancelled": true, "ready": true},
-	"self_check":  {"in_review": true, "in_progress": true, "blocked": true, "cancelled": true},
-	"in_review":   {"merging": true, "in_progress": true, "blocked": true, "cancelled": true},
-	"merging":     {"done": true, "in_progress": true, "conflict": true, "blocked": true, "cancelled": true},
-	"conflict":    {"in_progress": true, "in_review": true, "ready": true, "cancelled": true, "blocked": true},
-}
-
-var ActiveOwner = map[string]bool{
-	"claimed": true, "in_progress": true, "self_check": true,
-	"in_review": true, "merging": true, "conflict": true,
-}
+// ActiveOwner 保留原有用法（按状态名查表）。内容来自 internal/engine/state，
+// 规则只有一份；这里不再维护第二张表，避免两套 ActiveOwner 漂移。
+var ActiveOwner = state.ActiveOwnerSet()
 
 // PreserveOnPlanApply 为 true 时，plan apply 不得删除该任务，也不得把状态打回 backlog。
 // 覆盖：已完成 / 已取消、阻塞中、以及任何占用 Agent 的活跃状态。
@@ -25,20 +16,15 @@ func PreserveOnPlanApply(status string) bool {
 	case "done", "cancelled", "blocked":
 		return true
 	default:
-		return ActiveOwner[status]
+		return state.IsActiveOwner(status)
 	}
 }
 
+// AssertTransition 校验业务任务状态转移。矩阵与语义在 internal/engine/state；
+// 本函数只负责把失败翻成带下一步提示的用户可读错误。
 func AssertTransition(src, dst string) error {
-	// blocked 可跳到任意态（unblock 恢复 PrevStatus）；同态转移一律拒绝（含 done→done）。
-	if src == "blocked" {
-		return nil
-	}
-	if src == dst {
+	if err := state.AssertTaskTransition(src, dst); err != nil {
 		return i18n.E("err.bad_transition", "next.inspect_board", src, dst)
 	}
-	if m := transitions[src]; m != nil && m[dst] {
-		return nil
-	}
-	return i18n.E("err.bad_transition", "next.inspect_board", src, dst)
+	return nil
 }
