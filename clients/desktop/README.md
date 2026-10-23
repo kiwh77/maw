@@ -6,9 +6,9 @@ Wraps the `maw serve` (`maw board --serve`) board page in a desktop window and u
 
 ## Behavior
 
-1. On start, probe `http://127.0.0.1:7420/api/board`
-2. If not ready, try `maw serve --addr 127.0.0.1:7420` from `PATH`
-3. WebView loads `http://127.0.0.1:7420/` (same HTML as the browser board)
+1. On start, show a local bootstrap page and probe `http://127.0.0.1:7420/api/board`
+2. If not ready, resolve `maw` via `MAW_BIN` / `PATH` / `~/.local/bin/maw` (and common prefixes), then run `maw serve --addr 127.0.0.1:7420` — macOS Dock launches get a minimal PATH without `~/.local/bin`
+3. When the hub is ready, the WebView navigates to `http://127.0.0.1:7420/` (same HTML as the browser board); tray “Show board” retries spawn
 4. Subscribe to `/api/events`: update tray title on `event` / `board-changed`; `event` may show a system notification
 
 Tray menu language follows `MAW_LANG` / system locale (`en` / `zh`).
@@ -28,6 +28,7 @@ Build: `cargo tauri build`
 ## Layout
 
 - `brand/` — icon masters
+- `ui/` — startup bootstrap (wait / failure UI while the hub is down)
 - `src-tauri/icons/` — bundle icons + tray
 - `src-tauri/` — Rust / Tauri shell
-- Front-end: no separate business UI; navigates to the local hub URL
+- Front-end: no board UI of our own; navigates to the local hub URL once ready

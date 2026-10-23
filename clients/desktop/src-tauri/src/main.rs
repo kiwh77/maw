@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
@@ -9,10 +10,11 @@ use tauri::{
     include_image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Manager, Url, WindowEvent,
 };
 
 const HUB: &str = "http://127.0.0.1:7420";
+const HUB_ADDR: &str = "127.0.0.1:7420";
 
 struct HubChild(Mutex<Option<Child>>);
 
@@ -38,10 +40,7 @@ fn tray_labels() -> (&'static str, &'static str) {
 }
 
 fn hub_ready() -> bool {
-    let Ok(resp) = ureq_get(&format!("{HUB}/api/board")) else {
-        return false;
-    };
-    resp
+    ureq_get(&format!("{HUB}/api/board")).unwrap_or(false)
 }
 
 fn ureq_get(url: &str) -> Result<bool, ()> {
@@ -56,33 +55,166 @@ fn ureq_get(url: &str) -> Result<bool, ()> {
     Ok(false)
 }
 
-fn ensure_hub(state: &HubChild) {
-    if hub_ready() {
-        return;
+/// macOS GUI apps inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`),
+/// so `Command::new("maw")` fails even when `~/.local/bin/maw` exists.
+fn resolve_maw() -> Option<PathBuf> {
+    if let Ok(bin) = std::env::var("MAW_BIN") {
+        let p = PathBuf::from(bin.trim());
+        if p.is_file() {
+            return Some(p);
+        }
     }
-    let mut guard = state.0.lock().unwrap();
-    if guard.is_some() {
-        return;
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            candidates.push(dir.join("maw"));
+        }
     }
-    match Command::new("maw")
-        .args(["serve", "--addr", "127.0.0.1:7420"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        candidates.push(home.join(".local/bin/maw"));
+        candidates.push(home.join("bin/maw"));
+        candidates.push(home.join("go/bin/maw"));
+    }
+
+    candidates.push(PathBuf::from("/opt/homebrew/bin/maw"));
+    candidates.push(PathBuf::from("/usr/local/bin/maw"));
+    candidates.push(PathBuf::from("/usr/bin/maw"));
+
+    // Prefer a maw next to the app bundle (optional sidecar layout).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("maw"));
+            // .../maw.app/Contents/MacOS → .../maw.app/Contents/Resources/maw
+            if let Some(contents) = dir.parent() {
+                candidates.push(contents.join("Resources/maw"));
+            }
+        }
+    }
+
+    for c in candidates {
+        if is_executable(&c) {
+            return Some(c);
+        }
+    }
+    None
+}
+
+fn is_executable(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
     {
-        Ok(child) => {
-            *guard = Some(child);
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            return meta.permissions().mode() & 0o111 != 0;
+        }
+        false
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn hub_path_env() -> Option<std::ffi::OsString> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(maw) = resolve_maw() {
+        if let Some(dir) = maw.parent() {
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        dirs.push(home.join(".local/bin"));
+        dirs.push(home.join("bin"));
+    }
+    dirs.push(PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(PathBuf::from("/usr/local/bin"));
+    if let Ok(existing) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&existing) {
+            if !dirs.iter().any(|d| d == &dir) {
+                dirs.push(dir);
+            }
+        }
+    }
+    std::env::join_paths(dirs).ok()
+}
+
+/// Ensure local hub is up. Returns true when `/api/board` responds 200.
+fn ensure_hub(state: &HubChild) -> bool {
+    if hub_ready() {
+        return true;
+    }
+    {
+        let guard = state.0.lock().unwrap();
+        if guard.is_some() {
+            drop(guard);
             for _ in 0..40 {
                 if hub_ready() {
-                    break;
+                    return true;
                 }
                 thread::sleep(Duration::from_millis(250));
             }
+            return hub_ready();
+        }
+    }
+
+    let Some(maw) = resolve_maw() else {
+        eprintln!(
+            "failed to locate `maw` binary (GUI PATH is minimal). \
+             Install to ~/.local/bin/maw or set MAW_BIN, then reopen the app."
+        );
+        return false;
+    };
+
+    let mut cmd = Command::new(&maw);
+    cmd.args(["serve", "--addr", HUB_ADDR])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(path) = hub_path_env() {
+        cmd.env("PATH", path);
+    }
+
+    match cmd.spawn() {
+        Ok(child) => {
+            *state.0.lock().unwrap() = Some(child);
+            for _ in 0..40 {
+                if hub_ready() {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(250));
+            }
+            let ok = hub_ready();
+            if !ok {
+                eprintln!(
+                    "spawned `{} serve` but hub at {HUB} did not become ready",
+                    maw.display()
+                );
+            }
+            ok
         }
         Err(err) => {
-            eprintln!("failed to spawn `maw serve`: {err}");
+            eprintln!("failed to spawn `{} serve`: {err}", maw.display());
+            false
         }
+    }
+}
+
+fn open_hub_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        if let Ok(url) = Url::parse(&format!("{HUB}/")) {
+            let _ = w.navigate(url);
+        } else {
+            let _ = w.reload();
+        }
+        let _ = w.show();
+        let _ = w.set_focus();
     }
 }
 
@@ -91,7 +223,12 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .manage(HubChild(Mutex::new(None)))
         .setup(|app| {
-            ensure_hub(app.state::<HubChild>().inner());
+            let ready = ensure_hub(app.state::<HubChild>().inner());
+            if ready {
+                open_hub_window(app.handle());
+            } else {
+                eprintln!("hub not ready; window shows bootstrap page until maw serve is available");
+            }
 
             let (show_label, quit_label) = tray_labels();
             let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
@@ -105,16 +242,16 @@ fn main() {
                 .tooltip("maw")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
-                        if let Some(child) = app.state::<HubChild>().0.lock().unwrap().take() {
-                            let _ = child; // drop; OS reaps; serve may keep running if shared
+                        if let Some(mut child) = app.state::<HubChild>().0.lock().unwrap().take() {
+                            let _ = child.kill();
+                            let _ = child.wait();
                         }
                         app.exit(0);
                     }
                     "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
+                        // Retry hub start if the first attempt failed (e.g. maw installed later).
+                        let _ = ensure_hub(app.state::<HubChild>().inner());
+                        open_hub_window(app);
                     }
                     _ => {}
                 })
@@ -126,10 +263,8 @@ fn main() {
                     } = event
                     {
                         let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
+                        let _ = ensure_hub(app.state::<HubChild>().inner());
+                        open_hub_window(app);
                     }
                 })
                 .build(app)?;

@@ -6,9 +6,9 @@
 
 ## 行为
 
-1. 启动时探测 `http://127.0.0.1:7420/api/board`
-2. 若未就绪，尝试在 PATH 中执行 `maw serve --addr 127.0.0.1:7420`
-3. WebView 加载 `http://127.0.0.1:7420/`（与浏览器版同一套 HTML）
+1. 启动时先打开本地 bootstrap 页，并探测 `http://127.0.0.1:7420/api/board`
+2. 若未就绪，解析 `MAW_BIN` / `PATH` / `~/.local/bin/maw` 等常见路径后执行 `maw serve --addr 127.0.0.1:7420`（macOS 从 Dock 启动时系统 PATH 不含 `~/.local/bin`）
+3. 中枢就绪后 WebView 导航到 `http://127.0.0.1:7420/`（与浏览器版同一套 HTML）；托盘「显示看板」会再次尝试拉起
 4. 订阅 `/api/events`：收到 `event` / `board-changed` 时更新托盘标题；`event` 可弹出系统通知
 
 ## 开发
@@ -34,8 +34,9 @@ cargo tauri build
 
 - `brand/` — 图标母版（1024、透明版、状态栏 Template）
 - `src-tauri/icons/` — 打包用 `icns` / `ico` / PNG + 托盘图标
+- `ui/` — 启动 bootstrap（中枢未就绪时的等待／失败提示）
 - `src-tauri/` — Rust / Tauri 壳（窗口、托盘、拉起 `maw serve`）
-- 前端：不自建业务 UI，直接导航到本机中枢 URL
+- 前端：不自建业务 UI，中枢就绪后导航到本机中枢 URL
 
 ## 图标
 

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>maw</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1a1a1a;
+        --muted: #5c5c5c;
+        --bg: #f4f4f2;
+        --accent: #0b6e4f;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #f2f2f0;
+          --muted: #a0a0a0;
+          --bg: #12141a;
+          --accent: #3dd68c;
+        }
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      main {
+        min-height: 100%;
+        display: grid;
+        place-content: center;
+        gap: 0.75rem;
+        padding: 2rem;
+        text-align: center;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.25rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9em;
+      }
+      a {
+        color: var(--accent);
+      }
+      .spin {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin: 0 auto;
+        border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .err {
+        display: none;
+        margin-top: 0.5rem;
+      }
+      body.failed .wait {
+        display: none;
+      }
+      body.failed .err {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>maw</h1>
+      <div class="wait">
+        <div class="spin" aria-hidden="true"></div>
+        <p>
+          正在启动本机中枢<br />
+          <a href="http://127.0.0.1:7420/">http://127.0.0.1:7420/</a>
+        </p>
+      </div>
+      <div class="err">
+        <p>
+          未能连上中枢。请确认已安装 <code>maw</code>（如
+          <code>~/.local/bin/maw</code>），或在终端执行：
+        </p>
+        <p><code>maw serve</code></p>
+        <p>然后点托盘图标重试，或<a href="http://127.0.0.1:7420/">点此打开</a>。</p>
+      </div>
+    </main>
+    <script>
+      const HUB = "http://127.0.0.1:7420/";
+      const API = HUB + "api/board";
+      let tries = 0;
+      async function probe() {
+        tries += 1;
+        try {
+          const res = await fetch(API, { cache: "no-store" });
+          if (res.ok) {
+            location.replace(HUB);
+            return;
+          }
+        } catch (_) {}
+        if (tries >= 40) {
+          document.body.classList.add("failed");
+          return;
+        }
+        setTimeout(probe, 250);
+      }
+      probe();
+    </script>
+  </body>
+</html>
