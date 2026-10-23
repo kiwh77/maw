@@ -9,6 +9,8 @@ import (
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/kiwh77/maw/internal/engine/model"
 )
 
 type Project struct {
@@ -22,9 +24,12 @@ type Project struct {
 }
 
 type Task struct {
-	ProjectID     string         `json:"project_id"`
-	ProjectName   string         `json:"project_name,omitempty"`
-	ID            string         `json:"id"`
+	ProjectID   string `json:"project_id"`
+	ProjectName string `json:"project_name,omitempty"`
+	ID          string `json:"id"`
+	// InstanceID 是当前行的稳定实例身份（ti_...）。写入时留空表示「按编号找活跃实例，
+	// 没有就新建」；已填的引用必须仍存在、未被退役，否则拒绝写入。
+	InstanceID    string         `json:"instance_id"`
 	Title         string         `json:"title"`
 	Status        string         `json:"status"`
 	Priority      int            `json:"priority"`
@@ -227,19 +232,21 @@ func scanProject(row interface{ Scan(dest ...any) error }) (*Project, error) {
 	return &p, nil
 }
 
-const taskCols = `project_id, id, title, status, priority, merge_order, owner, deps_json, write_scope_json, read_scope_json, acceptance_json, branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json`
+const taskCols = `project_id, id, title, status, priority, merge_order, owner, deps_json, write_scope_json, read_scope_json, acceptance_json, branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json, instance_id`
 
 func scanTask(row interface{ Scan(dest ...any) error }) (*Task, error) {
 	var t Task
 	var owner, branch, wt, blocked, hb, prev sql.NullString
-	var deps, ws, rs, acc, extra string
+	var deps, ws, rs, acc, extra, instanceID string
 	err := row.Scan(
 		&t.ProjectID, &t.ID, &t.Title, &t.Status, &t.Priority, &t.MergeOrder, &owner,
 		&deps, &ws, &rs, &acc, &branch, &wt, &t.Attempts, &blocked, &hb, &prev, &t.Revision, &extra,
+		&instanceID,
 	)
 	if err != nil {
 		return nil, err
 	}
+	t.InstanceID = instanceID
 	t.Owner = owner.String
 	t.Branch = branch.String
 	t.Worktree = wt.String
@@ -286,7 +293,7 @@ func ListTasksFiltered(tx *sql.Tx, projectID, agent, status string) ([]*Task, er
 	q := `SELECT t.project_id, t.id, t.title, t.status, t.priority, t.merge_order, t.owner,
 		t.deps_json, t.write_scope_json, t.read_scope_json, t.acceptance_json, t.branch, t.worktree,
 		t.attempts, t.blocked_reason, t.heartbeat, t.prev_status, t.revision, t.extra_json,
-		COALESCE(p.name,'')
+		t.instance_id, COALESCE(p.name,'')
 		FROM tasks t LEFT JOIN projects p ON p.id = t.project_id WHERE 1=1`
 	var args []any
 	if projectID != "" {
@@ -311,15 +318,16 @@ func ListTasksFiltered(tx *sql.Tx, projectID, agent, status string) ([]*Task, er
 	for rows.Next() {
 		var t Task
 		var owner, branch, wt, blocked, hb, prev sql.NullString
-		var deps, ws, rs, acc, extra, pname string
+		var deps, ws, rs, acc, extra, instanceID, pname string
 		err := rows.Scan(
 			&t.ProjectID, &t.ID, &t.Title, &t.Status, &t.Priority, &t.MergeOrder, &owner,
 			&deps, &ws, &rs, &acc, &branch, &wt, &t.Attempts, &blocked, &hb, &prev, &t.Revision, &extra,
-			&pname,
+			&instanceID, &pname,
 		)
 		if err != nil {
 			return nil, err
 		}
+		t.InstanceID = instanceID
 		t.Owner = owner.String
 		t.Branch = branch.String
 		t.Worktree = wt.String
@@ -342,12 +350,16 @@ func UpsertTask(tx *sql.Tx, t *Task) error {
 	if t.Extra == nil {
 		t.Extra = map[string]any{}
 	}
+	if err := bindTaskIdentity(tx, t); err != nil {
+		return err
+	}
 	_, err := tx.Exec(`
 INSERT INTO tasks(
   project_id, id, title, status, priority, merge_order, owner,
   deps_json, write_scope_json, read_scope_json, acceptance_json,
-  branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json,
+  instance_id
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(project_id, id) DO UPDATE SET
   title=excluded.title, status=excluded.status, priority=excluded.priority,
   merge_order=excluded.merge_order, owner=excluded.owner,
@@ -355,23 +367,56 @@ ON CONFLICT(project_id, id) DO UPDATE SET
   read_scope_json=excluded.read_scope_json, acceptance_json=excluded.acceptance_json,
   branch=excluded.branch, worktree=excluded.worktree, attempts=excluded.attempts,
   blocked_reason=excluded.blocked_reason, heartbeat=excluded.heartbeat,
-  prev_status=excluded.prev_status, revision=excluded.revision, extra_json=excluded.extra_json
+  prev_status=excluded.prev_status, revision=excluded.revision, extra_json=excluded.extra_json,
+  instance_id=excluded.instance_id
 `, t.ProjectID, t.ID, t.Title, t.Status, t.Priority, t.MergeOrder, nullStr(t.Owner),
 		mustJSON(t.Deps), mustJSON(t.WriteScope), mustJSON(t.ReadScope), mustJSON(t.Acceptance),
 		nullStr(t.Branch), nullStr(t.Worktree), t.Attempts, nullStr(t.BlockedReason),
-		nullStr(t.Heartbeat), nullStr(t.PrevStatus), t.Revision, mustJSON(t.Extra))
+		nullStr(t.Heartbeat), nullStr(t.PrevStatus), t.Revision, mustJSON(t.Extra), t.InstanceID)
 	return err
 }
 
+// DeleteTasks 清空某工程的任务行，并把它们的实例一并退役（plan apply --reset 用）。
+//
+// 退役与别名释放同事务：不会留下「实例还是 active、tasks 行却没了」的半状态。
 func DeleteTasks(tx *sql.Tx, projectID string) error {
+	if err := retireActiveInstances(tx, projectID, RetireReset); err != nil {
+		return err
+	}
 	_, err := tx.Exec(`DELETE FROM tasks WHERE project_id = ?`, projectID)
 	return err
 }
 
-// DeleteTask 删除单条任务（plan apply 剔除蓝图外的 idle 题时用）。
+// DeleteTask 删除单条任务，并退役它持有的实例（plan apply 剔除蓝图外的 idle 题时用）。
 func DeleteTask(tx *sql.Tx, projectID, id string) error {
-	_, err := tx.Exec(`DELETE FROM tasks WHERE project_id = ? AND id = ?`, projectID, id)
+	t, err := GetTask(tx, projectID, id)
+	if err != nil {
+		return err
+	}
+	if t != nil && t.InstanceID != "" {
+		if err := RetireInstance(tx, t.InstanceID, RetireRemovedFromPlan); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(`DELETE FROM tasks WHERE project_id = ? AND id = ?`, projectID, id)
 	return err
+}
+
+// retireActiveInstances 退役某工程全部活跃实例，别名释放由 RetireInstance 完成。
+func retireActiveInstances(tx *sql.Tx, projectID, reason string) error {
+	insts, err := ListInstances(tx, projectID)
+	if err != nil {
+		return err
+	}
+	for _, inst := range insts {
+		if inst.State != model.InstanceStateActive {
+			continue
+		}
+		if err := RetireInstance(tx, string(inst.InstanceID), reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func AppendEvent(tx *sql.Tx, projectID, actor, typ, taskID string, data any) error {
@@ -401,7 +446,7 @@ func FindTask(tx *sql.Tx, projectID, id string) (*Task, error) {
 SELECT t.project_id, t.id, t.title, t.status, t.priority, t.merge_order, t.owner,
   t.deps_json, t.write_scope_json, t.read_scope_json, t.acceptance_json, t.branch, t.worktree,
   t.attempts, t.blocked_reason, t.heartbeat, t.prev_status, t.revision, t.extra_json,
-  COALESCE(p.name,'')
+  t.instance_id, COALESCE(p.name,'')
 FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
 WHERE t.id = ? ORDER BY t.project_id LIMIT 1`, id)
 	t, err := scanTaskWithName(row)
@@ -414,15 +459,16 @@ WHERE t.id = ? ORDER BY t.project_id LIMIT 1`, id)
 func scanTaskWithName(row interface{ Scan(dest ...any) error }) (*Task, error) {
 	var t Task
 	var owner, branch, wt, blocked, hb, prev sql.NullString
-	var deps, ws, rs, acc, extra, pname string
+	var deps, ws, rs, acc, extra, instanceID, pname string
 	err := row.Scan(
 		&t.ProjectID, &t.ID, &t.Title, &t.Status, &t.Priority, &t.MergeOrder, &owner,
 		&deps, &ws, &rs, &acc, &branch, &wt, &t.Attempts, &blocked, &hb, &prev, &t.Revision, &extra,
-		&pname,
+		&instanceID, &pname,
 	)
 	if err != nil {
 		return nil, err
 	}
+	t.InstanceID = instanceID
 	t.Owner = owner.String
 	t.Branch = branch.String
 	t.Worktree = wt.String

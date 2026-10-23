@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -100,9 +101,17 @@ func TestMigrationsAreExplicitAndIdempotent(t *testing.T) {
 	if st.Current != LatestVersion() {
 		t.Fatalf("current=%d latest=%d", st.Current, LatestVersion())
 	}
-	// 迁移序列末端必须与契约版本同源，否则 meta.schema_version 与台账会各说一套。
-	if got := LatestVersion(); got != version.SchemaVersion {
-		t.Fatalf("latest=%d version.SchemaVersion=%d", got, version.SchemaVersion)
+	// 台账是 vnext 的权威版本；发布常量只能落后于它，不能超前。
+	if got := LatestVersion(); got < version.SchemaVersion {
+		t.Fatalf("latest=%d 落后于 version.SchemaVersion=%d", got, version.SchemaVersion)
+	}
+	// meta.schema_version 只是旧读法的镜像，必须与台账末端一致。
+	var metaVersion string
+	if err := mustOpenRead(t, path).QueryRow(`SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&metaVersion); err != nil {
+		t.Fatal(err)
+	}
+	if metaVersion != strconv.Itoa(LatestVersion()) {
+		t.Fatalf("meta.schema_version=%q 台账=%d", metaVersion, LatestVersion())
 	}
 	if n := countLedger(t, path); n != len(Migrations()) {
 		t.Fatalf("台账 %d 行，迁移 %d 条", n, len(Migrations()))
@@ -139,8 +148,9 @@ func TestMigrationsAreExplicitAndIdempotent(t *testing.T) {
 
 	// 迁移序列对外只读：改副本不得影响内部注册表。
 	ms := Migrations()
+	orig := ms[0].Version
 	ms[0].Version = -1
-	if Migrations()[0].Version != LatestVersion() {
+	if Migrations()[0].Version != orig {
 		t.Fatal("Migrations() 返回的应是副本")
 	}
 }

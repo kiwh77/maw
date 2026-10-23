@@ -18,6 +18,9 @@ type Migration struct {
 	Version int
 	Name    string
 	SQL     string
+	// Apply 是可选的 Go 数据步骤，在同一个事务里紧接 SQL 执行；
+	// 需要按行计算身份或补账的迁移用它，而不是在 SQL 里硬编码。
+	Apply func(*sql.Tx) error
 }
 
 // schema 是 vnext 的基线表结构。
@@ -109,13 +112,78 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 `
 
+// identityDDL 是 v4：任务实例身份、冻结版本与 tasks 的实例引用。
+//
+// 三条约束落在库里而不是只写在注释里：
+//   - 同一 (工程, 编号) 至多一个活跃实例（部分唯一索引）；
+//   - 活跃实例必须指向一个已冻结版本，退役实例必须写时间、原因且不持活跃指针（CHECK）；
+//   - tasks 行的 instance_id 非空且唯一（触发器 + 部分唯一索引），已冻结版本不可改不可删（触发器）。
+const identityDDL = `
+CREATE TABLE IF NOT EXISTS task_instances (
+    instance_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    display_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    retired_at TEXT,
+    retired_reason TEXT,
+    active_version INTEGER,
+    ambiguous INTEGER NOT NULL DEFAULT 0,
+    ambiguity_note TEXT,
+    CHECK (state IN ('active', 'retired')),
+    CHECK (
+        (state = 'active' AND active_version IS NOT NULL AND retired_at IS NULL
+            AND retired_reason IS NULL AND ambiguous = 0)
+        OR
+        (state = 'retired' AND active_version IS NULL AND retired_at IS NOT NULL
+            AND retired_reason IS NOT NULL)
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS task_instances_one_active_display
+    ON task_instances(project_id, display_id) WHERE state = 'active';
+CREATE INDEX IF NOT EXISTS task_instances_project_state
+    ON task_instances(project_id, state);
+CREATE TABLE IF NOT EXISTS task_versions (
+    instance_id TEXT NOT NULL,
+    version_no INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    frozen_at TEXT NOT NULL,
+    deps_json TEXT NOT NULL DEFAULT '[]',
+    spec_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (instance_id, version_no),
+    FOREIGN KEY (instance_id) REFERENCES task_instances(instance_id)
+);
+CREATE TRIGGER IF NOT EXISTS task_versions_frozen_no_update
+BEFORE UPDATE ON task_versions
+BEGIN SELECT RAISE(ABORT, 'task_versions: 已冻结版本不可修改'); END;
+CREATE TRIGGER IF NOT EXISTS task_versions_frozen_no_delete
+BEFORE DELETE ON task_versions
+BEGIN SELECT RAISE(ABORT, 'task_versions: 已冻结版本不可删除'); END;
+ALTER TABLE tasks ADD COLUMN instance_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS tasks_instance_id_key
+    ON tasks(instance_id) WHERE instance_id IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS tasks_instance_id_required_insert
+BEFORE INSERT ON tasks
+WHEN NEW.instance_id IS NULL OR NEW.instance_id = ''
+BEGIN SELECT RAISE(ABORT, 'tasks.instance_id: 当前任务必须有实例身份'); END;
+CREATE TRIGGER IF NOT EXISTS tasks_instance_id_required_update
+BEFORE UPDATE ON tasks
+WHEN NEW.instance_id IS NULL OR NEW.instance_id = ''
+BEGIN SELECT RAISE(ABORT, 'tasks.instance_id: 当前任务必须有实例身份'); END;
+`
+
 // migrations 是显式迁移序列：版本号唯一、升序执行、只往前走。
 //
-// 版本号与 meta.schema_version（version.SchemaVersion）同源。历史 0.x 二进制没有台账，
-// 只在打开时重放 IF NOT EXISTS 并把 schema_version 写成 3；这类旧库按「版本 0」处理，
-// 重放幂等的基线即得到同一结构，因此不需要单独的补账步骤。
+// 版本号从 3 起：3 是 vnext 基线（沿用旧 0.x 把 schema_version 写成 3 的数值），
+// 之后每次结构变更 +1。vnext 的权威是这张台账，而不是 version.SchemaVersion
+// ——后者是发布契约常量，跟随发布节奏单独维护（本卡写盘范围不包含它）。
+// meta.schema_version 只是给旧读法看的镜像，由 MigrateDB 写成台账末端。
+//
+// 历史 0.x 二进制没有台账，只在打开时重放 IF NOT EXISTS 并把 schema_version 写成 3；
+// 这类旧库按「版本 0」处理，重放幂等的基线即得到同一结构，因此不需要单独的补账步骤。
 var migrations = []Migration{
 	{Version: 3, Name: "baseline_core_tables", SQL: schema},
+	{Version: 4, Name: "task_identity", SQL: identityDDL, Apply: backfillTaskIdentity},
 }
 
 const (
@@ -309,6 +377,12 @@ func MigrateDB(conn *sql.DB) error {
 		if _, err := tx.Exec(m.SQL); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("db: 应用迁移 %d（%s）失败: %w", m.Version, m.Name, err)
+		}
+		if m.Apply != nil {
+			if err := m.Apply(tx); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("db: 迁移 %d（%s）的数据步骤失败: %w", m.Version, m.Name, err)
+			}
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO `+ledgerTable+`(version, name, checksum, applied_at) VALUES (?,?,?,?)`,
