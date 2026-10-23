@@ -50,3 +50,23 @@ internal/board/web
 ## 注意
 
 `@antv/x6` 的 ESM 产物引用了 `tslib` 但未在其 `dependencies` 中声明，因此在本包显式依赖 `tslib`，否则构建会报 `Rolldown failed to resolve import "tslib"`。
+
+## Receiving yard (RF-002)
+
+The Board view switch includes a live Three.js receiving yard (`src/factory`).
+It consumes the same filtered snapshot/search as Board and topology and opens the
+same task drawer. No separate port, CDN, external model or simulation is required.
+An existing project is a truck; task count chooses its size. This is explicitly a
+project visualization until the backend supplies a distinct ware identity.
+
+`done` alone maps to warehouse storage. Review/merging remain at inspection;
+cancelled, conflict/blocked and unknown each have distinct cargo states. A filtered
+subset must never be interpreted as whole-project completion. The canvas shows at
+most six projects and 72 boxes each; the keyboard-accessible list retains every
+matching task. Select a project for a closer view. Workers represent actual task
+owners; idle registered agents have no invented assignment. Motion is decorative
+and never writes to task state. The canvas stops rendering when its view is hidden.
+WebGL failures retain a live task list. System reduced-motion disables idle motions.
+
+Checks: `node --test src/factory/model.test.cjs`, `npm run build`,
+`node --test ../page.test.cjs`, `go test ./internal/board` from repository root.

@@ -28,6 +28,7 @@ const I18N = {
     "aria.views": "View switch",
     "view.board": "Board",
     "view.topo": "Dependency topology",
+    "view.factory": "Receiving yard",
     "loading_tasks": "Loading tasks…",
     "search": "Search tasks",
     "search.ph": "Search tasks, ids, owners…",
@@ -238,6 +239,7 @@ const I18N = {
     "aria.views": "视图切换",
     "view.board": "看板",
     "view.topo": "依赖拓扑",
+    "view.factory": "收货工坊",
     "loading_tasks": "正在加载任务…",
     "search": "搜索任务",
     "search.ph": "搜索任务、编号、负责人…",
@@ -481,6 +483,7 @@ function applyStaticI18n() {
     ["f-copy-join", "copy.join"],
     ["view-board", "view.board"],
     ["view-topo", "view.topo"],
+    ["view-factory", "view.factory"],
     ["board-count", "loading_tasks"],
     ["f-reset", "reset"],
     ["next-hint-text", "next.reading"],
@@ -500,6 +503,7 @@ function applyStaticI18n() {
   setAria("task-search", "search");
   setAria("columns", "aria.flow");
   setAria("topology", "aria.topo");
+  setAria("factory", "view.factory");
   setAria("d-close", "close_detail");
   const th = document.getElementById("theme-select");
   if (th) {
@@ -521,7 +525,7 @@ function applyStaticI18n() {
 
 const COLUMNS = [];
 const LANES = [];
-const VIEWS = ["board", "topo"];
+const VIEWS = ["board", "topo", "factory"];
 const TOPO_NODE_W = 200;
 const TOPO_NODE_H = 98;
 const TOPO_GAP_X = 72;
@@ -543,6 +547,13 @@ function setView(value) {
   document.getElementById("view-topo").setAttribute("aria-pressed", boardView === "topo" ? "true" : "false");
   document.getElementById("columns").hidden = boardView !== "board";
   document.getElementById("topology").hidden = boardView !== "topo";
+  const factoryRoot = document.getElementById("factory");
+  if (factoryRoot) {
+    factoryRoot.hidden = boardView !== "factory";
+    document.getElementById("view-factory")?.classList?.toggle("active", boardView === "factory");
+    document.getElementById("view-factory")?.setAttribute("aria-pressed", String(boardView === "factory"));
+    if (typeof window !== "undefined") window.MawBoard?.setFactoryVisible?.(factoryRoot, boardView === "factory");
+  }
   if (lastSnap) renderWorkspace(lastSnap);
 }
 
@@ -1305,7 +1316,18 @@ function renderBoard(s) {
 }
 
 function renderWorkspace(s) {
-  if (boardView === "topo") renderTopology(s);
+  if (boardView === "factory") {
+    const root = document.getElementById("factory");
+    const tasks = visibleTasks(s);
+    if (window.MawBoard?.renderFactory) {
+      window.MawBoard.renderFactory(root, { tasks, agents: s.agents || [], lang: uiLang, onTask: openDrawer });
+      window.MawBoard.setFactoryVisible(root, true);
+    } else {
+      root.textContent = uiLang === "zh" ? "三维资源尚未加载，请稍候；也可切回任务看板。" : "3D assets are loading. You can also use the Board view.";
+    }
+    document.getElementById("board-count").textContent = tasks.length + (uiLang === "zh" ? " 件货物 · 实时状态" : " boxes · live status");
+  }
+  else if (boardView === "topo") renderTopology(s);
   else renderBoard(s);
 }
 
@@ -1524,6 +1546,13 @@ document.getElementById("view-board").setAttribute("aria-pressed", boardView ===
 document.getElementById("view-topo").setAttribute("aria-pressed", boardView === "topo" ? "true" : "false");
 document.getElementById("columns").hidden = boardView !== "board";
 document.getElementById("topology").hidden = boardView !== "topo";
+  const factoryRoot = document.getElementById("factory");
+  if (factoryRoot) {
+    factoryRoot.hidden = boardView !== "factory";
+    document.getElementById("view-factory")?.classList?.toggle("active", boardView === "factory");
+    document.getElementById("view-factory")?.setAttribute("aria-pressed", String(boardView === "factory"));
+    if (typeof window !== "undefined") window.MawBoard?.setFactoryVisible?.(factoryRoot, boardView === "factory");
+  }
 // 首屏请求前从 #锚点恢复工程，避免刷新后先拉全部再切换
 {
   const hashProject = readProjectHash();
@@ -1532,3 +1561,5 @@ document.getElementById("topology").hidden = boardView !== "topo";
 syncBoard();
 connectEvents();
 setInterval(syncBoard, 3000);
+
+window.addEventListener("load", () => { if (boardView === "factory" && lastSnap) renderWorkspace(lastSnap); });

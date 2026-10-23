@@ -53,3 +53,5 @@ export function mountBoard(options: BoardMountOptions): BoardHandle {
     },
   }
 }
+
+export { renderFactory, setFactoryVisible } from './factory/factory'
