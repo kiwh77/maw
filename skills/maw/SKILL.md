@@ -57,3 +57,6 @@ maw next
 - **`git commit` before `maw submit`** (scope only)
 - After submit you may `maw merge --yes`; never git merge/rebase/push trunk yourself
 - Locale: `MAW_LANG=en|zh` (default en) for CLI / protocol inject / terminal board
+- Manual claim keeps **instance / version / source** (`manual_next`); tokens never enter prompts, the repo, or events
+- Bypass (`maw status report`) reports **own** observations only — never seize a **managed Run**
+- Managed path: `maw managed start --task … --node …` (auto off by default); stale protocol → `maw init --upgrade`

@@ -73,6 +73,9 @@ maw status report -m "实现中" --phase code --pct 40 --status working
 - `maw next`（≥0.3.6）**不卡并行槽**：有可激活 ready 即派活；写盘重叠仍串行
 - `plan apply` 默认增量合并；`--reset` 才会清空该工程任务表后重灌
 - 题已 `done` 仍见 dirty 文案：多为旧 `blocked_reason` 残留，以合入记录为准
+- 人工领取保留 **实例／版本／来源**（`manual_next`）；令牌不得进入提示词、仓库或事件
+- 旁路（`maw status report`）只上报**自己的**观察，**不得夺取 managed Run**
+- 受管路径：`maw managed start --task … --node …`（默认关闭自动派发）；协议落后 → `maw init --upgrade`
 
 ## 相关文件
 

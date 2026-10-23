@@ -61,11 +61,15 @@ maw next --agent "$MAW_AGENT" --json     # 自动 register
 
 成功后：
 
-1. 记下 JSON 里的 `worktree`、`task.id`、`branch`
-2. `cd <worktree>`
-3. 读 worktree 内任务卡（常见 `.maw/TASK.md` 或根 `TASK.md`）与清单中对应 `T-xxx`
-4. **只改** `write_scope`；需要越界 → `maw request-change`（若不可用则停并报告，勿擅改）
-5. 里程碑：`maw progress -m "..."`；完成：`maw submit`
+1. 记下 JSON 里的 `worktree`、`task.id`、`task.instance_id`、版本／revision、`branch`
+2. 领取来源记为 `manual_next`（与 `managed_cli`／旁路 status-attach 区分）
+3. `cd <worktree>`
+4. 读 worktree 内任务卡（常见 `.maw/TASK.md` 或根 `TASK.md`）与清单中对应 `T-xxx`
+5. **只改** `write_scope`；需要越界 → `maw request-change`（若不可用则停并报告，勿擅改）
+6. 里程碑：`maw progress -m "..."`；完成：`maw submit`
+
+**令牌**：`maw_pat_…`／`Authorization: Bearer …` 不得写入提示词、TASK.md、提交或事件；只留在本机受权文件或 HTTP 头。  
+**受管**：`maw managed start --task <ID> --node <node>` 是另一条路径（默认关闭自动派发）；人工 next 不得宣称拥有 managed Run。
 
 无 ready：
 

@@ -19,6 +19,21 @@ maw next --json
 
 Work only in the printed worktree (`.worktrees/{agent}`). Stay inside `write_scope`. Commit before `maw submit`.
 
+### Claim context (keep these fields)
+
+After `maw next --json`, preserve in your working notes / TASK context:
+
+| Field | From JSON | Notes |
+|---|---|---|
+| task id | `task.id` | display id |
+| instance | `task.instance_id` | `ti_…` — stable identity |
+| version / revision | task revision fields | definition version |
+| source | treat as `manual_next` | not `managed_cli` / not status-attach |
+
+**Never** paste CLI tokens (`maw_pat_…`, `Authorization: Bearer …`) into prompts, TASK.md, commits, or status events. Tokens stay in the local auth file / HTTP header only.
+
+Managed runs are a separate path: `maw managed start --task <ID> --node <node>` (auto-dispatch off by default). Do not pretend a manual next owns a managed Run.
+
 ## Global board
 
 ```bash
