@@ -243,8 +243,7 @@ function newGraph(canvas: HTMLElement): Graph {
     mousewheel: { enabled: true, modifiers: ['ctrl', 'meta'], factor: 1.1, minScale: 0.3, maxScale: 2.5 },
     interacting: { nodeMovable: false, edgeMovable: false, edgeLabelMovable: false, arrowheadMovable: false, vertexMovable: false },
     connecting: {
-      router: { name: 'manhattan', args: { padding: 16 } },
-      connector: { name: 'rounded', args: { radius: 12 } },
+      connector: { name: 'smooth' },
     },
   })
 }
