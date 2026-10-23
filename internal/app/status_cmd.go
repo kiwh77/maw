@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"strings"
 
+	"github.com/kiwh77/maw/internal/board"
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/i18n"
@@ -20,6 +21,7 @@ type StatusReportInput struct {
 	Pct       *int
 	Client    string
 	Status    string // agent status: idle|working (default working when message set)
+	LogPath   string // optional absolute session log path (Cursor/Codex/WorkBuddy, …)
 }
 
 // StatusReport upserts agent presence and appends an event into the global DB.
@@ -59,6 +61,15 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 		}
 	}
 
+	logPath := strings.TrimSpace(in.LogPath)
+	if logPath != "" {
+		abs, verr := board.ValidateLogPath(logPath)
+		if verr != nil {
+			return nil, i18n.EW("err.log_path", "next.fix_log_path", verr)
+		}
+		logPath = abs
+	}
+
 	eventType := "agent_status"
 	if in.Message != "" {
 		eventType = "external_progress"
@@ -76,6 +87,9 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 	}
 	if in.Client != "" {
 		data["client"] = in.Client
+	}
+	if logPath != "" {
+		data["log_path"] = logPath
 	}
 
 	now := db.UTCNow()
@@ -109,6 +123,7 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 				a.TaskID = existing.TaskID
 			}
 		}
+		a.Meta = mergeAgentMeta(a.Meta, logPath)
 		if err := db.UpsertAgent(tx, a); err != nil {
 			return err
 		}
@@ -135,11 +150,15 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Result{
+	res := Result{
 		"ok": true, "project_id": projectID, "agent": actor,
 		"task_id": in.TaskID, "event_id": eventID, "event_type": eventType,
 		"next": i18n.T("next.status_visible"),
-	}, nil
+	}
+	if logPath != "" {
+		res["log_path"] = logPath
+	}
+	return res, nil
 }
 
 // LoadEventFeed returns events with id > since for the status hub.

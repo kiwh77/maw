@@ -30,7 +30,22 @@ func refreshBoard(pc *projCtx) (string, error) {
 	return board.Write(pc.LocalHome, snap)
 }
 
-func bindAgent(tx *sql.Tx, projectID, who, role, status, taskID, worktree, branch string) error {
+// mergeAgentMeta copies existing meta and optionally sets log_path.
+// Empty logPath leaves any prior log_path untouched.
+func mergeAgentMeta(existing map[string]any, logPath string) map[string]any {
+	meta := map[string]any{}
+	if existing != nil {
+		for k, v := range existing {
+			meta[k] = v
+		}
+	}
+	if strings.TrimSpace(logPath) != "" {
+		meta["log_path"] = strings.TrimSpace(logPath)
+	}
+	return meta
+}
+
+func bindAgent(tx *sql.Tx, projectID, who, role, status, taskID, worktree, branch, logPath string) error {
 	if role == "" {
 		role = "worker"
 	}
@@ -39,10 +54,15 @@ func bindAgent(tx *sql.Tx, projectID, who, role, status, taskID, worktree, branc
 	if existing != nil && existing.RegisteredAt != "" {
 		regAt = existing.RegisteredAt
 	}
+	var prevMeta map[string]any
+	if existing != nil {
+		prevMeta = existing.Meta
+	}
 	return db.UpsertAgent(tx, &db.Agent{
 		ProjectID: projectID, ID: who, Role: role, Status: status,
 		TaskID: taskID, Worktree: worktree, Branch: branch,
-		RegisteredAt: regAt, LastSeen: db.UTCNow(), Meta: map[string]any{},
+		RegisteredAt: regAt, LastSeen: db.UTCNow(),
+		Meta: mergeAgentMeta(prevMeta, logPath),
 	})
 }
 

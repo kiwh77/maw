@@ -91,6 +91,7 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 					Pct:       rep.Pct,
 					Client:    rep.Client,
 					Status:    rep.Status,
+					LogPath:   rep.LogPath,
 				})
 				if err != nil {
 					return nil, err
@@ -100,6 +101,7 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 			Feed: func(since int64, projectID, agent string) ([]*db.Event, error) {
 				return LoadEventFeed(gdb, since, projectID, agent)
 			},
+			Log: AgentLog,
 		})
 		if err != nil {
 			return nil, i18n.EW("err.board_serve", "next.change_addr", err)

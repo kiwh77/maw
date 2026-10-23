@@ -77,7 +77,7 @@ func main() {
 		if ok, _ := r["ok"].(bool); ok {
 			fmt.Println(i18n.T("out.ok"))
 		}
-		for _, k := range []string{"home", "global_db", "project_id", "project_name", "worktree", "branch", "task_id", "status", "board", "html", "agent", "registered", "role", "url", "protocol_fallback", "worktrees", "branches", "removed_worktrees", "removed_branches"} {
+		for _, k := range []string{"home", "global_db", "project_id", "project_name", "worktree", "branch", "task_id", "status", "board", "html", "agent", "registered", "role", "url", "log_path", "protocol_fallback", "worktrees", "branches", "removed_worktrees", "removed_branches"} {
 			if v, ok := r[k]; ok {
 				fmt.Printf("%s: %v\n", k, v)
 			}
@@ -187,10 +187,12 @@ func main() {
 		Short: i18n.T("cmd.next.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			agent, _ := cmd.Flags().GetString("agent")
-			printRes(app.Next(cwd, agent, dryRun))
+			logPath, _ := cmd.Flags().GetString("log-path")
+			printRes(app.Next(cwd, agent, dryRun, logPath))
 		},
 	}
 	nextCmd.Flags().String("agent", "", i18n.T("flag.agent"))
+	nextCmd.Flags().String("log-path", "", i18n.T("flag.log_path"))
 	root.AddCommand(nextCmd)
 
 	progCmd := &cobra.Command{
@@ -305,6 +307,7 @@ func main() {
 			agent, _ := cmd.Flags().GetString("agent")
 			project, _ := cmd.Flags().GetString("project")
 			st, _ := cmd.Flags().GetString("status")
+			logPath, _ := cmd.Flags().GetString("log-path")
 			var pctPtr *int
 			if cmd.Flags().Changed("pct") {
 				p, _ := cmd.Flags().GetInt("pct")
@@ -313,6 +316,7 @@ func main() {
 			printRes(app.StatusReport(cwd, app.StatusReportInput{
 				ProjectID: project, Actor: agent, TaskID: task,
 				Message: msg, Phase: phase, Pct: pctPtr, Client: client, Status: st,
+				LogPath: logPath,
 			}))
 		},
 	}
@@ -324,6 +328,7 @@ func main() {
 	statusReportCmd.Flags().String("agent", "", i18n.T("flag.agent"))
 	statusReportCmd.Flags().String("project", "", i18n.T("flag.project"))
 	statusReportCmd.Flags().String("status", "", i18n.T("flag.agent_status"))
+	statusReportCmd.Flags().String("log-path", "", i18n.T("flag.log_path"))
 	statusCmd.AddCommand(statusReportCmd)
 	root.AddCommand(statusCmd)
 	root.AddCommand(&cobra.Command{Use: "doctor", Run: func(cmd *cobra.Command, args []string) { printRes(app.Doctor(cwd)) }})

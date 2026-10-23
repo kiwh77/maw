@@ -206,6 +206,9 @@ button.copy.ok { color: var(--ok); }
 code, .kv dd, .list-plain { font-family: var(--mono); }
 .list-plain { padding-left: 18px; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
 .prompt-box, .cmd-box { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; font: 11px/1.8 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+.session-log-box { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; font: 11px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin: 0; color: var(--text); }
+.session-log-meta { font-size: 11px; color: var(--muted); margin: 0 0 8px; }
+.session-log-meta code { font-size: 10px; word-break: break-all; }
 .timeline { padding: 0; margin: 0; list-style: none; }
 .timeline li { border-left: 1px solid var(--line-strong); padding: 0 0 20px 16px; font-size: 12px; position: relative; }
 .timeline li::before { content: ""; width: 5px; height: 5px; background: var(--accent); border-radius: 50%; position: absolute; left: -3px; top: 6px; }

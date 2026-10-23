@@ -23,6 +23,7 @@ type StatusReport struct {
 	Pct       *int   `json:"pct"`
 	Client    string `json:"client"`
 	Status    string `json:"status"`
+	LogPath   string `json:"log_path"`
 }
 
 // StatusFunc applies an injected status report. Returns a JSON-serializable result map.
@@ -37,6 +38,7 @@ type ServeOpts struct {
 	Detail TaskDetailFunc
 	Status StatusFunc // nil → POST /api/status returns 501
 	Feed   FeedFunc   // nil → GET /api/feed returns 501; SSE stays invalidation-only
+	Log    LogFunc    // nil → GET /api/log returns 501; SSE skips log-append
 }
 
 // assetHandler 提供嵌入的前端构建产物（assets/dist）。
@@ -76,7 +78,7 @@ func isLoopback(r *http.Request) bool {
 
 func newHandlerOpts(opts ServeOpts) http.Handler {
 	mux := http.NewServeMux()
-	events := newEventHub(opts.Load, opts.Feed, 500*time.Millisecond)
+	events := newEventHub(opts.Load, opts.Feed, opts.Log, 500*time.Millisecond)
 	mux.Handle("/api/events", events.handler(15*time.Second))
 	mux.Handle("/assets/", assetHandler())
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +157,34 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(out)
+	})
+	mux.HandleFunc("/api/log", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if opts.Log == nil {
+			http.Error(w, "log unavailable", http.StatusNotImplemented)
+			return
+		}
+		q := r.URL.Query()
+		projectID := strings.TrimSpace(q.Get("project"))
+		agent := strings.TrimSpace(q.Get("agent"))
+		if projectID == "" || agent == "" {
+			http.Error(w, "missing project or agent", http.StatusBadRequest)
+			return
+		}
+		offset, _ := strconv.ParseInt(q.Get("offset"), 10, 64)
+		fromTail := q.Get("tail") == "1" || q.Get("tail") == "true"
+		chunk, err := opts.Log(projectID, agent, offset, fromTail)
+		if err != nil && !chunk.OK {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(chunk)
 	})
 	mux.HandleFunc("/api/feed", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
