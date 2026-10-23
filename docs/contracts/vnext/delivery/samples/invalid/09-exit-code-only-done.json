@@ -1,0 +1,69 @@
+{
+  "contract": "maw.delivery.manifest/v1",
+  "project_id": "716c30878ba1b95f",
+  "deliveries": [
+    {
+      "delivery_id": "dlv_109",
+      "task_instance": "ti_vn003c",
+      "task_version": 1,
+      "run_id": "run_a001",
+      "mode": "code",
+      "baseline_commit": "dedc919",
+      "candidate_commit": "abc1234",
+      "delivered_at": "2026-10-23T07:09:00Z",
+      "artifacts": [
+        {
+          "artifact_id": "art_001",
+          "kind": "commit",
+          "ref": "abc1234",
+          "declared_by": "manual",
+          "exists": true,
+          "in_write_scope": true
+        },
+        {
+          "artifact_id": "art_002",
+          "kind": "file",
+          "ref": "docs/contracts/vnext/delivery/x.md",
+          "declared_by": "cli",
+          "exists": true,
+          "in_write_scope": true,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "verification": [
+        {
+          "verification_id": "vfy_109",
+          "command": "go test ./...",
+          "target_task_version": 1,
+          "result": "pass",
+          "evidence": [
+            "exit_code:0"
+          ],
+          "ran_at": "2026-10-23T07:10:00Z",
+          "target_commit": "abc1234"
+        }
+      ],
+      "review": {
+        "required": true,
+        "verdict": "approved",
+        "reviewer": "r1",
+        "reviewed_at": "2026-10-23T07:12:00Z"
+      },
+      "merge": {
+        "required": true,
+        "merged": true,
+        "merged_commit": "def5678",
+        "merged_at": "2026-10-23T07:15:00Z"
+      },
+      "completion": {
+        "decision": "done",
+        "decided_at": "2026-10-23T07:16:00Z",
+        "reason": ""
+      },
+      "supersedes": null,
+      "superseded_by": null
+    }
+  ],
+  "expect_error": "E333",
+  "note": "只有退出码 0 就判 pass：认证失败也可能退出 0，这不是结果证据。"
+}

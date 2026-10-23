@@ -1,0 +1,63 @@
+{
+  "contract": "maw.delivery.manifest/v1",
+  "project_id": "716c30878ba1b95f",
+  "deliveries": [
+    {
+      "delivery_id": "dlv_104",
+      "task_instance": "ti_vn003c",
+      "task_version": 1,
+      "run_id": "run_a001",
+      "mode": "code",
+      "baseline_commit": "dedc919",
+      "candidate_commit": "abc1234",
+      "delivered_at": "2026-10-23T07:09:00Z",
+      "artifacts": [
+        {
+          "artifact_id": "art_101",
+          "kind": "file",
+          "ref": "docs/none.md",
+          "declared_by": "cli",
+          "exists": false,
+          "in_write_scope": true,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "verification": [
+        {
+          "verification_id": "vfy_104",
+          "command": "go test ./...",
+          "target_task_version": 1,
+          "result": "pass",
+          "evidence": [
+            "exit_code:0",
+            "go test: 12 packages ok",
+            "diff_stat: 3 files"
+          ],
+          "ran_at": "2026-10-23T07:10:00Z",
+          "target_commit": "abc1234"
+        }
+      ],
+      "review": {
+        "required": true,
+        "verdict": "approved",
+        "reviewer": "r1",
+        "reviewed_at": "2026-10-23T07:12:00Z"
+      },
+      "merge": {
+        "required": true,
+        "merged": true,
+        "merged_commit": "def5678",
+        "merged_at": "2026-10-23T07:15:00Z"
+      },
+      "completion": {
+        "decision": "done",
+        "decided_at": "2026-10-23T07:16:00Z",
+        "reason": ""
+      },
+      "supersedes": null,
+      "superseded_by": null
+    }
+  ],
+  "expect_error": "E320",
+  "note": "声明的产物查不到实体：CLI 说了有，实际没有。"
+}
