@@ -366,6 +366,51 @@ func main() {
 	})
 	root.AddCommand(hookCmd)
 
+	managedCmd := &cobra.Command{Use: "managed", Short: i18n.T("cmd.managed.short")}
+	managedStartCmd := &cobra.Command{
+		Use:   "start",
+		Short: i18n.T("cmd.managed.start.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			task, _ := cmd.Flags().GetString("task")
+			node, _ := cmd.Flags().GetString("node")
+			agent, _ := cmd.Flags().GetString("agent")
+			printRes(app.ManagedStart(cwd, task, node, agent, dryRun))
+		},
+	}
+	managedStartCmd.Flags().String("task", "", i18n.T("flag.task"))
+	managedStartCmd.Flags().String("node", "", i18n.T("flag.node"))
+	managedStartCmd.Flags().String("agent", "", i18n.T("flag.agent"))
+	managedCmd.AddCommand(managedStartCmd)
+	managedCmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: i18n.T("cmd.managed.status.short"),
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.ManagedStatus(cwd)) },
+	})
+	root.AddCommand(managedCmd)
+
+	// 同一二进制的内部 Runner：参数白名单，隐藏于帮助。
+	runnerCmd := &cobra.Command{
+		Use:    "__runner",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			op, _ := cmd.Flags().GetString("operation")
+			nonce, _ := cmd.Flags().GetString("nonce")
+			stateDir, _ := cmd.Flags().GetString("state-dir")
+			token, _ := cmd.Flags().GetString("token")
+			once, _ := cmd.Flags().GetBool("once")
+			printRes(app.InternalRunner(app.RunnerOpts{
+				OperationID: op, Nonce: nonce, StateDir: stateDir, Token: token, Once: once,
+			}))
+		},
+	}
+	runnerCmd.Flags().String("operation", "", i18n.T("flag.runner_operation"))
+	runnerCmd.Flags().String("nonce", "", i18n.T("flag.runner_nonce"))
+	runnerCmd.Flags().String("state-dir", "", i18n.T("flag.runner_state_dir"))
+	runnerCmd.Flags().String("token", "", i18n.T("flag.runner_token"))
+	runnerCmd.Flags().Bool("once", false, "exit after bootstrap (test)")
+	root.AddCommand(runnerCmd)
+
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}

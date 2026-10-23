@@ -21,6 +21,18 @@ type Config struct {
 	Locks     Locks     `toml:"locks"`
 	Launcher  Launcher  `toml:"launcher"`
 	Identity  Identity  `toml:"identity"`
+	// Managed 是受管执行开关与硬上限（契约 auto_execution）。
+	Managed Managed `toml:"managed"`
+}
+
+// Managed 控制受管 CLI 执行。默认关闭自动模式，上限为 1。
+type Managed struct {
+	// ConfigVersion 是本段配置的版本号，便于迁移与看板展示。
+	ConfigVersion int `toml:"config_version"`
+	// AutoEnabled 为真时才允许自动派发循环；默认 false。
+	AutoEnabled bool `toml:"auto_enabled"`
+	// Limit 是受管执行的全局硬上限；auto_enabled=true 时必须 ≥1。
+	Limit int `toml:"limit"`
 }
 
 type Project struct {
@@ -85,7 +97,51 @@ func Load(path string) (*Config, error) {
 	if c.Gates.TimeoutSec == 0 {
 		c.Gates.TimeoutSec = 900
 	}
+	if c.Managed.ConfigVersion == 0 {
+		c.Managed.ConfigVersion = 1
+	}
+	// 默认关闭自动模式；显式开启时 Limit 至少为 1（E270）。
+	if c.Managed.Limit <= 0 {
+		c.Managed.Limit = 1
+	}
+	if c.Managed.AutoEnabled && c.Managed.Limit < 1 {
+		return nil, i18n.E("err.managed_limit_required", "next.fix_toml")
+	}
 	return &c, nil
+}
+
+// AutoExecution 把配置映射为运行时契约里的 auto_execution 视图。
+func (c *Config) AutoExecution() (enabled bool, limit int) {
+	if c == nil {
+		return false, 1
+	}
+	return c.Managed.AutoEnabled, c.Managed.Limit
+}
+
+const managedSectionTOML = `
+[managed]
+# 受管执行：默认关闭自动派发；硬上限 1（与 max_parallel 看板参考值分离）
+config_version = 1
+auto_enabled = false
+limit = 1
+`
+
+// EnsureManagedSection 为旧配置补写 [managed] 段；已存在则不动。
+// 返回 true 表示写入了迁移内容。
+func EnsureManagedSection(path string) (bool, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false, i18n.E("err.config_missing", "next.run_init", path)
+	}
+	text := string(b)
+	if regexp.MustCompile(`(?m)^\s*\[managed\]\s*$`).MatchString(text) {
+		return false, nil
+	}
+	trimmed := strings.TrimRight(text, "\n") + "\n" + managedSectionTOML
+	if err := os.WriteFile(path, []byte(trimmed), 0o644); err != nil {
+		return false, i18n.EW("err.write_config", "next.check_perms", err)
+	}
+	return true, nil
 }
 
 func DetectGates(repo string) []string {
@@ -203,6 +259,12 @@ heartbeat_ttl_sec = 900
 
 [launcher]
 mode = "manual"
+
+[managed]
+# 受管执行：默认关闭自动派发；硬上限 1（与 max_parallel 看板参考值分离）
+config_version = 1
+auto_enabled = false
+limit = 1
 
 [identity]
 # Worker 名推荐动态注册：{应用}-{工程}-{序号}，如 cursor-demo-1

@@ -46,3 +46,31 @@ func TestE(t *testing.T) {
 		t.Fatalf("%+v", err)
 	}
 }
+
+func TestCatalogKeysSynced(t *testing.T) {
+	for k := range catalogEn {
+		if _, ok := catalogZh[k]; !ok {
+			t.Errorf("zh missing key %q", k)
+		}
+	}
+	for k := range catalogZh {
+		if _, ok := catalogEn[k]; !ok {
+			t.Errorf("en missing key %q", k)
+		}
+	}
+}
+
+func TestManagedKeysPresent(t *testing.T) {
+	keys := []string{
+		"cmd.managed.short", "err.managed_auto_off", "err.managed_platform",
+		"err.managed_limit_required", "next.managed_explicit",
+	}
+	for _, k := range keys {
+		if _, ok := catalogEn[k]; !ok {
+			t.Fatalf("en missing %s", k)
+		}
+		if _, ok := catalogZh[k]; !ok {
+			t.Fatalf("zh missing %s", k)
+		}
+	}
+}
