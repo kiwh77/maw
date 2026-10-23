@@ -339,3 +339,128 @@ func schemaStatusNoMigrate(path string) (db.SchemaStatus, error) {
 	defer s.Close()
 	return s.SchemaStatus()
 }
+
+// Migrated aliases predate DisplayID's strict shape. They must not prevent an
+// unrelated contractual task from being registered or rewrite persisted history.
+func TestPlanTaskIdentityWithLegacyAlias(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "maw.db")
+	if err := db.Init(path); err != nil {
+		t.Fatal(err)
+	}
+	const pid = "1234567890abcdef"
+	err := db.WithTx(path, func(tx *sql.Tx) error {
+		if err := db.UpsertProject(tx, &db.Project{ID: pid, Name: "mixed"}); err != nil {
+			return err
+		}
+		old := &db.Task{ProjectID: pid, ID: "VN-021R", Title: "legacy", Status: "in_progress", Owner: "other-agent"}
+		if err := db.UpsertTask(tx, old); err != nil {
+			return err
+		}
+		before, err := db.GetTask(tx, pid, old.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := planTaskIdentity(tx, pid, []*db.Task{{ID: "RF-003", Title: "new"}}, false); err != nil {
+			return err
+		}
+		after, err := db.GetTask(tx, pid, old.ID)
+		if err != nil {
+			return err
+		}
+		if before.InstanceID != after.InstanceID || after.ID != old.ID || after.Owner != old.Owner || after.Status != old.Status {
+			t.Fatalf("legacy task changed: %#v", after)
+		}
+		inst, err := db.GetInstance(tx, before.InstanceID)
+		if err != nil {
+			return err
+		}
+		if string(inst.DisplayID) != old.ID {
+			t.Fatalf("persisted alias was renamed: %s", inst.DisplayID)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlanTaskIdentityKeepsPreservedDependencies(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "maw.db")
+	if err := db.Init(path); err != nil {
+		t.Fatal(err)
+	}
+	const pid = "1234567890abcdef"
+	err := db.WithTx(path, func(tx *sql.Tx) error {
+		if err := db.UpsertProject(tx, &db.Project{ID: pid, Name: "mixed"}); err != nil {
+			return err
+		}
+		for _, old := range []*db.Task{
+			{ProjectID: pid, ID: "VN-100", Title: "prerequisite", Status: "done"},
+			{ProjectID: pid, ID: "VN-101R", Title: "historic dependent", Status: "in_progress", Owner: "other-agent", Deps: []string{"VN-100"}},
+		} {
+			if err := db.UpsertTask(tx, old); err != nil {
+				return err
+			}
+		}
+		plan, err := planTaskIdentity(tx, pid, []*db.Task{{ID: "RF-003", Title: "independent"}}, false)
+		if err != nil {
+			return err
+		}
+		if len(plan.Retires) != 0 {
+			t.Fatalf("preserved tasks retired: %#v", plan.Retires)
+		}
+		_, err = planTaskIdentity(tx, pid, []*db.Task{{ID: "RF-004", Title: "invalid dependency", Deps: []string{"VN-999"}}}, false)
+		if err == nil {
+			t.Fatal("missing dependency was accepted")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlanTaskIdentityDoesNotRewriteHistoricalRetiredEdges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "maw.db")
+	if err := db.Init(path); err != nil {
+		t.Fatal(err)
+	}
+	const pid = "1234567890abcdef"
+	err := db.WithTx(path, func(tx *sql.Tx) error {
+		if err := db.UpsertProject(tx, &db.Project{ID: pid, Name: "history"}); err != nil {
+			return err
+		}
+		target := &db.Task{ProjectID: pid, ID: "VN-955", Title: "retired", Status: "ready"}
+		if err := db.UpsertTask(tx, target); err != nil {
+			return err
+		}
+		if err := db.UpsertTask(tx, &db.Task{ProjectID: pid, ID: "VN-100", Title: "historic", Status: "done", Deps: []string{"VN-955"}}); err != nil {
+			return err
+		}
+		if err := db.RetireInstance(tx, target.InstanceID, "old plan"); err != nil {
+			return err
+		}
+		if _, err := planTaskIdentity(tx, pid, []*db.Task{{ID: "RF-003", Title: "independent"}}, false); err != nil {
+			return err
+		}
+		_, err := planTaskIdentity(tx, pid, []*db.Task{{ID: "RF-004", Title: "new invalid", Deps: []string{"VN-955"}}}, false)
+		if err == nil {
+			t.Fatal("new retired dependency accepted")
+		}
+		old, err := db.GetTask(tx, pid, "VN-100")
+		if err != nil {
+			return err
+		}
+		inst, err := db.GetInstance(tx, old.InstanceID)
+		if err != nil {
+			return err
+		}
+		if len(inst.Versions[0].Deps) != 1 || inst.Versions[0].Deps[0].Target != "VN-955" {
+			t.Fatal("frozen history was rewritten")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

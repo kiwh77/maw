@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/engine/tasks"
 	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/machine"
 )
 
 // ensureWritableDB 是写库入口：已是最新 schema 时只做写者闸门检查；
@@ -174,13 +176,175 @@ func planTaskIdentity(tx *sql.Tx, projectID string, desired []*db.Task, reset bo
 	if reset {
 		mode = tasks.ModeReset
 	}
-	return taskIdentityService().Plan(tasks.PlanRequest{
+	definitions := desiredFromTasks(desired)
+	// The preflight must use the same retained set as PlanApply's incremental
+	// write path. Otherwise a new independent task falsely retires completed or
+	// occupied prerequisites and fails their historical dependency checks.
+	if !reset {
+		existing, err := db.ListTasks(tx, projectID)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[string]bool{}
+		for _, t := range desired {
+			if t != nil {
+				seen[t.ID] = true
+			}
+		}
+		for _, t := range existing {
+			if !seen[t.ID] && machine.PreserveOnPlanApply(t.Status) {
+				definitions = append(definitions, desiredFromTasks([]*db.Task{t})...)
+			}
+		}
+	}
+	// Legacy frozen versions can refer to already retired prerequisites. Keep
+	// those records immutable, but do not revalidate their old edges as new work.
+	// Explicitly submitted definitions are never exempt from dependency checks.
+	planning, definitions, historicalEdges := historicalPlanningSnapshot(snap, definitions, desired)
+	planning, definitions, legacyCount := legacyPlanningSnapshot(planning, definitions)
+	plan, err := taskIdentityService().Plan(tasks.PlanRequest{
 		ProjectID:  model.ProjectID(projectID),
-		Snapshot:   snap,
-		Desired:    desiredFromTasks(desired),
+		Snapshot:   planning,
+		Desired:    definitions,
 		Mode:       mode,
 		ActiveRuns: runs,
 	})
+	if err == nil && legacyCount > 0 {
+		plan.Notes = append(plan.Notes, "历史编号仅在内存规划中使用兼容别名，持久化编号保持不变")
+	}
+	if err == nil && historicalEdges > 0 {
+		plan.Notes = append(plan.Notes, "已有冻结版本包含退役依赖：原记录保留，新提交定义仍严格校验")
+	}
+	return plan, err
+}
+
+// historicalPlanningSnapshot isolates old, already-unresolvable dependency edges
+// from preflight. It never removes a new dependency, changes persisted versions,
+// or treats ambiguous/missing references as valid.
+func historicalPlanningSnapshot(snap *model.TaskSnapshot, defs []tasks.Desired, submitted []*db.Task) (*model.TaskSnapshot, []tasks.Desired, int) {
+	if snap == nil {
+		return snap, defs, 0
+	}
+	byID := map[string]model.InstanceState{}
+	byDisplay := map[string][]model.InstanceState{}
+	for _, inst := range snap.Instances {
+		byID[string(inst.InstanceID)] = inst.State
+		byDisplay[string(inst.DisplayID)] = append(byDisplay[string(inst.DisplayID)], inst.State)
+	}
+	count := 0
+	prune := func(input []model.Dep) []model.Dep {
+		out := make([]model.Dep, 0, len(input))
+		for _, dep := range input {
+			retired := dep.Kind == model.DepInstance && byID[dep.Target] == model.InstanceStateRetired
+			if dep.Kind == model.DepLegacy {
+				hits := byDisplay[dep.Target]
+				retired = len(hits) == 1 && hits[0] == model.InstanceStateRetired
+			}
+			if retired {
+				count++
+				continue
+			}
+			out = append(out, dep)
+		}
+		return out
+	}
+	out := *snap
+	out.Instances = append([]model.TaskInstance(nil), snap.Instances...)
+	for i := range out.Instances {
+		inst := &out.Instances[i]
+		inst.Versions = append([]model.TaskVersion(nil), inst.Versions...)
+		for v := range inst.Versions {
+			inst.Versions[v].Deps = prune(inst.Versions[v].Deps)
+		}
+	}
+	explicit := map[model.DisplayID]bool{}
+	for _, t := range submitted {
+		if t != nil {
+			explicit[model.DisplayID(t.ID)] = true
+		}
+	}
+	desired := append([]tasks.Desired(nil), defs...)
+	for i := range desired {
+		if !explicit[desired[i].DisplayID] {
+			desired[i].Deps = prune(desired[i].Deps)
+		}
+	}
+	return &out, desired, count
+}
+
+// legacyPlanningSnapshot adapts migrated display aliases only for the pure planning
+// preflight. PlanApply persists definitions through the original db.Task rows;
+// this synthetic snapshot is never saved. All identity, dependency, version and
+// occupancy checks still run, and malformed legacy anchors are not repaired here.
+func legacyPlanningSnapshot(snap *model.TaskSnapshot, desired []tasks.Desired) (*model.TaskSnapshot, []tasks.Desired, int) {
+	if snap == nil {
+		return snap, desired, 0
+	}
+	aliases := map[model.DisplayID]model.DisplayID{}
+	used := map[model.DisplayID]bool{}
+	for _, inst := range snap.Instances {
+		used[inst.DisplayID] = true
+	}
+	for _, d := range desired {
+		used[d.DisplayID] = true
+	}
+	next := 0
+	for _, inst := range snap.Instances {
+		if inst.DisplayID.Valid() || aliases[inst.DisplayID] != "" {
+			continue
+		}
+		var alias model.DisplayID
+		for {
+			next++
+			alias = model.DisplayID(fmt.Sprintf("MAWLEGACY-%06d", next))
+			if !used[alias] {
+				break
+			}
+		}
+		used[alias] = true
+		aliases[inst.DisplayID] = alias
+	}
+	if len(aliases) == 0 {
+		return snap, desired, 0
+	}
+	remap := func(id model.DisplayID) model.DisplayID {
+		if alias := aliases[id]; alias != "" {
+			return alias
+		}
+		return id
+	}
+	deps := func(input []model.Dep) []model.Dep {
+		out := append([]model.Dep(nil), input...)
+		for i := range out {
+			if out[i].Kind == model.DepLegacy {
+				out[i].Target = string(remap(model.DisplayID(out[i].Target)))
+			}
+		}
+		return out
+	}
+	out := *snap
+	out.Instances = append([]model.TaskInstance(nil), snap.Instances...)
+	for i := range out.Instances {
+		inst := &out.Instances[i]
+		original := inst.DisplayID
+		inst.DisplayID = remap(original)
+		if inst.Legacy.DisplayID == original {
+			if inst.Legacy.PrimaryKey == model.LegacyPrimaryKey(inst.Legacy.ProjectID, original) {
+				inst.Legacy.PrimaryKey = model.LegacyPrimaryKey(inst.Legacy.ProjectID, inst.DisplayID)
+			}
+			inst.Legacy.DisplayID = inst.DisplayID
+		}
+		inst.Versions = append([]model.TaskVersion(nil), inst.Versions...)
+		for v := range inst.Versions {
+			inst.Versions[v].Deps = deps(inst.Versions[v].Deps)
+		}
+	}
+	definitions := append([]tasks.Desired(nil), desired...)
+	for i := range definitions {
+		definitions[i].DisplayID = remap(definitions[i].DisplayID)
+		definitions[i].Deps = deps(definitions[i].Deps)
+	}
+	return &out, definitions, len(aliases)
 }
 
 func refuseResetIfOccupied(tx *sql.Tx, projectID string) error {
