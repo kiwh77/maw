@@ -1123,15 +1123,9 @@ function topoNearestFreeTrack(want, used) {
   return t;
 }
 
-/** 已结束态：不阻塞后续，不抬升波次深度。 */
-function topoDepDone(task) {
-  const st = task && task.status;
-  return st === "done" || st === "cancelled";
-}
-
 /**
- * 同工程内分层：可单独开始（无未完成前置）在最左，再向右延伸。
- * 深度按「未完成依赖」最长路径；已完成／筛选外依赖不抬升。
+ * 同工程内分层：依赖在左、依赖方在右（完整依赖链深度，含已完成）。
+ * 已完成链也必须左右排开，否则会叠成竖排、边变成上下连线。
  * 纵轴：barycenter 减交叉；单链尽量同一行；多依赖取中位行；冲突选最近空闲行。
  */
 function layoutTopoBands(tasks) {
@@ -1157,18 +1151,16 @@ function layoutTopoBands(tasks) {
       let L = 0;
       if (task) {
         for (const d of (task.deps || [])) {
-          if (!d || !byId.has(d)) continue; // 筛选外 stub：视为已满足，不抬升
-          const dep = byId.get(d);
-          if (topoDepDone(dep)) continue;
-          L = Math.max(L, walk(d, stack) + 1);
+          if (!d) continue;
+          // 含已完成依赖：VN-801→802→804 应落在相邻波次，左右连线。
+          L = Math.max(L, (byId.has(d) || stubs.has(d) ? walk(d, stack) : -1) + 1);
         }
       }
       level.set(id, L);
       stack.delete(id);
       return L;
     };
-    // stub 仅作虚线端点：落在波次 0，不参与未完成深度抬升。
-    for (const id of stubs) level.set(id, 0);
+    for (const id of stubs) walk(id, new Set());
     for (const t of group) walk(t.id, new Set());
     const layers = [];
     for (const [id, L] of level) {
