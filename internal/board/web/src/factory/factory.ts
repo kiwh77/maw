@@ -107,12 +107,13 @@ function createFactory(root) {
     let obj = hit.object; while (obj && !obj.userData.task) obj = obj.parent;
     if (obj?.userData.task) options.onTask(obj.userData.task.id, obj.userData.task.project_id || '');
   });
-  function zoneTarget(zone, homeX, homeZ, index) {
-    if (zone === 'queued') return [homeX * .2, 4.2];
-    if (zone === 'processing') return [homeX * .35, -1.5];
-    if (zone === 'inspection') return [homeX * .25, -4];
-    if (zone === 'blocked') return [-1.6 + (index % 3) * .55, 1.5];
-    if (zone === 'unknown') return [homeX, homeZ + .8];
+  /** Walk targets stay on each agent's own station; only inspection uses the shared bay. */
+  function zoneTarget(zone, homeX, homeZ) {
+    if (zone === 'queued') return [homeX * .35, 3.6];
+    if (zone === 'processing') return [homeX, homeZ];
+    if (zone === 'inspection') return [homeX * .45, -4];
+    if (zone === 'blocked') return [homeX, 1.4];
+    if (zone === 'unknown') return [homeX, homeZ + .6];
     return [homeX, homeZ];
   }
   function worker(parent, x, z, color, task, name) {
@@ -141,12 +142,12 @@ function createFactory(root) {
     people.push({
       g, arms, legs, active, blocked, zone,
       home: [x, z],
-      target: zoneTarget(zone, x, z, people.length),
+      target: zoneTarget(zone, x, z),
       phase: Math.random() * Math.PI * 2,
     });
   }
   function makeTruck(lane, length, color, side) {
-    // Cab faces the warehouse (-Z); bed faces the road (+Z) so the nose points into the yard on arrival.
+    // Cab on local -Z, bed on local +Z. Parked yaw = π → bed/tail faces warehouse (-Z).
     const truck = group(lane, 0, 0, 6.5);
     const cabZ = -length / 2;
     const bedZ = .7;
@@ -163,49 +164,83 @@ function createFactory(root) {
     trucks.push({ g: truck, side, arrive: reduced.matches ? 1 : 0 });
     return truck;
   }
+  function benchX(i, count) {
+    if (count <= 1) return 0;
+    const span = Math.min(4.6, 1.15 * (count - 1));
+    return -span / 2 + (i / (count - 1)) * span;
+  }
+  function addWorkbench(lane, x, z) {
+    box(lane, 1.15, .18, 1.15, '#c5b38b', x, 1.28, z);
+    for (const dx of [-.42, .42]) {
+      for (const dz of [-.42, .42]) box(lane, .1, 1.05, .1, '#75896c', x + dx, .55, z + dz);
+    }
+    box(lane, 1.05, .04, .08, '#a8946a', x, 1.4, z - .5);
+  }
   function rebuild(groups, agents) {
     world.clear(); people = []; trucks = []; pickables = []; clearLabels();
     const shown = groups.slice(0,6), width = Math.max(16, shown.length * 7);
     box(world,width+2,.45,21,'#cbd7bf',0,-.3,0);
     box(world,width+1,.1,20,'#e0e6d5',0,-.04,0);
     box(world,width,.03,5,'#a5b49b',0,.04,7.3);
-    const workerNames = new Set();
+    const palette = ['#6d8d7a','#c9a45d','#8b92ad','#ac887c','#7a9e8c'];
     shown.forEach((g, index) => {
       const x = (index - (shown.length-1)/2)*7;
       const lane = group(world,x,0,0);
       const large = g.size !== 'small', length = large ? 4.8 : 3.1;
       const color = large ? '#6b8b78' : '#c4a45c';
       makeTruck(lane, length, color, index % 2 ? 1 : -1);
-      // Delivery bay, processing bench, inspection station, warehouse.
+      // Delivery bay, shared inspection, warehouse. Per-agent benches added below.
       box(lane,5.6,.35,3,'#c0cbb4',0,.15,2.4);
-      for(const bx of [-1.1,1.1]) box(lane,.13,1.2,1.1,'#75896c',bx,.6,-1.5);
-      box(lane,3,.2,1.5,'#c5b38b',0,1.3,-1.5);
       box(lane,2.8,.3,1.6,'#bac6d1',0,.4,-4);
       for(const bx of [-2.5,2.5]) box(lane,.12,3.8,1.7,'#6d8465',bx,1.9,-7);
       for(const y of [.2,1.4,2.6,3.8]) box(lane,5.2,.12,1.8,'#a9bc99',0,y,-7);
-      const counts = {};
+
       const sample = g.tasks.slice(0,72);
+      const idle = agents.filter(a=>a.project_id===g.id&&!a.task_id&&a.status!=='offline');
+      const roster = [];
+      const rosterIndex = new Map();
+      const takeAgent = (id) => {
+        if (!id || rosterIndex.has(id) || roster.length >= 5) return;
+        rosterIndex.set(id, roster.length);
+        roster.push(id);
+      };
+      for (const task of sample) {
+        const zone = cargoZone(task.status);
+        if (task.owner && !['stored','cancelled'].includes(zone)) takeAgent(task.owner);
+      }
+      for (const a of idle) takeAgent(a.id);
+      if (!roster.length) takeAgent('—');
+
+      const benchZ = -1.5;
+      const standZ = -.45;
+      roster.forEach((name, i) => {
+        const bx = benchX(i, roster.length);
+        addWorkbench(lane, bx, benchZ);
+        const task = sample.find(t => t.owner === name && !['stored','cancelled'].includes(cargoZone(t.status))) || null;
+        const tint = idle.some(a => a.id === name) && !task ? '#99a58d' : palette[i % palette.length];
+        worker(lane, bx, standZ, tint, task, name === '—' ? '' : name);
+      });
+
+      const counts = {};
       for(const task of sample) {
         const zone = cargoZone(task.status), n = counts[zone] || 0; counts[zone]=n+1;
         const crate = group(lane,0,0,0);
         const col = n%5, row = Math.floor(n/5);
-        // Queued cargo sits on the bed (road side, +Z) behind the cab that faces the warehouse.
-        if(zone==='queued') crate.position.set((n%3-1)*.7,1+Math.floor(n/12)*.55,7.1-Math.floor((n%12)/3)*.55);
+        // Parked truck yaw=π: bed (+Z local) faces warehouse; queued crates sit on that bed side.
+        if(zone==='queued') crate.position.set((n%3-1)*.7,1+Math.floor(n/12)*.55,5.35-Math.floor((n%12)/3)*.45);
         else if(zone==='stored') crate.position.set((col-2)*.8,.3+(row%3)*1.2,-7+(Math.floor(row/3)%2)*.7);
-        else if(zone==='processing') crate.position.set((n%4-1.5)*.65,1.45+Math.floor(n/4)*.55,-1.5);
+        else if(zone==='processing') {
+          const ai = rosterIndex.has(task.owner) ? rosterIndex.get(task.owner) : 0;
+          const key = 'proc-' + ai;
+          const pn = counts[key] || 0; counts[key] = pn + 1;
+          const bx = benchX(ai, roster.length);
+          crate.position.set(bx + (pn % 2 ? .28 : -.28), 1.42 + Math.floor(pn / 2) * .5, benchZ);
+        }
         else if(zone==='inspection') crate.position.set((n%4-1.5)*.65,.58+Math.floor(n/4)*.55,-4);
         else crate.position.set(-2.2+(n%3)*.7,.1+Math.floor(n/6)*.55,1.6+Math.floor((n%6)/3)*.7);
         box(crate,.55,.52,.55,colors[zone],0,.26,0);box(crate,.07,.015,.56,'#e9d9b5',0,.528,0);
         crate.userData.task=task;pickables.push(crate);
-        if(task.owner && !workerNames.has(`${g.id}/${task.owner}`) && !['stored','cancelled'].includes(zone)) {
-          workerNames.add(`${g.id}/${task.owner}`);
-          const wi=[...workerNames].filter(name=>name.startsWith(`${g.id}/`)).length-1;
-          if(wi<4) worker(lane,-2+wi*1.3,-.2,['#6d8d7a','#c9a45d','#8b92ad','#ac887c'][wi],task,task.owner);
-        }
       }
-      // Idle registered agents remain visible, without a fictional assignment.
-      const idle = agents.filter(a=>a.project_id===g.id&&!a.task_id&&a.status!=='offline').slice(0,2);
-      idle.forEach((a,i)=>worker(lane,2+i*.8,3,'#99a58d',null,a.id));
     });
     const extent = Math.max(1,width/28); camera.zoom=1/extent;camera.updateProjectionMatrix();
   }
@@ -242,12 +277,13 @@ function createFactory(root) {
     applyTheme();
   }
   function animateTrucks(dt) {
+    // Parked yaw π: local +Z (bed/tail) faces warehouse (-Z); cab faces the road.
+    const parkYaw = Math.PI;
     for (const t of trucks) {
       if (reduced.matches) {
         t.arrive = 1;
         t.g.position.x = 0;
-        // Parked: cab toward warehouse (-Z). Model cab is built on local -Z, so yaw 0.
-        t.g.rotation.y = 0;
+        t.g.rotation.y = parkYaw;
         continue;
       }
       t.arrive = Math.min(1, t.arrive + dt * .45);
@@ -255,16 +291,16 @@ function createFactory(root) {
       const ease = 1 - Math.pow(1 - Math.min(u, 1), 3);
       if (u < .72) {
         const p = ease / .72;
-        // Enter along X with nose pointing toward the lane (into the yard).
+        // Drive in cab-first along X toward the lane.
         t.g.position.x = t.side * 14 * (1 - Math.min(p, 1));
-        // Local -Z (cab) faces travel direction: from +X → face -X (yaw +π/2); from -X → face +X (yaw -π/2).
+        // Local -Z (cab) faces travel: from +X → -X (+π/2); from -X → +X (−π/2).
         t.g.rotation.y = t.side > 0 ? Math.PI / 2 : -Math.PI / 2;
       } else {
         const p = (u - .72) / .28;
         t.g.position.x = 0;
         const from = t.side > 0 ? Math.PI / 2 : -Math.PI / 2;
-        // Settle to cab facing warehouse (-Z).
-        t.g.rotation.y = from + (0 - from) * Math.min(1, p);
+        // Swing so the tail faces the workshop for unloading.
+        t.g.rotation.y = from + (parkYaw - from) * Math.min(1, p);
       }
     }
   }

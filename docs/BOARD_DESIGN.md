@@ -49,9 +49,9 @@ Cards keep exact status labels; filters support every status. Hide the attention
 
 ## Views
 
-The workspace toggles **Board** vs **Dependency topology** (`maw-board-view`); the board keeps rendering status lanes.
+The workspace toggles **Board** vs **Dependency topology** (`maw-board-view`); the board keeps rendering status lanes. **Topology is available only when a single project is selected**; choosing **All projects** forces the board view and disables the topology control (stacked multi-project graphs are unreadable).
 
-Dependency topology is drawn with **X6** on a free canvas, ordered by **wave**: a wave is the dependency depth, so prerequisites sit on the left and dependents on the right. Each project gets a horizontal band with wave columns, orthogonal rounded edges, and nodes showing ID, title, status, owner, priority, and in/out degree; dashed edges and stub nodes mark dependencies outside the current filter. The canvas pans by dragging empty space, zooms with Ctrl/⌘ + wheel, and the toolbar offers fit and relayout; hovering highlights neighbouring dependencies and dims the rest, and theme switches redraw immediately. Filters and search apply to both views; click, Enter, or Space opens the drawer.
+Dependency topology is drawn with **X6** on a free canvas, ordered by **wave**: a wave is the dependency depth, so prerequisites sit on the left and dependents on the right. Wave columns, orthogonal rounded edges, and nodes show ID, title, status, owner, priority, and in/out degree; dashed edges and stub nodes mark dependencies outside the current filter. The canvas pans by dragging empty space, zooms with Ctrl/⌘ + wheel, and the toolbar offers fit and relayout; hovering highlights neighbouring dependencies and dims the rest, and theme switches redraw immediately. Filters and search apply to the board and (single-project) topology; click, Enter, or Space opens the drawer.
 
 ### Build and assets
 

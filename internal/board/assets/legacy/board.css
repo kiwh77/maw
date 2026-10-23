@@ -116,6 +116,13 @@ select:hover, .quiet-button:hover { border-color: var(--line-strong); }
 .view-toggle button:last-child { border-right: 0; }
 .view-toggle button:hover { color: var(--text); background: var(--hover); }
 .view-toggle button.active { color: var(--accent); background: var(--accent-soft); }
+.view-toggle button:disabled,
+.view-toggle button:disabled:hover {
+  color: var(--faint);
+  background: transparent;
+  opacity: .5;
+  cursor: not-allowed;
+}
 .board { display: flex; gap: 12px; flex: 1; min-height: 0; overflow-x: auto; padding-bottom: 16px; }
 .topo { flex: 1; min-height: 0; overflow: auto; padding-bottom: 16px; border-top: 1px solid var(--line); }
 .topo-empty { color: var(--muted); font-size: 11px; padding: 28px 4px; }

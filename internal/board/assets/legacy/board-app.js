@@ -115,6 +115,7 @@ const I18N = {
     "topo.missing": "Missing dep ",
     "topo.outside": "Outside filter / historical dep",
     "topo.not_in_view": "Not in current view",
+    "topo.need_project": "Select a single project to view topology",
     "tasks_edges": " tasks · ",
     "edges": " edges",
     "n_projects": " projects",
@@ -326,6 +327,7 @@ const I18N = {
     "topo.missing": "缺失依赖 ",
     "topo.outside": "筛选外 / 历史依赖",
     "topo.not_in_view": "不在当前视图",
+    "topo.need_project": "请先选择单个工程再查看拓扑",
     "tasks_edges": " 任务 · ",
     "edges": " 边",
     "n_projects": " 个工程",
@@ -450,6 +452,7 @@ function setLang(lang) {
   } catch (_) {}
   rebuildLocalizedLists();
   try { applyStaticI18n(); } catch (_) {}
+  try { updateTopoButtonState(); } catch (_) {}
   const sel = document.getElementById("lang-select");
   if (sel) sel.value = uiLang;
   if (typeof lastSnap !== "undefined" && lastSnap) {
@@ -538,8 +541,25 @@ function readView() {
     return VIEWS.includes(value) ? value : "board";
   } catch (_) { return "board"; }
 }
+
+/** 拓扑仅在选中单个工程时可用（「全部工程」会把多仓叠成超大图）。 */
+function canUseTopo() {
+  return !!filters.project;
+}
+
+function updateTopoButtonState() {
+  const btn = document.getElementById("view-topo");
+  if (!btn) return;
+  const ok = canUseTopo();
+  btn.disabled = !ok;
+  btn.title = ok ? "" : t("topo.need_project");
+  btn.setAttribute("aria-disabled", ok ? "false" : "true");
+}
+
 function setView(value) {
-  boardView = VIEWS.includes(value) ? value : "board";
+  let next = VIEWS.includes(value) ? value : "board";
+  if (next === "topo" && !canUseTopo()) next = "board";
+  boardView = next;
   try { localStorage.setItem("maw-board-view", boardView); } catch (_) {}
   document.getElementById("view-board").classList.toggle("active", boardView === "board");
   document.getElementById("view-topo").classList.toggle("active", boardView === "topo");
@@ -554,6 +574,7 @@ function setView(value) {
     document.getElementById("view-factory")?.setAttribute("aria-pressed", String(boardView === "factory"));
     if (typeof window !== "undefined") window.MawBoard?.setFactoryVisible?.(factoryRoot, boardView === "factory");
   }
+  updateTopoButtonState();
   if (lastSnap) renderWorkspace(lastSnap);
 }
 
@@ -615,6 +636,9 @@ function setProjectFilter(projectId, { syncHash = true } = {}) {
   filters.project = projectId || "";
   filters._inited = true;
   if (syncHash) writeProjectHash(filters.project);
+  updateTopoButtonState();
+  // 「全部工程」时拓扑不可用，自动退回看板。
+  if (!filters.project && boardView === "topo") setView("board");
 }
 
 const EVENT_LABEL = {
@@ -1430,7 +1454,12 @@ if (typeof window !== "undefined" && window.addEventListener) {
 }
 document.getElementById("view-toggle").addEventListener("click", e => {
   const button = e.target.closest ? e.target.closest("[data-view]") : null;
-  if (!button || button.dataset.view === boardView) return;
+  if (!button || button.disabled || button.dataset.view === boardView) return;
+  if (button.dataset.view === "topo" && !canUseTopo()) {
+    updateTopoButtonState();
+    document.getElementById("f-project")?.focus();
+    return;
+  }
   setView(button.dataset.view);
 });
 document.getElementById("columns").addEventListener("click", async e => {
@@ -1539,13 +1568,20 @@ document.addEventListener("DOMContentLoaded", () => {
 const themeSelect = document.getElementById("theme-select");
 themeSelect.value = readTheme();
 themeSelect.addEventListener("change", e => setTheme(e.target.value));
+// 首屏请求前从 #锚点恢复工程，再决定视图（拓扑依赖单工程）。
+{
+  const hashProject = readProjectHash();
+  if (hashProject) setProjectFilter(hashProject, { syncHash: false });
+}
 boardView = readView();
+if (boardView === "topo" && !canUseTopo()) boardView = "board";
 document.getElementById("view-board").classList.toggle("active", boardView === "board");
 document.getElementById("view-topo").classList.toggle("active", boardView === "topo");
 document.getElementById("view-board").setAttribute("aria-pressed", boardView === "board" ? "true" : "false");
 document.getElementById("view-topo").setAttribute("aria-pressed", boardView === "topo" ? "true" : "false");
 document.getElementById("columns").hidden = boardView !== "board";
 document.getElementById("topology").hidden = boardView !== "topo";
+{
   const factoryRoot = document.getElementById("factory");
   if (factoryRoot) {
     factoryRoot.hidden = boardView !== "factory";
@@ -1553,11 +1589,8 @@ document.getElementById("topology").hidden = boardView !== "topo";
     document.getElementById("view-factory")?.setAttribute("aria-pressed", String(boardView === "factory"));
     if (typeof window !== "undefined") window.MawBoard?.setFactoryVisible?.(factoryRoot, boardView === "factory");
   }
-// 首屏请求前从 #锚点恢复工程，避免刷新后先拉全部再切换
-{
-  const hashProject = readProjectHash();
-  if (hashProject) setProjectFilter(hashProject, { syncHash: false });
 }
+updateTopoButtonState();
 syncBoard();
 connectEvents();
 setInterval(syncBoard, 3000);
