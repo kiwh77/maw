@@ -147,6 +147,7 @@ function createFactory(root) {
       clock: saved?.clock ?? Math.random() * 3,
       homeX,
       standZ,
+      aisleX: slot?.aisleX ?? homeX,
     });
   }
   function makeTruck(lane, length, color, side, projectId) {
@@ -190,20 +191,25 @@ function createFactory(root) {
     for (const t of trucks) truckState.set(t.projectId, t.arrive);
     world.clear(); people = []; trucks = []; pickables = []; clearLabels();
     const shown = groups.slice(0, 6);
-    // Pre-size lanes for the densest agent grid so benches stay inside the pad.
+    // Only status=working agents appear in the yard (matches sidebar "执行中").
+    const workingIds = new Set(
+      (agents || []).filter((a) => a && a.status === 'working' && a.id).map((a) => a.id),
+    );
+    // Pre-size lanes for the densest *active* agent grid so benches stay inside the pad.
     let lanePitch = YARD.laneWidth;
     for (const g of shown) {
       const owners = new Set();
       for (const task of g.tasks.slice(0, 72)) {
-        if (task.owner && !['stored', 'cancelled'].includes(cargoZone(task.status))) owners.add(task.owner);
+        if (task.owner && workingIds.has(task.owner) && !['stored', 'cancelled'].includes(cargoZone(task.status))) {
+          owners.add(task.owner);
+        }
       }
-      const idleN = agents.filter(a => a.project_id === g.id && !a.task_id && a.status !== 'offline' && !owners.has(a.id)).length;
-      const grid = benchGrid(owners.size + idleN);
-      lanePitch = Math.max(lanePitch, grid.width + 2.8);
+      const grid = benchGrid(owners.size);
+      lanePitch = Math.max(lanePitch, grid.width + 3.6);
     }
     const width = Math.max(16, shown.length * lanePitch);
-    box(world, width + 2, .45, 24, '#cbd7bf', 0, -.3, 0);
-    box(world, width + 1, .1, 23, '#e0e6d5', 0, -.04, 0);
+    box(world, width + 2, .45, 26, '#cbd7bf', 0, -.3, 0);
+    box(world, width + 1, .1, 25, '#e0e6d5', 0, -.04, 0);
     box(world, width, .03, 5, '#a5b49b', 0, .04, YARD.roadZ);
     shown.forEach((g, index) => {
       const x = (index - (shown.length - 1) / 2) * lanePitch;
@@ -221,27 +227,21 @@ function createFactory(root) {
       const sample = g.tasks.slice(0, 72);
       for (const task of sample) {
         const zone = cargoZone(task.status);
-        if (task.owner) {
+        if (task.owner && workingIds.has(task.owner)) {
           const held = owners.get(task.owner);
           if (!held) owners.set(task.owner, { zone, task });
           else if ((zoneRank[zone] ?? 0) > (zoneRank[held.zone] ?? 0)) { held.zone = zone; held.task = task; }
         }
       }
+      // Only agents currently executing work appear in the yard (no idle stand-ins).
       const active = [...owners].filter(([, o]) => !['stored', 'cancelled'].includes(o.zone));
-      const idle = agents.filter(a => a.project_id === g.id && !a.task_id && a.status !== 'offline' && !owners.has(a.id));
-      const roster = [...active.map(([owner]) => owner), ...idle.map(a => a.id)];
-      const grid = benchGrid(Math.max(1, roster.length));
+      const roster = active.map(([owner]) => owner);
+      const grid = benchGrid(roster.length);
       const rosterIndex = new Map(roster.map((id, i) => [id, i]));
-      grid.slots.forEach((slot, i) => {
-        if (i < roster.length || roster.length === 0) addWorkbench(lane, slot.x, slot.z);
-      });
+      grid.slots.forEach((slot) => addWorkbench(lane, slot.x, slot.z));
       active.forEach(([owner, o]) => {
         const i = rosterIndex.get(owner) ?? 0;
-        worker(lane, grid.slots[i] || grid.slots[0], o.zone, { ...o.task, project_id: g.id }, owner);
-      });
-      idle.forEach((a) => {
-        const i = rosterIndex.get(a.id) ?? 0;
-        worker(lane, grid.slots[i] || grid.slots[0], 'rest', null, a.id);
+        worker(lane, grid.slots[i], o.zone, { ...o.task, project_id: g.id }, owner);
       });
       for (const task of sample) {
         const zone = cargoZone(task.status), n = counts[zone] || 0; counts[zone] = n + 1;
@@ -256,7 +256,7 @@ function createFactory(root) {
           const ai = rosterIndex.has(task.owner) ? rosterIndex.get(task.owner) : 0;
           const key = 'proc-' + ai;
           const pn = procCounts[key] || 0; procCounts[key] = pn + 1;
-          const slot = grid.slots[ai] || grid.slots[0];
+          const slot = grid.slots[ai] || { x: 0, z: YARD.benchZ };
           crate(lane, task, zone, slot.x + (pn % 2 ? .28 : -.28), 1.42 + Math.floor(pn / 2) * .5, slot.z);
         } else if (zone === 'inspection') {
           crate(lane, task, zone, (n % 4 - 1.5) * .65, .58 + Math.floor(n / 4) * .55, -4);
@@ -332,11 +332,11 @@ function createFactory(root) {
         continue;
       }
       if (p.role === 'carry') {
-        // Shuttle: tail → own bench (carrying) → bench work (arms only) → back empty.
+        // Shuttle via side aisle: never cut through a desk top.
         p.clock += dt;
-        const step = carryCycle(p.clock, p.standZ);
+        const step = carryCycle(p.clock, p.standZ, p.homeX, p.aisleX);
+        p.g.position.x = step.x;
         p.g.position.z = step.z;
-        p.g.position.x += (p.homeX - p.g.position.x) * Math.min(1, dt * 4);
         // Face the route while walking; lock yaw at the bench so only arms move.
         p.g.rotation.y = step.walking ? step.facing : Math.PI;
         posePerson(p, step.walking, step.carrying, step.working, t);

@@ -85,20 +85,20 @@ test('carriers shuttle between tail and bench with a visible working phase', asy
   const period = carryPeriod();
   const walk = carryWalkTime();
   assert.equal(carryCycle(0).z, YARD.pickupZ);
+  assert.equal(carryCycle(0).x, 0);
   assert.deepEqual(carryCycle(0), carryCycle(period), 'the cycle repeats instead of drifting');
   const carrying = carryCycle(CARRY.pickup + walk / 2);
   assert.equal(carrying.carrying, true);
   assert.equal(carrying.walking, true);
-  assert.equal(carrying.facing, Math.PI, 'the carrier faces the bench while loaded');
-  assert.ok(carrying.z < YARD.pickupZ && carrying.z > YARD.standZ);
+  assert.ok(carrying.z <= YARD.pickupZ + 1e-9 && carrying.z >= YARD.standZ - 1e-9);
   const working = carryCycle(CARRY.pickup + walk + CARRY.work / 2);
   assert.equal(working.working, true);
   assert.equal(working.walking, false);
   assert.equal(working.z, YARD.standZ);
+  assert.equal(working.x, 0);
   const returning = carryCycle(CARRY.pickup + walk + CARRY.work + walk / 2);
   assert.equal(returning.carrying, false, 'the return leg is empty handed');
   assert.equal(returning.walking, true);
-  assert.equal(returning.facing, 0);
   for (let t = 0; t < period * 2; t += 0.05) {
     const step = carryCycle(t);
     assert.ok(step.z >= YARD.standZ - 1e-9 && step.z <= YARD.pickupZ + 1e-9, 'carriers never leave the route');
@@ -109,15 +109,38 @@ test('carriers shuttle between tail and bench with a visible working phase', asy
   assert.equal(carryCycle(CARRY.pickup + carryWalkTime(deep) + CARRY.work / 2, deep).z, deep);
 });
 
-test('benchGrid packs agents into a mesh without capping count', async () => {
+test('carry routes stay in the aisle instead of cutting through front desks', async () => {
+  const { CARRY, carryCycle, carryWalkTime, benchGrid, YARD } = await load();
+  const grid = benchGrid(6);
+  assert.ok(grid.rows >= 2, 'fixture needs a back row');
+  const deep = grid.slots[grid.cols];
+  const frontDeskZ = grid.slots[0].z;
+  const speed = CARRY.speed;
+  const tSide = Math.max(0.12, Math.abs(deep.aisleX - deep.x) / speed);
+  const tAisle = Math.max(0.35, Math.abs(deep.standZ - YARD.pickupZ) / speed);
+  // Late on the long aisle leg (P1→P2): x locked to aisle while z has passed the front desk line.
+  const tMid = CARRY.pickup + tSide + tAisle * 0.9;
+  const step = carryCycle(tMid, deep.standZ, deep.x, deep.aisleX);
+  assert.equal(step.carrying, true);
+  assert.ok(Math.abs(step.x - deep.aisleX) < 0.08, `Z travel hugs the side aisle (x=${step.x})`);
+  assert.ok(step.z < frontDeskZ, `should have passed front desk (z=${step.z}, desk=${frontDeskZ})`);
+  assert.ok(step.z > deep.standZ - 0.2, `z=${step.z}`);
+  // Desk top sits at (homeX, frontDeskZ); aisle offset keeps the body clear of it.
+  assert.ok(Math.abs(step.x - deep.x) > 0.5);
+  assert.ok(carryWalkTime(deep.standZ, deep.x, deep.aisleX) > carryWalkTime(YARD.standZ));
+});
+
+test('benchGrid packs agents into a wider mesh with aisle offsets', async () => {
   const { benchGrid, YARD } = await load();
   assert.equal(benchGrid(0).slots.length, 0);
   assert.equal(benchGrid(1).slots.length, 1);
   assert.equal(benchGrid(1).slots[0].x, 0);
+  assert.ok(Math.abs(benchGrid(1).slots[0].aisleX) > 0.5, 'single column still has a side aisle');
   const nine = benchGrid(9);
   assert.equal(nine.slots.length, 9);
   assert.equal(nine.cols, 3);
   assert.equal(nine.rows, 3);
+  assert.ok(nine.pitchX >= 2.2 && nine.pitchZ >= 2.4, 'default spacing is roomy');
   assert.ok(nine.slots[3].z < YARD.benchZ, 'extra rows grow toward the warehouse');
   const many = benchGrid(17);
   assert.equal(many.slots.length, 17);
@@ -163,4 +186,9 @@ test('the renderer reuses state, projects labels and never writes task state', (
   // At the station the body yaw stays locked; only arms keep moving.
   assert.ok(/Planted at the station|lock yaw at the bench/.test(source));
   assert.ok(/benchGrid\(/.test(source));
+  // Idle / offline agents stay off the yard; carriers walk the side aisle.
+  assert.ok(/Only agents currently executing/.test(source));
+  assert.ok(/status === 'working'|idle stand-ins/.test(source));
+  assert.ok(/workingIds/.test(source));
+  assert.ok(/p\.aisleX/.test(source));
 });

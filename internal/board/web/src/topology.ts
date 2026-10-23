@@ -1,8 +1,8 @@
 /**
  * 波次依赖拓扑画布（X6）。
  *
- * 布局由 legacy `layoutTopoBands` 计算（波次列 = 依赖深度），本模块只负责渲染：
- * - 正交 manhattan 路由 + 圆角连接；
+ * 布局由 legacy `layoutTopoBands` 计算（波次列 = 依赖深度；纵轴并行轨道），本模块只负责渲染：
+ * - 平滑曲线连接 + 中点圆点；
  * - 空白拖拽平移、Ctrl／⌘ + 滚轮缩放、适应画布／重布局；
  * - 悬停高亮相邻依赖，其余节点与边降透明度；
  * - 筛选外依赖以虚线 stub 表示；多工程 band 纵向堆叠并保留标题。
@@ -326,8 +326,20 @@ function addEdges(instance: Instance): void {
       graph.addEdge({
         source: { cell: nodeKey(band.pid, edge.from), anchor: { name: 'right' } },
         target: { cell: nodeKey(band.pid, edge.to), anchor: { name: 'left' } },
-        router: { name: 'manhattan', args: { padding: 16, startDirections: ['right'], endDirections: ['left'] } },
-        connector: { name: 'rounded', args: { radius: 12 } },
+        connector: { name: 'smooth' },
+        labels: [
+          {
+            markup: [{ tagName: 'circle', selector: 'dot' }],
+            attrs: {
+              dot: {
+                r: 3.5,
+                fill: stroke,
+                strokeWidth: 0,
+              },
+            },
+            position: { distance: 0.5 },
+          },
+        ],
         attrs: {
           line: {
             stroke: stroke,

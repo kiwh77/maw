@@ -1093,7 +1093,18 @@ function visibleTasks(s) {
     (!query || [t.id, t.title, t.owner, t.project_name, t.project_id].join(" ").toLocaleLowerCase().includes(query)));
 }
 
-/** 同工程内分层：依赖在左，依赖方在右；缺失依赖以虚线 stub 占位。 */
+/** 中位数；空数组返回 null（调用方回退到原序）。 */
+function topoMedian(values) {
+  if (!values.length) return null;
+  const s = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor((s.length - 1) / 2);
+  return s.length % 2 === 1 ? s[mid] : (s[mid] + s[mid + 1]) / 2;
+}
+
+/**
+ * 同工程内分层：依赖在左，依赖方在右；缺失依赖以虚线 stub 占位。
+ * 纵轴用并行轨道：barycenter 减交叉，链式节点尽量水平对齐，分叉/汇合居中。
+ */
 function layoutTopoBands(tasks) {
   const groups = new Map();
   for (const t of tasks) {
@@ -1132,22 +1143,120 @@ function layoutTopoBands(tasks) {
       if (!layers[L]) layers[L] = [];
       layers[L].push(id);
     }
+
+    const preds = new Map(), succs = new Map();
+    for (const id of level.keys()) {
+      preds.set(id, []);
+      succs.set(id, []);
+    }
+    for (const t of group) {
+      for (const d of (t.deps || [])) {
+        if (!d || !level.has(d) || !level.has(t.id)) continue;
+        preds.get(t.id).push(d);
+        succs.get(d).push(t.id);
+      }
+    }
+
+    const tieBreak = (a, b) => {
+      const ta = byId.get(a), tb = byId.get(b);
+      const pa = ta?.priority ?? 1e9, pb = tb?.priority ?? 1e9;
+      if (pa !== pb) return pa - pb;
+      return a.localeCompare(b);
+    };
     for (const layer of layers) {
       if (!layer) continue;
-      layer.sort((a, b) => {
-        const ta = byId.get(a), tb = byId.get(b);
-        const pa = ta?.priority ?? 1e9, pb = tb?.priority ?? 1e9;
-        if (pa !== pb) return pa - pb;
-        return a.localeCompare(b);
-      });
+      layer.sort(tieBreak);
     }
+
+    // 多轮 barycenter：稳定兄弟相对顺序、减少边交叉。
+    for (let pass = 0; pass < 4; pass++) {
+      for (let li = 1; li < layers.length; li++) {
+        const layer = layers[li];
+        const prev = layers[li - 1];
+        if (!layer || !prev || !prev.length) continue;
+        const order = new Map(prev.map((id, i) => [id, i]));
+        layer.sort((a, b) => {
+          const ma = topoMedian((preds.get(a) || []).map((p) => order.get(p)).filter((v) => v != null));
+          const mb = topoMedian((preds.get(b) || []).map((p) => order.get(p)).filter((v) => v != null));
+          if (ma == null && mb == null) return tieBreak(a, b);
+          if (ma == null) return 1;
+          if (mb == null) return -1;
+          if (ma !== mb) return ma - mb;
+          return tieBreak(a, b);
+        });
+      }
+      for (let li = layers.length - 2; li >= 0; li--) {
+        const layer = layers[li];
+        const next = layers[li + 1];
+        if (!layer || !next || !next.length) continue;
+        const order = new Map(next.map((id, i) => [id, i]));
+        layer.sort((a, b) => {
+          const ma = topoMedian((succs.get(a) || []).map((s) => order.get(s)).filter((v) => v != null));
+          const mb = topoMedian((succs.get(b) || []).map((s) => order.get(s)).filter((v) => v != null));
+          if (ma == null && mb == null) return tieBreak(a, b);
+          if (ma == null) return 1;
+          if (mb == null) return -1;
+          if (ma !== mb) return ma - mb;
+          return tieBreak(a, b);
+        });
+      }
+    }
+
+    // 水平轨道：有前驱则取前驱 track 中位；同列保序推开。
+    const track = new Map();
+    let nextFree = 0;
+    for (let li = 0; li < layers.length; li++) {
+      const layer = layers[li];
+      if (!layer) continue;
+      let prevTrack = -1;
+      for (const id of layer) {
+        const upstream = (preds.get(id) || []).filter((p) => track.has(p)).map((p) => track.get(p));
+        let desired = topoMedian(upstream);
+        if (desired == null) desired = nextFree++;
+        if (desired <= prevTrack) desired = prevTrack + 1;
+        track.set(id, desired);
+        prevTrack = desired;
+        nextFree = Math.max(nextFree, desired + 1);
+      }
+    }
+
+    // 分叉源 / 汇合点落到相连轨道的中线（菱形起止）。
+    for (const id of level.keys()) {
+      const outs = (succs.get(id) || []).filter((s) => track.has(s)).map((s) => track.get(s));
+      const ins = (preds.get(id) || []).filter((p) => track.has(p)).map((p) => track.get(p));
+      if (outs.length >= 2) {
+        const m = topoMedian(outs);
+        if (m != null) track.set(id, m);
+      } else if (ins.length >= 2) {
+        const m = topoMedian(ins);
+        if (m != null) track.set(id, m);
+      }
+    }
+
+    // 居中后再消解同列重叠，并按 track 重排层序。
+    for (const layer of layers) {
+      if (!layer) continue;
+      const ordered = layer.slice().sort((a, b) => {
+        const d = track.get(a) - track.get(b);
+        if (d !== 0) return d;
+        return layer.indexOf(a) - layer.indexOf(b);
+      });
+      for (let i = 1; i < ordered.length; i++) {
+        if (track.get(ordered[i]) <= track.get(ordered[i - 1])) {
+          track.set(ordered[i], track.get(ordered[i - 1]) + 1);
+        }
+      }
+      layer.length = 0;
+      layer.push(...ordered);
+    }
+
     const positions = new Map();
     let width = TOPO_PAD * 2, height = TOPO_PAD * 2;
     layers.forEach((layer, li) => {
       if (!layer) return;
-      layer.forEach((id, ri) => {
+      layer.forEach((id) => {
         const x = TOPO_PAD + li * (TOPO_NODE_W + TOPO_GAP_X);
-        const y = TOPO_PAD + ri * (TOPO_NODE_H + TOPO_GAP_Y);
+        const y = TOPO_PAD + track.get(id) * (TOPO_NODE_H + TOPO_GAP_Y);
         positions.set(id, { x, y, stub: !byId.has(id) });
         width = Math.max(width, x + TOPO_NODE_W + TOPO_PAD);
         height = Math.max(height, y + TOPO_NODE_H + TOPO_PAD);
@@ -1191,6 +1300,15 @@ function topoEdgePath(from, to) {
   const y2 = to.y + TOPO_NODE_H / 2;
   const mx = (x1 + x2) / 2;
   return "M " + x1 + " " + y1 + " C " + mx + " " + y1 + ", " + mx + " " + y2 + ", " + x2 + " " + y2;
+}
+
+/** 与 topoEdgePath 同控制点的曲线中点（用于中点圆点）。 */
+function topoEdgeMid(from, to) {
+  const x1 = from.x + TOPO_NODE_W;
+  const y1 = from.y + TOPO_NODE_H / 2;
+  const x2 = to.x;
+  const y2 = to.y + TOPO_NODE_H / 2;
+  return { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
 }
 
 function renderTopoNode(task, pos, indeg, outdeg) {
@@ -1258,7 +1376,9 @@ function renderTopology(s) {
       const paths = band.edges.map(e => {
         const a = band.positions.get(e.from), b = band.positions.get(e.to);
         if (!a || !b) return "";
-        return '<path class="'+(e.cross ? "cross" : "")+'" d="'+topoEdgePath(a, b)+'" marker-end="url(#'+markerId+')"/>';
+        const mid = topoEdgeMid(a, b);
+        return '<path class="'+(e.cross ? "cross" : "")+'" d="'+topoEdgePath(a, b)+'" marker-end="url(#'+markerId+')"/>'+
+          '<circle class="topo-edge-dot'+(e.cross ? " cross" : "")+'" cx="'+mid.x+'" cy="'+mid.y+'" r="3.5"/>';
       }).join("");
       const nodes = [...band.positions.entries()].map(([id, pos]) => {
         const task = band.byId.get(id);

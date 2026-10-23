@@ -120,44 +120,95 @@ export function bedCargo(index, length) {
 }
 
 // Worker shuttle: empty walk to the tail, carry to the bench, work, walk back.
+// Paths use a side aisle so carriers never cut through a desk.
 export const CARRY = { speed: 1.6, pickup: 0.5, work: 1.6 };
 
-export function carryWalkTime(standZ = YARD.standZ) {
-  return Math.max(0.8, Math.abs(YARD.pickupZ - standZ) / CARRY.speed);
+function dist2(a, b) {
+  return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
-export function carryPeriod(standZ = YARD.standZ) {
-  return CARRY.pickup + carryWalkTime(standZ) * 2 + CARRY.work;
+function along(a, b, u) {
+  return { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u };
 }
 
-// Pure function of elapsed seconds, so polling can never restart a cycle and the
-// animation can never touch task state. `standZ` is that agent's own bench front.
-export function carryCycle(elapsed, standZ = YARD.standZ) {
-  const to = Number.isFinite(standZ) ? standZ : YARD.standZ;
-  const walk = carryWalkTime(to);
-  const total = carryPeriod(to);
+function faceToward(a, b) {
+  return Math.atan2(b.x - a.x, b.z - a.z);
+}
+
+function carryWaypoints(standZ, homeX, aisleX) {
+  const toZ = Number.isFinite(standZ) ? standZ : YARD.standZ;
+  const hx = Number.isFinite(homeX) ? homeX : 0;
+  const ax = Number.isFinite(aisleX) ? aisleX : hx;
+  const P0 = { x: hx, z: YARD.pickupZ };
+  const P1 = { x: ax, z: YARD.pickupZ };
+  const P2 = { x: ax, z: toZ };
+  const P3 = { x: hx, z: toZ };
+  return { P0, P1, P2, P3, toZ, hx, ax };
+}
+
+function segmentTimes(P0, P1, P2, P3) {
+  const t01 = Math.max(0.12, dist2(P0, P1) / CARRY.speed);
+  const t12 = Math.max(0.35, dist2(P1, P2) / CARRY.speed);
+  const t23 = Math.max(0.12, dist2(P2, P3) / CARRY.speed);
+  return { t01, t12, t23, walk: t01 + t12 + t23 };
+}
+
+export function carryWalkTime(standZ = YARD.standZ, homeX = 0, aisleX = homeX) {
+  const { P0, P1, P2, P3 } = carryWaypoints(standZ, homeX, aisleX);
+  return segmentTimes(P0, P1, P2, P3).walk;
+}
+
+export function carryPeriod(standZ = YARD.standZ, homeX = 0, aisleX = homeX) {
+  return CARRY.pickup + carryWalkTime(standZ, homeX, aisleX) * 2 + CARRY.work;
+}
+
+// Pure function of elapsed seconds. Outbound: home → aisle → row → stand; return reverses.
+// `aisleX` is the corridor beside the column so Z travel never crosses a desk top.
+export function carryCycle(elapsed, standZ = YARD.standZ, homeX = 0, aisleX = homeX) {
+  const { P0, P1, P2, P3 } = carryWaypoints(standZ, homeX, aisleX);
+  const { t01, t12, t23, walk } = segmentTimes(P0, P1, P2, P3);
+  const total = CARRY.pickup + walk + CARRY.work + walk;
   const t0 = Number.isFinite(elapsed) ? elapsed : 0;
   let t = ((t0 % total) + total) % total;
-  const from = YARD.pickupZ;
-  if (t < CARRY.pickup) return { z: from, walking: false, carrying: false, working: false, facing: Math.PI };
+
+  if (t < CARRY.pickup) {
+    return { x: P0.x, z: P0.z, walking: false, carrying: false, working: false, facing: Math.PI };
+  }
   t -= CARRY.pickup;
+
+  const run = (local, segs, carrying) => {
+    let rest = local;
+    for (const [a, b, dur] of segs) {
+      if (rest <= dur) {
+        const u = rest / dur;
+        const p = along(a, b, u);
+        return { x: p.x, z: p.z, walking: true, carrying, working: false, facing: faceToward(a, b) };
+      }
+      rest -= dur;
+    }
+    const last = segs[segs.length - 1][1];
+    return { x: last.x, z: last.z, walking: false, carrying, working: false, facing: Math.PI };
+  };
+
   if (t < walk) {
-    const u = t / walk;
-    return { z: from + (to - from) * u, walking: true, carrying: true, working: false, facing: Math.PI };
+    return run(t, [[P0, P1, t01], [P1, P2, t12], [P2, P3, t23]], true);
   }
   t -= walk;
-  if (t < CARRY.work) return { z: to, walking: false, carrying: false, working: true, facing: Math.PI };
-  const u = (t - CARRY.work) / walk;
-  return { z: to + (from - to) * u, walking: true, carrying: false, working: false, facing: 0 };
+  if (t < CARRY.work) {
+    return { x: P3.x, z: P3.z, walking: false, carrying: false, working: true, facing: Math.PI };
+  }
+  t -= CARRY.work;
+  return run(t, [[P3, P2, t23], [P2, P1, t12], [P1, P0, t01]], false);
 }
 
 /** Pack workbenches into a grid in the lane (cols × rows), growing toward the warehouse. */
 export function benchGrid(count, opts = {}) {
   const n = Math.max(0, Number(count) || 0);
-  if (n === 0) return { cols: 0, rows: 0, slots: [], width: 0, depth: 0 };
+  if (n === 0) return { cols: 0, rows: 0, slots: [], width: 0, depth: 0, pitchX: 0, pitchZ: 0 };
   const maxCols = opts.maxCols ?? 4;
-  const pitchX = opts.pitchX ?? 1.4;
-  const pitchZ = opts.pitchZ ?? 1.5;
+  // Wide enough for a person + desk clearance; aisles sit between columns.
+  const pitchX = opts.pitchX ?? 2.4;
+  const pitchZ = opts.pitchZ ?? 2.6;
   const standLift = YARD.standZ - YARD.benchZ;
   const cols = Math.min(maxCols, Math.max(1, Math.ceil(Math.sqrt(n))));
   const rows = Math.ceil(n / cols);
@@ -169,9 +220,13 @@ export function benchGrid(count, opts = {}) {
     const row = Math.floor(i / cols);
     const x = cols === 1 ? 0 : -width / 2 + col * pitchX;
     const z = YARD.benchZ - row * pitchZ;
-    slots.push({ x, z, standZ: z + standLift, col, row });
+    // Corridor on the near gap so Z travel stays off desk tops.
+    const aisleX = cols === 1
+      ? x + pitchX * 0.55
+      : (col < cols - 1 ? x + pitchX * 0.5 : x - pitchX * 0.5);
+    slots.push({ x, z, standZ: z + standLift, aisleX, col, row });
   }
-  return { cols, rows, slots, width, depth };
+  return { cols, rows, slots, width, depth, pitchX, pitchZ };
 }
 
 const signatureKey = row => JSON.stringify(row);
