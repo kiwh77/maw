@@ -45,7 +45,7 @@
 | RUNNER | 5：`VN-401`、`VN-402`、`VN-403`、`VN-404`、`VN-405` | internal/runner/**；journal → process → session → recovery |
 | DELIVERY | 5：`VN-501`、`VN-502`、`VN-503`、`VN-504`、`VN-505` | internal/workspace/**、internal/delivery/**、internal/verification/**；工作空间与交付链 |
 | HTTP | 6：`VN-601`、`VN-602`、`VN-603`、`VN-604`、`VN-605`、`VN-606` | internal/localauth/**、internal/httpapi/**；不同资源子目录，根路由留给 WIRE |
-| FE-SHELL | 5：`VN-701`、`VN-702`、`VN-703`、`VN-704`、`VN-705` | 内嵌壳、全局 styles/components/api/bootstrap/shell/i18n；递增串行 |
+| FE-SHELL | 10：`VN-701`、`VN-701R`、`VN-706`–`VN-709`、`VN-702`、`VN-703`、`VN-704`、`VN-705` | 内嵌壳、全局 styles/components/api/bootstrap/shell/i18n；递增串行；701R 为 legacy i18n 热修；**706–709** 为 Board Vite+X6 拓扑工程化（详见 [maw_board_topo_可执行任务清单.md](maw_board_topo_可执行任务清单.md)），插在 701／701R 之后、与 702 写盘正交 |
 | FE-PAGES-CONTROL | 5：`VN-721`、`VN-722`、`VN-723`、`VN-724`、`VN-725` | assets/views/{nodes,tasks,runs,deliveries,projects,settings}；控制页续链 |
 | FE-PAGES-OBS | 4：`VN-741`、`VN-742`、`VN-743`、`VN-744` | assets/views/{timeline,activity,sessions,analytics}；回顾页续链 |
 | QUERY | 7：`VN-801`、`VN-802`、`VN-803`、`VN-804`、`VN-805`、`VN-806`、`VN-807` | internal/{query,events,projection,observability,analytics,notifications,retention}/**；事实到读模型 |
@@ -144,6 +144,7 @@ Board 壳／样式／菜单        FE-SHELL 701 → 705 独占
 | [VN-605](#vn-605) | HTTP | B0 | 实现事件补拉与 SSE 兼容传输 | `VN-601`、`VN-801`、`VN-802` |
 | [VN-606](#vn-606) | HTTP | O2 | 实现观测与提醒查询接口 | `VN-601`、`VN-803`、`VN-804`、`VN-805`、`VN-806` |
 | [VN-701](#vn-701) | FE-SHELL | B0 | 保行为拆分内嵌页面资源 | `VN-021`、`VN-022` |
+| [VN-701R](#vn-701r) | FE-SHELL | B0 | 修复 legacy 看板 `t` 遮蔽翻译函数 | `VN-701` |
 | [VN-702](#vn-702) | FE-SHELL | B0 | 建立共享主题组件与状态样式 | `VN-701`、`VN-981` |
 | [VN-703](#vn-703) | FE-SHELL | B0 | 实现公共请求与页面上下文 | `VN-702`、`VN-005`、`VN-022` |
 | [VN-704](#vn-704) | FE-SHELL | C1 | 挂载首个受管闭环页面 | `VN-703`、`VN-721`、`VN-722`、`VN-723`、`VN-724`、`VN-981` |
@@ -1405,6 +1406,36 @@ Board 壳／样式／菜单        FE-SHELL 701 → 705 独占
   ```
 
 - **Deliverables**：保行为拆分内嵌页面资源的实现／文档及针对验收边界的验证证据。Verify 的测试代码必须在本卡 Surface 内，或由其显式前置基座提供。
+
+<a id="vn-701r"></a>
+
+### VN-701R 修复 legacy 看板 `t` 遮蔽翻译函数
+
+- **Goal**：消除真实浏览器里看板卡片／拓扑节点抛出的 `t is not a function`，恢复 i18n 文案与接入提示词生成。
+- **Non-goals**：不重做 Workbench 视觉；不改 `tests/browser/**`（VN-981 验收基座仍以统计／侧栏／NEXT 断言数据已加载）；不顺手改 bootstrap／新壳页面。
+- **Depends**：`VN-701`
+- **Surface / write_scope**：`internal/board/assets/legacy/**`
+- **Read scope**：`internal/board/page.html`、`internal/board/page.test.cjs`、`docs/BOARD_DESIGN.md`、`tests/browser/**`（只读，理解 VN-981 为何绕过卡片断言）。
+- **Contract**：沿用 `VN-021` 状态／文案键；不新增全局皮肤或第二套字典。
+- **Lane / 范围**：`FE-SHELL` / `B0`；**maw**：priority=12 · merge_order=12 · write_scope 同上。
+- **需求／门槛**：`F48`；`UI-C`（生产缺陷热修，不阻塞 VN-702 主题卡写盘，但与 legacy 同族）。
+- **Acceptance**：
+  - [ ] `board-app.js` 中任务对象参数不再命名为 `t`（或翻译函数改用不被遮蔽的稳定名）；`buildTaskPrompt`、看板卡片 `map`、`renderTopoNode` 调用翻译键时不再把任务对象当函数。
+  - [ ] 真实浏览器打开 `maw board --serve`：看板卡片与拓扑节点可渲染，控制台无 `t is not a function`；复制「接入提示词」不再因翻译调用失败。
+  - [ ] 顺手修同段 HTML 属性字面量 `title=t("…")`（缺引号）为合法属性插值；不扩大到无关重构。
+- **Steps**：
+  1. 盘点 `board-app.js` 内 `function t` 与参数／回调名 `t` 的冲突点（已知：`buildTaskPrompt`、`renderBoard` 卡片 map、`renderTopoNode`）。
+  2. 统一改名（推荐任务参数 → `task`，保留顶层 `t` 为翻译；或 `t` → `i18n`／`tr`），全文件同类遮蔽一并清掉。
+  3. 本地 `maw board --serve` 点开看板／拓扑与接入提示词，确认控制台干净。
+- **Verify**（本卡实现时执行）：
+
+  ```sh
+  node --check internal/board/assets/legacy/board-app.js
+  # 人工或既有 board 嵌入测试：打开看板后卡片／拓扑无 t is not a function
+  CGO_ENABLED=0 go test ./internal/board -count=1
+  ```
+
+- **Deliverables**：修复后的 `internal/board/assets/legacy/board-app.js`（及同目录必要连带）；说明遮蔽点与改名约定的短注释可写在文件头或邻近函数。
 
 <a id="vn-702"></a>
 
