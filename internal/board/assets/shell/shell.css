@@ -1,0 +1,192 @@
+/* Workbench 挂载层样式（VN-704）。
+ *
+ * 与共享组件一起注入：shell 在挂载时把 components.css 与本文件作为
+ * 一个 <style> 插入页面，不新增第二套 token 或色值字面量。
+ * 断点沿用契约 §13 的 1500 / 1100 / 700，不另造断点。
+ */
+
+/* ---------- 侧边导航：与 legacy 工程导航同一视觉语言 ---------- */
+
+.vnext-nav .section-label {
+  margin-top: 14px;
+}
+
+.vnext-nav .nav-item {
+  font: 12px/1.4 var(--sans);
+}
+
+.vnext-nav .nav-item .symbol {
+  width: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.vnext-nav .nav-item.active .symbol {
+  color: var(--accent);
+}
+
+.vnext-nav .nav-item .count {
+  margin-left: auto;
+  color: var(--muted);
+  font: 10px var(--mono);
+}
+
+/* ---------- 视图容器 ---------- */
+
+.vnext {
+  padding: 4px 2px 32px;
+  min-width: 0;
+  animation: surface-enter var(--dur-enter, 180ms) var(--ease, ease-out) both;
+}
+
+.vnext[hidden],
+.vnext-detail[hidden] {
+  display: none !important;
+}
+
+.vnext h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.vnext .nodes-head p,
+.vnext header p {
+  margin: 0 0 14px;
+}
+
+.vnext .table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+/* 行可打开详情：给出键盘焦点与悬停反馈，但不改变视图自身的表格语义。 */
+.vnext tbody tr.row-clickable {
+  cursor: pointer;
+}
+
+.vnext tbody tr.row-clickable:hover {
+  background: var(--hover);
+}
+
+.vnext tbody tr.row-clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 状态说明条：缺失/失败/过期由这里给出，视图内部不冒充成功。 */
+.vnext-status {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.vnext-status[data-state="error"] {
+  border-left-color: var(--danger);
+}
+
+/* ---------- 详情面板 ---------- */
+
+.vnext-detail {
+  position: fixed;
+  inset: 56px 24px 24px auto;
+  width: min(560px, calc(100vw - 48px));
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+  padding: 16px 18px 24px;
+  z-index: 40;
+  animation: surface-enter var(--dur-enter, 180ms) var(--ease, ease-out) both;
+}
+
+.vnext-detail__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.vnext-detail__title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.vnext-detail__back {
+  margin-right: auto;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius);
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+.vnext-detail__back:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.vnext-detail__close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.vnext-detail__close:hover {
+  color: var(--text);
+}
+
+.vnext-detail__body {
+  min-width: 0;
+}
+
+/* ---------- 窄屏：导航保持可用，不产生横向溢出 ---------- */
+
+@media (max-width: 1100px) {
+  .vnext {
+    padding-bottom: 24px;
+  }
+
+  .vnext-detail {
+    inset: 52px 12px 12px 12px;
+    width: auto;
+  }
+}
+
+@media (max-width: 700px) {
+  .vnext {
+    padding-bottom: 18px;
+  }
+
+  .vnext h1 {
+    font-size: 18px;
+  }
+
+  .vnext-status {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .vnext-detail {
+    inset: 0;
+    border-radius: 0;
+    border: 0;
+    width: auto;
+  }
+}

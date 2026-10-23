@@ -4,10 +4,16 @@
  * - 波次依赖拓扑画布由 `topology.ts` 用 X6 渲染，布局来自 legacy `layoutTopoBands`；
  * - 构建产物为 IIFE bundle（全局名 `MawBoard`），由 `page.html` 以
  *   `<script id="board-web" src="assets/board-web.js" defer>` 加载；
- * - 未加载 bundle（或 X6 不可用）时页面回退到 legacy SVG 拓扑。
+ * - 未加载 bundle（或 X6 不可用）时页面回退到 legacy SVG 拓扑；
+ * - VN-704 起 bundle 同时导出 Workbench 挂载层（注册表、路由、i18n、shell），
+ *   并把共享组件样式以内联字符串注入页面，供 nodes/tasks/runs/deliveries 视图使用。
  *
  * 视觉沿用 `internal/board/page.html` 的 `:root` token，不在此处写死颜色。
  */
+
+import componentsCSS from '../../assets/components/components.css?inline'
+import shellCSS from '../../assets/shell/shell.css?inline'
+import { createShell, mountShell as mountWorkbenchShell } from '../../assets/shell/board-shell.mjs'
 
 export { Graph } from '@antv/x6'
 export { renderTopology, disposeTopology } from './topology'
@@ -53,5 +59,19 @@ export function mountBoard(options: BoardMountOptions): BoardHandle {
     },
   }
 }
+
+/**
+ * 挂载统一布局的 Workbench：注册、路由、语言与四个 vnext 视图。
+ * 共享组件样式与 shell 样式在此合并注入，页面自身不重复引用。
+ */
+export function mountShell(options: Record<string, unknown> = {}): unknown {
+  const styles = typeof options.styles === 'string' ? options.styles : `${componentsCSS}\n${shellCSS}`
+  return mountWorkbenchShell({ ...options, styles })
+}
+
+export { createShell }
+export * from '../../assets/shell/view-registry.mjs'
+export * from '../../assets/shell/router.mjs'
+export * from '../../assets/i18n/board-i18n.mjs'
 
 export { renderFactory, setFactoryVisible } from './factory/factory'

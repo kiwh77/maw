@@ -292,3 +292,143 @@ test('built web bundle exposes the mount placeholder API', () => {
   assert.ok(source.startsWith('var MawBoard='), 'bundle is an IIFE assigned to MawBoard');
   assert.match(source, /mountBoard/);
 });
+
+// ---------- VN-704：统一布局挂载层 ----------
+
+const shellUrl = path => require('node:url').pathToFileURL(__dirname + path).href;
+
+async function loadShellModules() {
+  return {
+    registry: await import(shellUrl('/assets/shell/view-registry.mjs')),
+    router: await import(shellUrl('/assets/shell/router.mjs')),
+    i18n: await import(shellUrl('/assets/i18n/board-i18n.mjs')),
+    context: await import(shellUrl('/assets/shell/view-context.mjs')),
+  };
+}
+
+test('VN-704 注册表同时登记 legacy 与 vnext 视图且分组稳定', async () => {
+  const { registry } = await loadShellModules();
+  const views = registry.createRegistry();
+  assert.deepEqual(views.ids, ['board', 'factory', 'topo', 'nodes', 'tasks', 'runs', 'deliveries']);
+  assert.deepEqual(views.legacyIds, ['board', 'factory', 'topo']);
+  assert.deepEqual(views.vnextIds, ['nodes', 'tasks', 'runs', 'deliveries']);
+  assert.equal(views.get('nodes').headingKey, 'heading.nodes');
+  assert.equal(views.get('nope'), null);
+  // 未知视图不猜测，回退到看板。
+  assert.equal(registry.resolveView(views, 'nope').id, 'board');
+  const groups = views.navModel();
+  assert.deepEqual(groups.map(group => group.id), ['flow', 'control']);
+  assert.deepEqual(groups[1].items.map(def => def.id), ['nodes', 'tasks', 'runs', 'deliveries']);
+});
+
+test('VN-704 路由保留旧工程锚点并让 vnext 视图可往返', async () => {
+  const { registry, router } = await loadShellModules();
+  const views = registry.createRegistry();
+  const known = id => Boolean(views.get(id));
+
+  const legacy = router.parseRoute('', '#7b24d390e1ee056d', known);
+  assert.equal(legacy.view, 'board');
+  assert.equal(legacy.project, '7b24d390e1ee056d');
+  assert.equal(legacy.fromHash, true);
+  assert.equal(router.serializeRoute(legacy), '/#7b24d390e1ee056d');
+
+  const detail = router.parseRoute('?view=runs&project=abc&id=run_1', '', known);
+  assert.equal(detail.view, 'runs');
+  assert.equal(detail.project, 'abc');
+  assert.equal(detail.detail, 'run_1');
+  assert.equal(router.serializeRoute(detail), '/?view=runs&project=abc&id=run_1#abc');
+
+  // board 视图忽略 id，旧详情抽屉行为不被改写。
+  assert.equal(router.parseRoute('?id=t-1', '', known).detail, '');
+  // 未知视图回退看板，且不把 id 带进来。
+  const unknown = router.parseRoute('?view=ghost&id=x', '', known);
+  assert.equal(unknown.view, 'board');
+  assert.equal(unknown.detail, '');
+  assert.equal(router.serializeQuery({ view: 'board', project: 'abc' }), '');
+  assert.equal(router.sameRoute(detail, router.parseRoute('?view=runs&project=abc&id=run_1', '', known)), true);
+});
+
+test('VN-704 全局语言只由语言簿收口并回退不产生 undefined', async () => {
+  const { i18n } = await loadShellModules();
+  assert.equal(i18n.normalizeLang('zh-CN'), 'en');
+  assert.equal(i18n.normalizeLang('zh'), 'zh');
+  assert.equal(i18n.translate('view.nodes', 'zh'), '节点');
+  assert.equal(i18n.translate('view.nodes', 'en'), 'Nodes');
+  assert.equal(i18n.translate('missing.key', 'zh'), 'missing.key');
+  assert.equal(i18n.translate('missing.key', 'zz'), 'missing.key');
+  assert.equal(i18n.translate('heading.nodes', 'zh', {}), '执行节点');
+  // 语言偏好优先级：query > storage > navigator > 默认。
+  assert.equal(i18n.readLangPreference({ search: '?lang=zh', storage: { getItem: () => 'en' }, navigatorLanguage: 'en-US' }), 'zh');
+  assert.equal(i18n.readLangPreference({ search: '', storage: { getItem: () => 'zh' }, navigatorLanguage: 'en-US' }), 'zh');
+  assert.equal(i18n.readLangPreference({ search: '', storage: null, navigatorLanguage: 'zh-CN' }), 'zh');
+  assert.equal(i18n.readLangPreference({ search: '', storage: null, navigatorLanguage: 'fr' }), 'en');
+  assert.equal(i18n.documentLang('zh'), 'zh-CN');
+  const doc = { documentElement: { lang: 'en' } };
+  assert.equal(i18n.applyDocumentLang(doc, 'zh'), 'zh-CN');
+  assert.equal(doc.documentElement.lang, 'zh-CN');
+});
+
+test('VN-704 数据适配显式区分失败与待核实，pending/unknown 不被改写成成功', async () => {
+  const { context } = await loadShellModules();
+  assert.equal(context.tasksStateFromSnapshot(null).status, 'error');
+  assert.equal(context.tasksStateFromSnapshot({}).status, 'error');
+
+  const snapshot = { tasks: [
+    { id: 'VN-1', status: 'ready', title: 'A' },
+    { id: 'VN-2', status: 'claimed', title: 'B' },
+  ] };
+  const tasks = context.tasksStateFromSnapshot(snapshot);
+  assert.equal(tasks.status, 'ok');
+  assert.equal(tasks.tasks.length, 2);
+  assert.equal(tasks.allTasks.length, 2);
+  assert.equal(tasks.inProgressTasks.length, 1);
+  assert.equal(tasks.inProgressTasks[0].id, 'VN-2');
+
+  const nodes = context.nodesStateFrom({ nodes: [{ id: 'n1', presence: { state: 'unknown' } }] });
+  assert.equal(nodes.status, 'ok');
+  assert.equal(nodes.nodes[0].presence.state, 'unknown');
+  const runs = context.runsStateFrom({ runs: [{ run_id: 'run_1', reconciliation: 'unknown' }] });
+  assert.equal(runs.runs[0].reconciliation, 'unknown');
+  const deliveries = context.deliveriesStateFrom({ deliveries: [{ delivery_id: 'dlv_1', verification: { state: 'pending' } }] });
+  assert.equal(deliveries.deliveries[0].verification.state, 'pending');
+
+  // 端点缺失 → 显式错误，绝不构造空成功。
+  assert.equal(context.nodesStateFrom({ unavailable: true }).status, 'error');
+  assert.equal(context.runsStateFrom(null).status, 'error');
+  assert.equal(context.deliveriesStateFrom({ deliveries: null }).status, 'error');
+  assert.equal(context.stateForKind('ghost', {}).status, 'error');
+
+  assert.equal(context.findDetail('nodes', { nodes: [{ id: 'n1' }] }, 'n1').id, 'n1');
+  assert.equal(context.findDetail('nodes', { nodes: [{ id: 'n1' }] }, 'n2'), null);
+
+  const ctx = context.createViewContext({
+    view: { id: 'nodes', legacy: false },
+    lang: 'zh',
+    route: { view: 'nodes', project: 'p1', detail: 'n1' },
+    registry: { ids: ['board', 'nodes'] },
+  });
+  assert.equal(ctx.filters.project, 'p1');
+  assert.equal(ctx.detailId, 'n1');
+  assert.equal(Object.isFrozen(ctx), true);
+  assert.equal(Reflect.set(ctx, 'lang', 'en'), false);
+  assert.equal(ctx.lang, 'zh');
+});
+
+test('VN-704 页面在 legacy 之后挂载 shell，且不强制依赖 bundle', () => {
+  const html = fs.readFileSync(__dirname + '/page.html', 'utf8');
+  assert.match(html, /id="vnext-nav"/);
+  assert.match(html, /id="vnext-view"/);
+  assert.match(html, /id="vnext-detail"/);
+  const legacyAt = html.indexOf('id="board-app"');
+  const bundleAt = html.indexOf('id="board-web"');
+  const bootAt = html.indexOf('id="workbench-bootstrap"');
+  assert.ok(legacyAt >= 0 && bundleAt > legacyAt, 'bundle loads after the legacy app');
+  assert.ok(bootAt > bundleAt, 'bootstrap runs after the bundle tag');
+  assert.match(html, /typeof window\.MawBoard\.mountShell !== "function"\) return;/);
+  const shell = fs.readFileSync(__dirname + '/assets/shell/board-shell.mjs', 'utf8');
+  assert.match(shell, /export function mountShell/);
+  assert.match(shell, /export function createShell/);
+  // 样式只消费共享 token，不写死色值。
+  const css = fs.readFileSync(__dirname + '/assets/shell/shell.css', 'utf8');
+  assert.equal(/#[0-9a-fA-F]{3,6}/.test(css), false);
+});

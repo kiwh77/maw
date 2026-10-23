@@ -19,6 +19,7 @@
     <div class="brand"><span class="brand-mark" aria-hidden="true">›_</span><div><div class="brand-name">maw<span style="color:var(--accent)">.</span></div><div class="brand-sub">AGENT WORKBENCH</div></div></div>
     <div class="section-label"><span id="workspace-label">Workspace</span> <span id="projects-count">00</span></div>
     <nav class="project-nav" id="project-nav" aria-label="工程导航"></nav>
+    <nav class="project-nav vnext-nav" id="vnext-nav" aria-label="工作台视图"></nav>
     <section class="agents-rail" id="agents-rail" aria-label="Working Agents">
       <div class="section-label">AGENTS <span id="agents-count">0</span></div>
       <div class="agents-scroll" id="agents"><p class="empty">Loading…</p></div>
@@ -58,6 +59,7 @@
       <div class="board" id="columns" aria-label="Task flow"></div>
       <div class="topo" id="topology" aria-label="Task dependency topology" hidden></div>
       <section class="factory" id="factory" aria-label="Workshop" hidden></section>
+      <section class="vnext" id="vnext-view" aria-label="Workbench view" hidden></section>
       <div class="hint-center" id="hint-center"><div class="hint-next" id="next"><b>NEXT</b><span id="next-hint-text">Reading schedule hints…</span></div><div class="hint-risks empty" id="risks"></div></div>
     </div>
   </main>
@@ -67,10 +69,36 @@
   <div class="drawer-head"><div><div class="subid" id="d-id"></div><h2 id="d-title"></h2></div><button type="button" class="drawer-close" id="d-close" aria-label="Close detail">×</button></div>
   <div class="drawer-body" id="drawer-body"></div>
 </aside>
+<section class="vnext-detail" id="vnext-detail" role="region" aria-label="Detail" hidden>
+  <div class="vnext-detail__head">
+    <button type="button" class="vnext-detail__back" id="vnext-detail-back"></button>
+    <h2 class="vnext-detail__title" id="vnext-detail-title"></h2>
+    <button type="button" class="vnext-detail__close" id="vnext-detail-close" aria-label="Close detail">×</button>
+  </div>
+  <div class="vnext-detail__body" id="vnext-detail-body"></div>
+</section>
 
 <script id="board-app">
 {{MAW_APP_JS}}
 </script>
 <script id="board-web" src="assets/board-web.js" defer></script>
+<script id="workbench-bootstrap">
+// Workbench 挂载：bundle 缺失时保持 legacy 页面原样。
+(function () {
+  function boot() {
+    if (!window.MawBoard || typeof window.MawBoard.mountShell !== "function") return;
+    try {
+      window.mawShell = window.MawBoard.mountShell({});
+    } catch (error) {
+      if (window.console) console.error("workbench shell failed to mount", error);
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
+})();
+</script>
 </body>
 </html>
