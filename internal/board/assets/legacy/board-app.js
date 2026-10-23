@@ -107,6 +107,8 @@ const I18N = {
     "prio_title": "Schedule priority; lower runs first",
     "no_tasks_filter": "No tasks to show under current filters",
     "no_tasks_topo": "No tasks yet; apply a blueprint to see topology",
+    "topo.fit": "Fit to view",
+    "topo.relayout": "Relayout",
     "topo.legend": "Deps: prerequisite → dependent",
     "topo.legend_cross": "Dashed: deps outside current view",
     "topo.missing": "Missing dep ",
@@ -315,6 +317,8 @@ const I18N = {
     "prio_title": "调度优先级，数值越小越优先",
     "no_tasks_filter": "当前筛选下没有可展示的任务",
     "no_tasks_topo": "暂无任务，应用蓝图后可查看依赖拓扑",
+    "topo.fit": "适应画布",
+    "topo.relayout": "重布局",
     "topo.legend": "依赖方向：前置 → 后续",
     "topo.legend_cross": "虚线：当前视图外的依赖",
     "topo.missing": "缺失依赖 ",
@@ -1171,6 +1175,34 @@ function renderTopoNode(task, pos, indeg, outdeg) {
   '</article>';
 }
 
+function topoCanvas() {
+  const bundle = typeof MawBoard !== "undefined" ? MawBoard : null;
+  return bundle && typeof bundle.renderTopology === "function" ? bundle : null;
+}
+
+function bandCountText(band) {
+  return band.tasks.length + t("tasks_edges") + band.edgeCount + t("edges");
+}
+
+function renderTopoCanvas(root, bands) {
+  const bundle = topoCanvas();
+  bundle.renderTopology({
+    container: root,
+    bands,
+    selected: selectedTid ? { tid: selectedTid, pid: selectedPid || "" } : null,
+    onOpen: (tid, pid) => openDrawer(tid, pid),
+    strings: {
+      fit: t("topo.fit"),
+      relayout: t("topo.relayout"),
+      legend: t("topo.legend"),
+      legendCross: t("topo.legend_cross"),
+      wave: "W",
+      stubTitle: t("topo.outside"),
+      stubHint: t("topo.not_in_view"),
+    },
+  });
+}
+
 function renderTopology(s) {
   const tasks = visibleTasks(s);
   const root = document.getElementById("topology");
@@ -1178,6 +1210,10 @@ function renderTopology(s) {
   const oldFocus = document.activeElement?.closest(".topo-node.clickable");
   const bands = layoutTopoBands(tasks);
   const edgeTotal = bands.reduce((n, b) => n + b.edgeCount, 0);
+  const canvas = topoCanvas();
+  if (canvas) {
+    for (const band of bands) band.countText = bandCountText(band);
+  }
   let html;
   if (!tasks.length) {
     html = '<p class="topo-empty">'+(searchTerm || filters.status || filters.agent ? t("no_tasks_filter") : t("no_tasks_topo"))+'</p>';
@@ -1207,7 +1243,14 @@ function renderTopology(s) {
         '</div></section>';
     }).join("");
   }
-  if (renderedTopoHTML !== html) {
+  if (!tasks.length && canvas) {
+    canvas.disposeTopology(root);
+  } else if (tasks.length && canvas) {
+    renderedTopoHTML = "";
+    renderTopoCanvas(root, bands);
+    html = null;
+  }
+  if (html !== null && renderedTopoHTML !== html) {
     renderedTopoHTML = html;
     root.innerHTML = html;
     root.scrollLeft = scrollLeft;

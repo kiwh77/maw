@@ -1,15 +1,17 @@
 /**
  * Board 拓扑前端入口。
  *
- * 现状（VN-706）：只提供挂载 API 占位与 X6 运行时导出。
- * - 拓扑渲染与波次交互在 VN-708 实现；
- * - embed.FS 与 `/assets/*` 静态挂载在 VN-707 接入，本文件不参与 Go 侧装配。
+ * - 波次依赖拓扑画布由 `topology.ts` 用 X6 渲染，布局来自 legacy `layoutTopoBands`；
+ * - 构建产物为 IIFE bundle（全局名 `MawBoard`），由 `page.html` 以
+ *   `<script id="board-web" src="assets/board-web.js" defer>` 加载；
+ * - 未加载 bundle（或 X6 不可用）时页面回退到 legacy SVG 拓扑。
  *
  * 视觉沿用 `internal/board/page.html` 的 `:root` token，不在此处写死颜色。
- * 构建产物为 IIFE bundle，全局名 `MawBoard`，可直接由 `<script>` 加载。
  */
 
 export { Graph } from '@antv/x6'
+export { renderTopology, disposeTopology } from './topology'
+export type { TopoBand, TopologyHandle, TopologyOptions } from './topology'
 
 /** 产物文件名，与 vite.config.ts 的 lib.fileName 保持一致。 */
 export const BOARD_WEB_ENTRY = 'board-web.js'
@@ -25,7 +27,7 @@ export interface BoardMountOptions {
 export interface BoardHandle {
   /** 已挂载的容器。 */
   readonly container: HTMLElement
-  /** 卸载占位标记；拓扑实例清理随 VN-708 补齐。 */
+  /** 卸载容器标记。 */
   unmount(): void
 }
 
@@ -40,10 +42,7 @@ function resolveContainer(target: HTMLElement | string): HTMLElement {
   return found
 }
 
-/**
- * 挂载占位：只标记容器，不创建画布。
- * VN-708 在此返回真实 X6 Graph 句柄，保持签名不变。
- */
+/** 标记挂载容器；拓扑实例请用 `renderTopology`。 */
 export function mountBoard(options: BoardMountOptions): BoardHandle {
   const container = resolveContainer(options.container)
   container.setAttribute(MOUNT_ATTR, BOARD_WEB_ENTRY)

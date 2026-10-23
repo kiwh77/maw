@@ -229,3 +229,46 @@ code, .kv dd, .list-plain { font-family: var(--mono); }
   .col { flex-basis: 255px; }
   .hint-center { font-size: 10px; } .hint-next { gap: 7px; } .hint-next span { max-height: 48px; overflow: auto; }
 }
+
+/* ---------- 依赖拓扑：X6 画布（波次列 = 依赖深度） ---------- */
+.topo.topo-x6-host { overflow: hidden; padding-bottom: 0; display: flex; }
+.topo.topo-x6-host[hidden] { display: none; }
+.topo-x6-shell { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.topo-x6-canvas { flex: 1; min-height: 0; min-width: 0; }
+.topo-x6-canvas .x6-graph,
+.topo-x6-canvas .x6-graph-svg { width: 100%; height: 100%; }
+.topo-x6-bar { position: absolute; top: 8px; right: 2px; z-index: 5; display: flex; gap: 6px; }
+.topo-x6-btn { font: 10px var(--mono); color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
+.topo-x6-btn:hover { color: var(--text); border-color: var(--card-hover-border); background: var(--card-hover); }
+.topo-x6-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.topo-x6-legend { position: absolute; top: 10px; left: 2px; z-index: 4; display: flex; gap: 14px; flex-wrap: wrap; font: 10px var(--mono); color: var(--muted); pointer-events: none; }
+.topo-x6-legend i { display: inline-block; width: 18px; height: 0; border-top: 1.5px solid var(--line-strong); vertical-align: middle; margin-right: 6px; }
+.topo-x6-legend i.cross { border-top-style: dashed; }
+.topo-x6-wave { display: flex; align-items: center; font: 9px var(--mono); letter-spacing: .08em; color: var(--faint); padding-left: 2px; }
+.topo-x6-band { display: flex; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--muted); padding-top: 8px; }
+.topo-x6-band .band-count { font-size: 10px; color: var(--muted); background: var(--panel); border-radius: 3px; padding: 1px 5px; }
+.topo-x6-node { box-sizing: border-box; display: flex; flex-direction: column; gap: 4px; width: 100%; height: 100%; padding: 8px 10px; overflow: hidden; background: var(--card); border: 1px solid var(--line); border-left: 2px solid var(--line-strong); border-radius: var(--radius); transition: border-color .15s, background .15s; }
+.topo-x6-node.clickable { cursor: pointer; }
+.topo-x6-node.clickable:hover { border-color: var(--card-hover-border); background: var(--card-hover); }
+.topo-x6-node.clickable:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.topo-x6-node.active { border-color: var(--accent); }
+.topo-x6-node.stub { border-style: dashed; border-left-style: dashed; background: transparent; color: var(--muted); }
+.topo-x6-node .node-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.topo-x6-node .id { font: 10px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.topo-x6-node .status { font: 9px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+.topo-x6-node .task-title { margin: 0; font-size: 12px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.topo-x6-node .node-meta { display: flex; align-items: center; gap: 10px; margin-top: auto; font-size: 10px; color: var(--muted); }
+.topo-x6-node .node-meta .owner { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topo-x6-node[data-status="ready"] { border-left-color: var(--accent); }
+.topo-x6-node[data-status="in_review"], .topo-x6-node[data-status="merging"] { border-left-color: var(--accent); }
+.topo-x6-node[data-status="claimed"], .topo-x6-node[data-status="in_progress"], .topo-x6-node[data-status="self_check"] { border-left-color: var(--warn); }
+.topo-x6-node[data-status="blocked"], .topo-x6-node[data-status="conflict"] { border-left-color: var(--danger); }
+.topo-x6-node[data-status="done"], .topo-x6-node[data-status="cancelled"] { border-left-color: var(--line); opacity: .82; }
+.topo-x6-canvas .x6-node, .topo-x6-canvas .x6-edge { transition: opacity .15s; }
+.topo-x6-canvas .x6-node.topo-x6-dim { opacity: .22; }
+.topo-x6-canvas .x6-node.topo-x6-hot .topo-x6-node { border-color: var(--accent); }
+.topo-x6-canvas .x6-edge.topo-x6-dim { opacity: .18; }
+.topo-x6-canvas .x6-edge.topo-x6-edge-hot path { stroke: var(--accent); stroke-width: 1.6; }
+@media (prefers-reduced-motion: reduce) {
+  .topo-x6-node, .topo-x6-btn, .topo-x6-canvas .x6-node, .topo-x6-canvas .x6-edge { transition: none; }
+}
