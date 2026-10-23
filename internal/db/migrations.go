@@ -281,6 +281,58 @@ CREATE TABLE IF NOT EXISTS run_events (
 CREATE INDEX IF NOT EXISTS run_events_project_cursor ON run_events(project_id, cursor);
 `
 
+// deliveryDDL 是 v7：交付清单、验证结论与评审结论。
+//
+// 交付行同时存完整清单（manifest_json）与指纹（fingerprint）；验证／评审各自记录
+// 生成时的指纹，因此「产物或提交变了，旧结论失效」是一次比较，而不是一条约定。
+const deliveryDDL = `
+CREATE TABLE IF NOT EXISTS deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    version_no INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    baseline_commit TEXT NOT NULL,
+    candidate_commit TEXT,
+    delivered_at TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    supersedes TEXT,
+    superseded_by TEXT,
+    idempotency_key TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK (mode IN ('code', 'non_code')),
+    UNIQUE (project_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS deliveries_run ON deliveries(run_id);
+CREATE INDEX IF NOT EXISTS deliveries_instance ON deliveries(instance_id, version_no);
+CREATE TABLE IF NOT EXISTS delivery_verifications (
+    verification_id TEXT PRIMARY KEY,
+    delivery_id TEXT NOT NULL,
+    result TEXT NOT NULL,
+    target_version INTEGER NOT NULL,
+    target_commit TEXT,
+    target_artifact_id TEXT,
+    target_artifact_sha256 TEXT,
+    fingerprint TEXT NOT NULL,
+    ran_at TEXT NOT NULL,
+    verification_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS delivery_verifications_delivery
+    ON delivery_verifications(delivery_id, result);
+CREATE TABLE IF NOT EXISTS delivery_reviews (
+    delivery_id TEXT PRIMARY KEY,
+    required INTEGER NOT NULL,
+    verdict TEXT NOT NULL,
+    reviewer TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT,
+    fingerprint TEXT NOT NULL,
+    review_json TEXT NOT NULL
+);
+`
+
 // migrations 是显式迁移序列：版本号唯一、升序执行、只往前走。
 //
 // 版本号从 3 起：3 是 vnext 基线（沿用旧 0.x 把 schema_version 写成 3 的数值），
@@ -295,6 +347,7 @@ var migrations = []Migration{
 	{Version: 4, Name: "task_identity", SQL: identityDDL, Apply: backfillTaskIdentity},
 	{Version: 5, Name: "resource_leases", SQL: resourceDDL},
 	{Version: 6, Name: "run_and_operations", SQL: runtimeDDL},
+	{Version: 7, Name: "delivery_manifests", SQL: deliveryDDL},
 }
 
 const (
