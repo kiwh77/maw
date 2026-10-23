@@ -1,0 +1,29 @@
+{
+  "contract": "maw.ui.data/v1",
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/p1/claims",
+      "query": {},
+      "headers": {
+        "host": "127.0.0.1:8787",
+        "origin": "http://127.0.0.1:8787",
+        "cookie": "maw_session=abc; maw_csrf=csrf123456",
+        "x-csrf-token": "csrf123456",
+        "idempotency-key": "idem-0123456789abcdef",
+        "if-match": "\"rev-41\""
+      },
+      "body": { "expected_revision": 41, "agent_id": "trae-goalagents-1" },
+      "attempts": 1,
+      "reused_idempotency_key": true,
+      "result": {
+        "status": 202,
+        "ok": true,
+        "data": { "operation": { "operation_id": "op_7f3c9a", "status": "queued" } },
+        "error": null,
+        "operation_id": "op_7f3c9a",
+        "location": "/api/v1/operations/op_7f3c9a"
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "contract": "maw.ui.data/v1",
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/board",
+      "query": {},
+      "headers": {
+        "host": "127.0.0.1:8787",
+        "origin": "http://127.0.0.1:8787",
+        "authorization": "Bearer cli-token-abc"
+      },
+      "attempts": 1,
+      "result": {
+        "status": 200,
+        "ok": true,
+        "data": {},
+        "error": null
+      }
+    }
+  ],
+  "expect": { "codes": ["V120"] }
+}

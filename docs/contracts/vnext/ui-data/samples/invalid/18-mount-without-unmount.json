@@ -1,0 +1,17 @@
+{
+  "contract": "maw.ui.data/v1",
+  "registry": {
+    "single_active": true,
+    "views": [
+      {
+        "id": "board",
+        "title_key": "view.board.title",
+        "order": 10,
+        "match": ["#/v/board"],
+        "has_mount": true,
+        "has_unmount": false
+      }
+    ]
+  },
+  "expect": { "codes": ["V140"] }
+}

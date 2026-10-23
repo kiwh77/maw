@@ -1,0 +1,5 @@
+{
+  "contract": "maw.ui.data/v1",
+  "requests": "not-a-list",
+  "expect": { "codes": ["V100"] }
+}

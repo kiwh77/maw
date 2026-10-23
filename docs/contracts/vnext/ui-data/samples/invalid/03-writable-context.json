@@ -1,0 +1,18 @@
+{
+  "contract": "maw.ui.data/v1",
+  "context": {
+    "api_version": "maw.ui.data/v1",
+    "view_id": "board",
+    "lang": "zh",
+    "theme": "system",
+    "project_id": "",
+    "filters": { "agent": "", "status": "", "q": "" },
+    "selection": { "instance_id": "", "project_id": "" },
+    "cursor": "",
+    "capabilities": { "write": false, "admin": false },
+    "frozen": false,
+    "navigate_returns_new": true,
+    "navigate_mutated_original": true
+  },
+  "expect": { "codes": ["V110"] }
+}
