@@ -37,4 +37,13 @@
 //     协调者租约保证同一操作只有一个执行者；
 //   - run_events：入库游标（AUTOINCREMENT，永不回退）排序的标准事实，event_id 唯一，
 //     补交同一条只入库一次；阶段变更必须与 run.phase 事件同批提交（E260）。
+//
+// 来源用量与投影元数据（架构 §10.1；契约 maw.observability.timeline/v1）：
+//
+//   - source_sessions／source_turns／run_source_links：来源命名空间内外部身份唯一，
+//     共享轮次只存一条 turn，允许未归属链接；
+//   - usage_records：按 (turn_id, epoch, scope) 记账，区分 cumulative／delta，
+//     Token 可空——unknown 不得落成 0；
+//   - projection_state／notification_deliveries：投影检查点与通知去重身份，
+//     独立于业务任务状态，可重建、不预计算统计。
 package db

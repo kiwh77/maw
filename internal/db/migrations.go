@@ -350,7 +350,110 @@ var migrations = []Migration{
 	{Version: 5, Name: "resource_leases", SQL: resourceDDL},
 	{Version: 6, Name: "run_and_operations", SQL: runtimeDDL},
 	{Version: 7, Name: "delivery_manifests", SQL: deliveryDDL},
+	{Version: 8, Name: "source_usage_projection", SQL: observabilityDDL},
 }
+
+// observabilityDDL 是 v8：来源会话／轮次、用量、投影水位与通知去重身份。
+//
+// 只存可重建读模型所需的权威事实与检查点，不预计算统计值；
+// Token 用可空列，未知不得落成 0（契约 maw.observability.timeline/v1 §4.3）。
+const observabilityDDL = `
+CREATE TABLE IF NOT EXISTS source_sessions (
+    session_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    source_ns TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    adapter TEXT NOT NULL DEFAULT '',
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (source_ns, external_id)
+);
+CREATE INDEX IF NOT EXISTS source_sessions_project
+    ON source_sessions(project_id, opened_at);
+CREATE TABLE IF NOT EXISTS source_turns (
+    turn_id TEXT PRIMARY KEY,
+    source_ns TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    external_id TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    shared_with_json TEXT NOT NULL DEFAULT '[]',
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (source_ns, turn_id),
+    FOREIGN KEY (session_id) REFERENCES source_sessions(session_id)
+);
+CREATE INDEX IF NOT EXISTS source_turns_session
+    ON source_turns(session_id, started_at);
+CREATE TABLE IF NOT EXISTS run_source_links (
+    link_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL DEFAULT '',
+    turn_id TEXT NOT NULL DEFAULT '',
+    attributed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    CHECK (attributed IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS run_source_links_run ON run_source_links(run_id);
+CREATE INDEX IF NOT EXISTS run_source_links_turn ON run_source_links(turn_id);
+CREATE TABLE IF NOT EXISTS usage_records (
+    usage_id TEXT PRIMARY KEY,
+    source_ns TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL DEFAULT 1,
+    scope TEXT NOT NULL,
+    semantic TEXT NOT NULL,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cache_read_tokens INTEGER,
+    cache_write_tokens INTEGER,
+    total_tokens INTEGER,
+    quality TEXT NOT NULL,
+    basis TEXT NOT NULL DEFAULT '',
+    reset_observed INTEGER NOT NULL DEFAULT 0,
+    event_id TEXT NOT NULL DEFAULT '',
+    recorded_at TEXT NOT NULL,
+    CHECK (epoch >= 1),
+    CHECK (semantic IN ('cumulative', 'delta')),
+    CHECK (quality IN ('observed', 'estimated', 'unknown')),
+    CHECK (reset_observed IN (0, 1)),
+    UNIQUE (source_ns, turn_id, epoch, scope)
+);
+CREATE INDEX IF NOT EXISTS usage_records_turn
+    ON usage_records(turn_id, epoch);
+CREATE TABLE IF NOT EXISTS projection_state (
+    projection TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 1,
+    cursor INTEGER NOT NULL DEFAULT 0,
+    complete_before INTEGER NOT NULL DEFAULT 0,
+    dirty_from INTEGER,
+    dirty_to INTEGER,
+    updated_at TEXT NOT NULL,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (projection, project_id),
+    CHECK (version >= 1),
+    CHECK (cursor >= 0),
+    CHECK (complete_before >= 0)
+);
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    notification_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    event_id TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    delivered_at TEXT,
+    acked_at TEXT,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    CHECK (status IN ('pending', 'delivered', 'acked', 'failed')),
+    UNIQUE (event_id, channel)
+);
+CREATE INDEX IF NOT EXISTS notification_deliveries_project
+    ON notification_deliveries(project_id, created_at);
+`
 
 const (
 	// ledgerTable 是迁移台账：每个版本一行，含内容摘要与应用时间。
@@ -391,7 +494,10 @@ func Migrations() []Migration {
 	return out
 }
 
-// LatestVersion 是本二进制的最新迁移版本，必须等于 version.SchemaVersion。
+// LatestVersion 是本二进制迁移台账的末端版本。
+//
+// 发布契约常量 version.SchemaVersion 可滞后于台账（由发布卡单独推进）；
+// 写者门槛与 meta.schema_version 以本函数为准。
 func LatestVersion() int {
 	latest := 0
 	for _, m := range migrations {

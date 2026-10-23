@@ -212,8 +212,8 @@ func TestMigrateWithBackupNewDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.SchemaVersion != version.SchemaVersion || st.MinWriterVersion != version.Version {
-		t.Fatalf("新库写者状态不符: %+v", st)
+	if st.SchemaVersion != LatestVersion() || st.MinWriterVersion != version.Version {
+		t.Fatalf("新库写者状态不符: %+v（期望 schema=%d）", st, LatestVersion())
 	}
 }
 
@@ -351,8 +351,8 @@ func TestLegacyDBWithoutMetaTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.SchemaVersion != version.SchemaVersion || st.LegacyWriter() {
-		t.Fatalf("补完 schema 后状态不符: %+v", st)
+	if st.SchemaVersion != LatestVersion() || st.LegacyWriter() {
+		t.Fatalf("补完 schema 后状态不符: %+v（期望 schema=%d）", st, LatestVersion())
 	}
 }
 
