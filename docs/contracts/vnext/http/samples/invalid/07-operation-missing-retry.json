@@ -1,0 +1,38 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "运行中操作缺 retry_after_ms",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/operations/op_7f3c9a",
+        "headers": {
+          "Authorization": "Bearer maw_pat_5f7c2a9e1b",
+          "Host": "127.0.0.1:7777"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "ok": true,
+          "operation": {
+            "operation_id": "op_7f3c9a",
+            "status": "running"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "H131"
+        ],
+        "expect_error": [
+          "H131"
+        ]
+      }
+    }
+  ]
+}

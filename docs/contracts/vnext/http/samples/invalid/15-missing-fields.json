@@ -1,0 +1,17 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "交换缺 request/response",
+      "expect": {
+        "valid": false,
+        "codes": [
+          "H100"
+        ],
+        "expect_error": [
+          "H100"
+        ]
+      }
+    }
+  ]
+}

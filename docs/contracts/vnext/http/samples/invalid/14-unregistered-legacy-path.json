@@ -1,0 +1,38 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "未登记的旧路径",
+      "request": {
+        "method": "GET",
+        "path": "/api/tasks",
+        "headers": {
+          "Host": "127.0.0.1:7777"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "X-Maw-Legacy": "1",
+          "Link": "</api/v1/tasks>; rel=\"successor-version\""
+        },
+        "body": {
+          "ok": true,
+          "items": [],
+          "next_cursor": null
+        }
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "H170",
+          "H110"
+        ],
+        "expect_error": [
+          "H170",
+          "H110"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "POST 缺幂等键",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/716c30878ba1b95f/claims",
+        "headers": {
+          "Authorization": "Bearer maw_pat_5f7c2a9e1b",
+          "Host": "127.0.0.1:7777",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "task_id": "ti_vn005a",
+          "expected_revision": 42
+        }
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Location": "/api/v1/operations/op_7f3c9a"
+        },
+        "body": {
+          "ok": true,
+          "operation": {
+            "operation_id": "op_7f3c9a",
+            "status": "queued"
+          },
+          "revision": 42
+        }
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "H140"
+        ],
+        "expect_error": [
+          "H140"
+        ]
+      }
+    }
+  ]
+}

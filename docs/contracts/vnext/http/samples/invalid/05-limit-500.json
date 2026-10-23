@@ -1,0 +1,39 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "limit 越界仍返回 200",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/716c30878ba1b95f/tasks",
+        "query": {
+          "limit": "500"
+        },
+        "headers": {
+          "Authorization": "Bearer maw_pat_5f7c2a9e1b",
+          "Host": "127.0.0.1:7777"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "ok": true,
+          "items": [],
+          "next_cursor": null
+        }
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "H120"
+        ],
+        "expect_error": [
+          "H120"
+        ]
+      }
+    }
+  ]
+}

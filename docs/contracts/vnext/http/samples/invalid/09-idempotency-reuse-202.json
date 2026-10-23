@@ -1,0 +1,47 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "同键异请求却返回 202",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/716c30878ba1b95f/claims",
+        "headers": {
+          "Authorization": "Bearer maw_pat_5f7c2a9e1b",
+          "Host": "127.0.0.1:7777",
+          "Idempotency-Key": "9c1f2a7b-4e3d-4a11-9f0e-2b7c8d1e5a60",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "task_id": "ti_vn007a",
+          "expected_revision": 42
+        }
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Location": "/api/v1/operations/op_9a8b7c"
+        },
+        "body": {
+          "ok": false,
+          "error": {
+            "code": "idempotency_key_reuse",
+            "message": "payload differs",
+            "retryable": false
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "H140",
+          "H160"
+        ],
+        "expect_error": [
+          "H140",
+          "H160"
+        ]
+      }
+    }
+  ]
+}

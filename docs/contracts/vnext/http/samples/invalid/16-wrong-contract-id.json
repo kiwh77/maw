@@ -1,0 +1,32 @@
+{
+  "contract": "maw.http.api/v0",
+  "cases": [
+    {
+      "name": "契约标识错误",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/board",
+        "headers": {
+          "Authorization": "Bearer maw_pat_5f7c2a9e1b",
+          "Host": "127.0.0.1:7777"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "ok": true
+        }
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "H101"
+        ],
+        "expect_error": [
+          "H101"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "loopback 旧状态上报，不改任务状态",
+      "request": {
+        "method": "POST",
+        "path": "/api/status",
+        "loopback": true,
+        "headers": {
+          "Host": "127.0.0.1:7777",
+          "Content-Type": "text/plain; charset=utf-8"
+        },
+        "body": {
+          "actor": "trae-goalagents-1",
+          "task_id": "ti_vn005a",
+          "status": "working",
+          "message": "写契约中",
+          "phase": "契约",
+          "pct": 40
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "X-Maw-Legacy": "1",
+          "Link": "</api/v1/status-reports>; rel=\"successor-version\""
+        },
+        "body": {
+          "ok": true,
+          "changed_task_status": false
+        }
+      },
+      "expect": {
+        "valid": true,
+        "codes": [],
+        "expect_error": []
+      }
+    }
+  ]
+}

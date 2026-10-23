@@ -1,0 +1,44 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "合法返回 revision 冲突",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/projects/716c30878ba1b95f/claims",
+        "headers": {
+          "Authorization": "Bearer maw_pat_5f7c2a9e1b",
+          "Host": "127.0.0.1:7777",
+          "Idempotency-Key": "9c1f2a7b-4e3d-4a11-9f0e-2b7c8d1e5a60",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "task_id": "ti_vn005a",
+          "expected_revision": 41
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "ok": false,
+          "error": {
+            "code": "revision_mismatch",
+            "message": "task revision changed",
+            "retryable": false,
+            "details": {
+              "actual_revision": 43
+            }
+          }
+        }
+      },
+      "expect": {
+        "valid": true,
+        "codes": [],
+        "expect_error": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "旧上报改任务状态",
+      "request": {
+        "method": "POST",
+        "path": "/api/status",
+        "loopback": true,
+        "headers": {
+          "Host": "127.0.0.1:7777"
+        },
+        "body": {
+          "actor": "trae-goalagents-1",
+          "task_id": "ti_vn005a",
+          "status": "in_progress"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "X-Maw-Legacy": "1",
+          "Link": "</api/v1/status-reports>; rel=\"successor-version\""
+        },
+        "body": {
+          "ok": true,
+          "changed_task_status": true
+        }
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "H171"
+        ],
+        "expect_error": [
+          "H171"
+        ]
+      }
+    }
+  ]
+}
