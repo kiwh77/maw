@@ -23,8 +23,23 @@ func newNonce(t *testing.T) string {
 	return nonce
 }
 
+// requireDarwinProcessTools 跳过非 macOS，以及本机禁止执行 ps 的环境。
+// 身份捕获／核对依赖 /bin/ps；部分受限环境会报 operation not permitted。
+func requireDarwinProcessTools(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skip("仅 macOS 实现进程身份与停止")
+	}
+	cmd := exec.Command("ps", "-p", "1", "-o", "pid=")
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	if err := cmd.Run(); err != nil {
+		t.Skipf("本机无法执行 ps，跳过依赖进程身份探测的测试: %v", err)
+	}
+}
+
 func startSleep(t *testing.T, nonce string) *Process {
 	t.Helper()
+	requireDarwinProcessTools(t)
 	p, err := Start(StartSpec{
 		RunID: "run_test",
 		Argv:  []string{"/bin/sleep", "30"},
@@ -41,9 +56,7 @@ func startSleep(t *testing.T, nonce string) *Process {
 }
 
 func TestStartCaptureAndVerifyIdentity(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程身份")
-	}
+	requireDarwinProcessTools(t)
 	nonce := newNonce(t)
 	p := startSleep(t, nonce)
 
@@ -85,9 +98,7 @@ func TestStartCaptureAndVerifyIdentity(t *testing.T) {
 }
 
 func TestCaptureRejectsExitedProcess(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程身份")
-	}
+	requireDarwinProcessTools(t)
 	cmd := exec.Command("/bin/sleep", "0")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("启动短进程: %v", err)
@@ -99,9 +110,7 @@ func TestCaptureRejectsExitedProcess(t *testing.T) {
 }
 
 func TestVerifyRejectsExitedProcess(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程身份")
-	}
+	requireDarwinProcessTools(t)
 	cmd := exec.Command("/bin/sleep", "0")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("启动短进程: %v", err)
@@ -115,9 +124,7 @@ func TestVerifyRejectsExitedProcess(t *testing.T) {
 }
 
 func TestStartUsesArgvAndFixedWorkingDirectory(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程身份")
-	}
+	requireDarwinProcessTools(t)
 	dir := filepath.Join(t.TempDir(), "dir with space")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("创建目录: %v", err)
@@ -157,9 +164,7 @@ func TestStartUsesArgvAndFixedWorkingDirectory(t *testing.T) {
 }
 
 func TestStartRejectsInvalidSpec(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程身份")
-	}
+	requireDarwinProcessTools(t)
 	cases := []StartSpec{
 		{RunID: "run_bad", Argv: nil, Dir: t.TempDir(), Nonce: "n"},
 		{RunID: "run_bad", Argv: []string{"/bin/sleep", "1"}, Dir: "relative/path", Nonce: "n"},
@@ -173,9 +178,7 @@ func TestStartRejectsInvalidSpec(t *testing.T) {
 }
 
 func TestStopRecordsCancelEvidence(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程停止")
-	}
+	requireDarwinProcessTools(t)
 	p := startSleep(t, newNonce(t))
 	ev, err := p.Stop(StopCancel)
 	if err != nil {
@@ -201,13 +204,18 @@ func TestStopRecordsCancelEvidence(t *testing.T) {
 }
 
 func TestStopEscalatesWhenTermIgnored(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程停止")
+	requireDarwinProcessTools(t)
+	// sh 的 trap 在进程组 SIGTERM 下仍可能整组退出；用忽略 SIGTERM 的常驻进程验证升级。
+	python := "/usr/bin/python3"
+	if _, err := os.Stat(python); err != nil {
+		t.Skip("需要 /usr/bin/python3 构造忽略 TERM 的进程")
 	}
+	dir := t.TempDir()
 	p, err := Start(StartSpec{
 		RunID: "run_stubborn",
-		Argv:  []string{"/bin/sh", "-c", `trap "" TERM; sleep 30 & wait`},
-		Dir:   t.TempDir(),
+		Argv: []string{python, "-c",
+			"import pathlib,signal,time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\npathlib.Path('ready').write_text('1')\nwhile True:\n time.sleep(30)\n"},
+		Dir:   dir,
 		Nonce: newNonce(t),
 	})
 	if err != nil {
@@ -216,6 +224,17 @@ func TestStopEscalatesWhenTermIgnored(t *testing.T) {
 	defer func() {
 		_, _ = p.Stop(StopCancel)
 	}()
+	ready := filepath.Join(dir, "ready")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("子进程未就绪（忽略 TERM 的 handler 尚未安装）")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
 	ev, err := p.Stop(StopTimeout)
 	if err != nil {
@@ -230,9 +249,7 @@ func TestStopEscalatesWhenTermIgnored(t *testing.T) {
 }
 
 func TestStopRecordsAlreadyExited(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程停止")
-	}
+	requireDarwinProcessTools(t)
 	p, err := Start(StartSpec{
 		RunID: "run_done",
 		Argv:  []string{"/bin/sh", "-c", "exit 3"},
@@ -257,9 +274,7 @@ func TestStopRecordsAlreadyExited(t *testing.T) {
 }
 
 func TestRecoverRunningRunIsUnknown(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程恢复核对")
-	}
+	requireDarwinProcessTools(t)
 	p := startSleep(t, newNonce(t))
 	ev, err := Recover(p.Identity)
 	if err != nil {
@@ -271,9 +286,7 @@ func TestRecoverRunningRunIsUnknown(t *testing.T) {
 }
 
 func TestRecoverLostRunAfterExternalKill(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程恢复核对")
-	}
+	requireDarwinProcessTools(t)
 	p := startSleep(t, newNonce(t))
 	if err := p.cmd.Process.Kill(); err != nil {
 		t.Fatalf("外部终止: %v", err)
@@ -293,9 +306,7 @@ func TestRecoverLostRunAfterExternalKill(t *testing.T) {
 }
 
 func TestRecoverUnknownWhenGroupUnconfirmed(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程恢复核对")
-	}
+	requireDarwinProcessTools(t)
 	live := startSleep(t, newNonce(t))
 	dead := exec.Command("/bin/sh", "-c", "exit 0")
 	if err := dead.Start(); err != nil {
@@ -338,9 +349,7 @@ func TestReusableRequiresConfirmedDescendants(t *testing.T) {
 }
 
 func TestStopRejectsUnknownReason(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("仅 macOS 实现进程停止")
-	}
+	requireDarwinProcessTools(t)
 	p := startSleep(t, newNonce(t))
 	if _, err := p.Stop(StopReason("panic")); !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("未知停止原因应拒绝: %v", err)
