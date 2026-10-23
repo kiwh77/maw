@@ -2,8 +2,10 @@ package board
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +39,32 @@ type ServeOpts struct {
 	Feed   FeedFunc   // nil → GET /api/feed returns 501; SSE stays invalidation-only
 }
 
+// assetHandler 提供嵌入的前端构建产物（assets/dist）。
+// 只暴露真实文件：不做目录列举，且与页面一致使用 no-store 避免旧 bundle 残留。
+func assetHandler() http.Handler {
+	assets, err := BoardAssets()
+	if err != nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "assets unavailable", http.StatusNotImplemented)
+		})
+	}
+	files := http.FileServerFS(assets)
+	return http.StripPrefix("/assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if name == "" {
+			http.NotFound(w, r)
+			return
+		}
+		info, statErr := fs.Stat(assets, name)
+		if statErr != nil || info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		files.ServeHTTP(w, r)
+	}))
+}
+
 func isLoopback(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -50,6 +78,7 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 	mux := http.NewServeMux()
 	events := newEventHub(opts.Load, opts.Feed, 500*time.Millisecond)
 	mux.Handle("/api/events", events.handler(15*time.Second))
+	mux.Handle("/assets/", assetHandler())
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
 			http.NotFound(w, r)

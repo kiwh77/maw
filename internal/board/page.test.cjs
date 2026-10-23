@@ -243,3 +243,19 @@ test('uiLang switches board column labels between en and zh', () => {
   assert.equal(run('COLUMNS.find(([s]) => s === "ready")[1]'), '可领取');
   assert.equal(run('uiLang'), 'zh');
 });
+
+test('published page loads the built web bundle by relative path', () => {
+  const html = fs.readFileSync(__dirname + '/page.html', 'utf8');
+  assert.match(html, /<script id="board-web" src="assets\/board-web\.js" defer><\/script>/);
+  // Relative src keeps the HTTP page and the file:// static export on the same URL.
+  assert.equal(/src="\/assets\//.test(html), false);
+  const dist = fs.statSync(__dirname + '/assets/dist/board-web.js');
+  assert.equal(dist.isFile(), true);
+  assert.ok(dist.size > 1024);
+});
+
+test('built web bundle exposes the mount placeholder API', () => {
+  const source = fs.readFileSync(__dirname + '/assets/dist/board-web.js', 'utf8');
+  assert.ok(source.startsWith('var MawBoard='), 'bundle is an IIFE assigned to MawBoard');
+  assert.match(source, /mountBoard/);
+});

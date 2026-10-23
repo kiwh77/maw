@@ -1,9 +1,10 @@
 package board
 
 import (
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -246,6 +247,39 @@ var boardCSS string
 //go:embed assets/legacy/board-app.js
 var boardAppJS string
 
+// 前端构建产物（internal/board/web 打包，见 web/README.md）随二进制发布。
+//
+//go:embed assets/dist
+var boardDistFS embed.FS
+
+// BoardAssets 返回嵌入的 assets/dist 只读文件系统，路径相对产物根。
+func BoardAssets() (fs.FS, error) {
+	return fs.Sub(boardDistFS, "assets/dist")
+}
+
+// writeBoardAssets 把构建产物复制到静态导出目录，保持与 PageHTML 中
+// `assets/board-web.js` 的相对引用一致，使 file:// 打开也能加载。
+func writeBoardAssets(dst string) error {
+	assets, err := BoardAssets()
+	if err != nil {
+		return err
+	}
+	return fs.WalkDir(assets, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, filepath.FromSlash(p))
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		b, err := fs.ReadFile(assets, p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, b, 0o644)
+	})
+}
+
 func Write(home string, snap Snapshot) (string, error) {
 	dir := filepath.Join(home, "board")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -260,6 +294,9 @@ func Write(home string, snap Snapshot) (string, error) {
 	}
 	htmlPath := filepath.Join(dir, "index.html")
 	if err := os.WriteFile(htmlPath, []byte(PageHTML()), 0o644); err != nil {
+		return "", err
+	}
+	if err := writeBoardAssets(filepath.Join(dir, "assets")); err != nil {
 		return "", err
 	}
 	md := "```\n" + RenderTerminal(snap) + "```\n"

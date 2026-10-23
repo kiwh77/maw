@@ -2,6 +2,8 @@ package board
 
 import (
 	"encoding/json"
+	"io/fs"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -70,6 +72,27 @@ func TestWriteSnapshotFile(t *testing.T) {
 	}
 }
 
+func TestWriteSnapshotCopiesWebAssets(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Write(dir, BuildSnapshot([]*db.Task{{ID: "T-1", Status: "ready"}}, nil, 2)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "board", "assets", "board-web.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "var MawBoard=") {
+		t.Fatal("static export is missing the built bundle")
+	}
+	html, err := os.ReadFile(filepath.Join(dir, "board", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), `src="assets/board-web.js"`) {
+		t.Fatal("static export does not reference the copied bundle relatively")
+	}
+}
+
 func TestAPIBoardHandler(t *testing.T) {
 	load := func(_, _, _ string) (Snapshot, error) {
 		return BuildSnapshot([]*db.Task{{ID: "T-1", Status: "ready"}}, nil, 2), nil
@@ -98,6 +121,7 @@ func TestPageHTMLAssemblesPublishedAssets(t *testing.T) {
 		`--bg: #141618`,
 		`<script id="board-app">`,
 		`const I18N`,
+		`<script id="board-web" src="assets/board-web.js" defer></script>`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("page missing %q", want)
@@ -105,6 +129,42 @@ func TestPageHTMLAssemblesPublishedAssets(t *testing.T) {
 	}
 	if strings.Contains(html, "{{MAW_") {
 		t.Fatal("page still has unresolved asset slots")
+	}
+}
+
+func TestBoardAssetsExposeBuiltBundle(t *testing.T) {
+	assets, err := BoardAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := fs.ReadFile(assets, "board-web.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "var MawBoard=") {
+		t.Fatal("board-web.js is not the IIFE bundle")
+	}
+}
+
+func TestAssetsRouteServesBundleWithoutListing(t *testing.T) {
+	h := newHandler(nil, nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/assets/board-web.js", nil))
+	if rr.Code != 200 {
+		t.Fatalf("code=%d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "var MawBoard=") {
+		t.Fatal("served asset is not the built bundle")
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("cache-control=%q", got)
+	}
+	for _, p := range []string{"/assets/", "/assets/missing.js"} {
+		rr = httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest("GET", p, nil))
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("%s code=%d", p, rr.Code)
+		}
 	}
 }
 
