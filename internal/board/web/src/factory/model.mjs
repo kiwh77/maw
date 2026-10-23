@@ -122,23 +122,23 @@ export function bedCargo(index, length) {
 // Worker shuttle: empty walk to the tail, carry to the bench, work, walk back.
 export const CARRY = { speed: 1.6, pickup: 0.5, work: 1.6 };
 
-export function carryWalkTime() {
-  return Math.max(0.8, Math.abs(YARD.pickupZ - YARD.standZ) / CARRY.speed);
+export function carryWalkTime(standZ = YARD.standZ) {
+  return Math.max(0.8, Math.abs(YARD.pickupZ - standZ) / CARRY.speed);
 }
 
-export function carryPeriod() {
-  return CARRY.pickup + carryWalkTime() * 2 + CARRY.work;
+export function carryPeriod(standZ = YARD.standZ) {
+  return CARRY.pickup + carryWalkTime(standZ) * 2 + CARRY.work;
 }
 
 // Pure function of elapsed seconds, so polling can never restart a cycle and the
-// animation can never touch task state.
-export function carryCycle(elapsed) {
-  const walk = carryWalkTime();
-  const total = carryPeriod();
+// animation can never touch task state. `standZ` is that agent's own bench front.
+export function carryCycle(elapsed, standZ = YARD.standZ) {
+  const to = Number.isFinite(standZ) ? standZ : YARD.standZ;
+  const walk = carryWalkTime(to);
+  const total = carryPeriod(to);
   const t0 = Number.isFinite(elapsed) ? elapsed : 0;
   let t = ((t0 % total) + total) % total;
   const from = YARD.pickupZ;
-  const to = YARD.standZ;
   if (t < CARRY.pickup) return { z: from, walking: false, carrying: false, working: false, facing: Math.PI };
   t -= CARRY.pickup;
   if (t < walk) {
@@ -149,6 +149,29 @@ export function carryCycle(elapsed) {
   if (t < CARRY.work) return { z: to, walking: false, carrying: false, working: true, facing: Math.PI };
   const u = (t - CARRY.work) / walk;
   return { z: to + (from - to) * u, walking: true, carrying: false, working: false, facing: 0 };
+}
+
+/** Pack workbenches into a grid in the lane (cols × rows), growing toward the warehouse. */
+export function benchGrid(count, opts = {}) {
+  const n = Math.max(0, Number(count) || 0);
+  if (n === 0) return { cols: 0, rows: 0, slots: [], width: 0, depth: 0 };
+  const maxCols = opts.maxCols ?? 4;
+  const pitchX = opts.pitchX ?? 1.4;
+  const pitchZ = opts.pitchZ ?? 1.5;
+  const standLift = YARD.standZ - YARD.benchZ;
+  const cols = Math.min(maxCols, Math.max(1, Math.ceil(Math.sqrt(n))));
+  const rows = Math.ceil(n / cols);
+  const width = (cols - 1) * pitchX;
+  const depth = (rows - 1) * pitchZ;
+  const slots = [];
+  for (let i = 0; i < n; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = cols === 1 ? 0 : -width / 2 + col * pitchX;
+    const z = YARD.benchZ - row * pitchZ;
+    slots.push({ x, z, standZ: z + standLift, col, row });
+  }
+  return { cols, rows, slots, width, depth };
 }
 
 const signatureKey = row => JSON.stringify(row);

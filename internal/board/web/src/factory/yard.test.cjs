@@ -104,6 +104,26 @@ test('carriers shuttle between tail and bench with a visible working phase', asy
     assert.ok(step.z >= YARD.standZ - 1e-9 && step.z <= YARD.pickupZ + 1e-9, 'carriers never leave the route');
     assert.ok(!(step.carrying && step.working), 'a crate is either carried or being worked on');
   }
+  // Per-agent bench: the work stop uses that agent's standZ.
+  const deep = YARD.standZ - 1.5;
+  assert.equal(carryCycle(CARRY.pickup + carryWalkTime(deep) + CARRY.work / 2, deep).z, deep);
+});
+
+test('benchGrid packs agents into a mesh without capping count', async () => {
+  const { benchGrid, YARD } = await load();
+  assert.equal(benchGrid(0).slots.length, 0);
+  assert.equal(benchGrid(1).slots.length, 1);
+  assert.equal(benchGrid(1).slots[0].x, 0);
+  const nine = benchGrid(9);
+  assert.equal(nine.slots.length, 9);
+  assert.equal(nine.cols, 3);
+  assert.equal(nine.rows, 3);
+  assert.ok(nine.slots[3].z < YARD.benchZ, 'extra rows grow toward the warehouse');
+  const many = benchGrid(17);
+  assert.equal(many.slots.length, 17);
+  assert.ok(many.cols <= 4);
+  const xs = new Set(many.slots.map(s => s.x));
+  assert.ok(xs.size > 1, 'mesh spreads on X');
 });
 
 test('polling the same snapshot never rebuilds or restarts the yard', async () => {
@@ -137,4 +157,10 @@ test('the renderer reuses state, projects labels and never writes task state', (
   // Polling keeps truck arrival, walk cycles and positions instead of replaying them.
   assert.ok(/truckState/.test(source) && /peopleState/.test(source));
   assert.ok(/sceneSignature\(/.test(source));
+  // Waiting cargo is parented under the truck deck so it yaws with the vehicle.
+  assert.ok(/truck\.deck|deck/.test(source));
+  assert.ok(/crate\(truck\.deck/.test(source));
+  // At the station the body yaw stays locked; only arms keep moving.
+  assert.ok(/Planted at the station|lock yaw at the bench/.test(source));
+  assert.ok(/benchGrid\(/.test(source));
 });

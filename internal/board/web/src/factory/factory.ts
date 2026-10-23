@@ -1,7 +1,7 @@
 // @ts-nocheck -- Three.js is used as a runtime renderer; the geometry helpers are tested separately.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { bedCargo, cargoZone, carryCycle, displayName, factoryGroups, sceneSignature, truckPose, YARD } from './model.mjs';
+import { bedCargo, benchGrid, cargoZone, carryCycle, displayName, factoryGroups, sceneSignature, truckPose, YARD } from './model.mjs';
 
 const instances = new WeakMap();
 const colors = { queued: '#c7a575', processing: '#d2aa56', inspection: '#8c9cbb', blocked: '#d07861', stored: '#8ba571', cancelled: '#999e93', unknown: '#9b8da7' };
@@ -109,9 +109,15 @@ function createFactory(root) {
   });
   // A worker: torso, head, cap, eyes, swinging legs, swinging arms and — for the
   // agents that actually carry work — one payload crate held in front.
-  function worker(parent, x, zone, task, name) {
+  function worker(parent, slot, zone, task, name) {
     const role = zoneRole[zone] || 'rest';
-    const g = group(parent, x, 0, roleStandZ[role] ?? 0.8);
+    const homeX = slot?.x ?? 0;
+    const standZ = role === 'carry' ? (slot?.standZ ?? YARD.standZ)
+      : role === 'inspect' ? roleStandZ.inspect
+      : role === 'dock' ? roleStandZ.dock
+      : role === 'blocked' ? roleStandZ.blocked
+      : (slot?.standZ ?? roleStandZ[role] ?? 0.8);
+    const g = group(parent, homeX, 0, standZ);
     const tone = role === 'blocked' ? '#ac887c' : role === 'carry' ? '#6d8d7a' : role === 'inspect' ? '#8b92ad' : '#c9a45d';
     box(g, .6, .65, .4, tone, 0, .95, 0);
     box(g, .62, .55, .55, '#dfc2a1', 0, 1.56, 0);
@@ -132,18 +138,20 @@ function createFactory(root) {
     const key = `${task?.project_id || parent.userData.project}/${displayName(name) || 'worker'}`;
     const saved = peopleState.get(key);
     if (saved) { g.position.x = saved.x; g.position.z = saved.z; g.rotation.y = saved.yaw; }
+    else g.rotation.y = Math.PI;
     const label = displayName(name || task?.owner || '');
     if (label) addLabel(g, label);
     people.push({
       key, role, g, arms, legs, carried, task,
       phase: saved?.phase ?? Math.random() * Math.PI * 2,
       clock: saved?.clock ?? Math.random() * 3,
-      homeX: x,
-      standZ: roleStandZ[role] ?? 0.8,
+      homeX,
+      standZ,
     });
   }
   function makeTruck(lane, length, color, side, projectId) {
     // Built nose-first on local -Z so the pose helper can point it at its travel direction.
+    // Deck cargo is a child of the truck group so it translates and yaws with the vehicle.
     const truck = group(lane, 0, 0, 0);
     const cabZ = -length / 2, bedZ = YARD.bedZ;
     box(truck, 2.7, .28, length + 1, '#576c59', 0, .55, 0);
@@ -156,9 +164,10 @@ function createFactory(root) {
       box(truck, .1, .7, length - .3, color, dx, 1.2, bedZ);
       for (const dz of [cabZ + .35, length / 2 - .15]) box(truck, .25, .65, .7, '#374a40', dx, .37, dz);
     }
+    const deck = group(truck, 0, 0, 0);
     const saved = truckState.get(projectId);
-    trucks.push({ g: truck, side, length, projectId, arrive: saved ?? (reduced.matches ? 1 : 0) });
-    return truck;
+    trucks.push({ g: truck, deck, side, length, projectId, arrive: saved ?? (reduced.matches ? 1 : 0) });
+    return trucks[trucks.length - 1];
   }
   function crate(parent, task, zone, x, y, z) {
     const g = group(parent, x, y, z);
@@ -166,11 +175,6 @@ function createFactory(root) {
     box(g, .07, .015, YARD.crates.size + .01, '#e9d9b5', 0, .528, 0);
     g.userData.task = task; pickables.push(g);
     return g;
-  }
-  function benchX(i, count) {
-    if (count <= 1) return 0;
-    const span = Math.min(4.6, 1.15 * (count - 1));
-    return -span / 2 + (i / (count - 1)) * span;
   }
   function addWorkbench(lane, x, z) {
     box(lane, 1.15, .18, 1.15, '#c5b38b', x, 1.28, z);
@@ -185,19 +189,31 @@ function createFactory(root) {
     for (const p of people) peopleState.set(p.key, { x: p.g.position.x, z: p.g.position.z, yaw: p.g.rotation.y, clock: p.clock, phase: p.phase });
     for (const t of trucks) truckState.set(t.projectId, t.arrive);
     world.clear(); people = []; trucks = []; pickables = []; clearLabels();
-    const shown = groups.slice(0, 6), width = Math.max(16, shown.length * 7);
-    box(world, width + 2, .45, 21, '#cbd7bf', 0, -.3, 0);
-    box(world, width + 1, .1, 20, '#e0e6d5', 0, -.04, 0);
+    const shown = groups.slice(0, 6);
+    // Pre-size lanes for the densest agent grid so benches stay inside the pad.
+    let lanePitch = YARD.laneWidth;
+    for (const g of shown) {
+      const owners = new Set();
+      for (const task of g.tasks.slice(0, 72)) {
+        if (task.owner && !['stored', 'cancelled'].includes(cargoZone(task.status))) owners.add(task.owner);
+      }
+      const idleN = agents.filter(a => a.project_id === g.id && !a.task_id && a.status !== 'offline' && !owners.has(a.id)).length;
+      const grid = benchGrid(owners.size + idleN);
+      lanePitch = Math.max(lanePitch, grid.width + 2.8);
+    }
+    const width = Math.max(16, shown.length * lanePitch);
+    box(world, width + 2, .45, 24, '#cbd7bf', 0, -.3, 0);
+    box(world, width + 1, .1, 23, '#e0e6d5', 0, -.04, 0);
     box(world, width, .03, 5, '#a5b49b', 0, .04, YARD.roadZ);
     shown.forEach((g, index) => {
-      const x = (index - (shown.length - 1) / 2) * YARD.laneWidth;
+      const x = (index - (shown.length - 1) / 2) * lanePitch;
       const lane = group(world, x, 0, 0);
       lane.userData.project = g.id;
       const large = g.size !== 'small', length = large ? 4.8 : 3.1;
       const color = large ? '#6b8b78' : '#c4a45c';
       const truck = makeTruck(lane, length, color, index % 2 ? 1 : -1, g.id);
-      // Unloading dock, shared inspection, warehouse. One workbench per Agent below.
-      box(lane, 5.6, .35, YARD.dockDepth, '#c0cbb4', 0, .15, YARD.dockZ);
+      // Unloading dock, shared inspection, warehouse. Workbenches in a grid below.
+      box(lane, Math.max(5.6, lanePitch - 1), .35, YARD.dockDepth, '#c0cbb4', 0, .15, YARD.dockZ);
       box(lane, 2.8, .3, 1.6, '#bac6d1', 0, .4, -4);
       for (const bx of [-2.5, 2.5]) box(lane, .12, 3.8, 1.7, '#6d8465', bx, 1.9, -7);
       for (const y of [.2, 1.4, 2.6, 3.8]) box(lane, 5.2, .12, 1.8, '#a9bc99', 0, y, -7);
@@ -211,26 +227,28 @@ function createFactory(root) {
           else if ((zoneRank[zone] ?? 0) > (zoneRank[held.zone] ?? 0)) { held.zone = zone; held.task = task; }
         }
       }
-      const active = [...owners].filter(([, o]) => !['stored', 'cancelled'].includes(o.zone)).slice(0, 4);
-      const idle = agents.filter(a => a.project_id === g.id && !a.task_id && a.status !== 'offline' && !owners.has(a.id)).slice(0, 2);
-      const roster = [...active.map(([owner]) => owner), ...idle.map(a => a.id)].slice(0, 5);
+      const active = [...owners].filter(([, o]) => !['stored', 'cancelled'].includes(o.zone));
+      const idle = agents.filter(a => a.project_id === g.id && !a.task_id && a.status !== 'offline' && !owners.has(a.id));
+      const roster = [...active.map(([owner]) => owner), ...idle.map(a => a.id)];
+      const grid = benchGrid(Math.max(1, roster.length));
       const rosterIndex = new Map(roster.map((id, i) => [id, i]));
-      roster.forEach((id, i) => addWorkbench(lane, benchX(i, roster.length || 1), YARD.benchZ));
-      if (!roster.length) addWorkbench(lane, 0, YARD.benchZ);
+      grid.slots.forEach((slot, i) => {
+        if (i < roster.length || roster.length === 0) addWorkbench(lane, slot.x, slot.z);
+      });
       active.forEach(([owner, o]) => {
         const i = rosterIndex.get(owner) ?? 0;
-        worker(lane, benchX(i, roster.length), o.zone, { ...o.task, project_id: g.id }, owner);
+        worker(lane, grid.slots[i] || grid.slots[0], o.zone, { ...o.task, project_id: g.id }, owner);
       });
       idle.forEach((a) => {
         const i = rosterIndex.get(a.id) ?? 0;
-        worker(lane, benchX(i, roster.length), 'rest', null, a.id);
+        worker(lane, grid.slots[i] || grid.slots[0], 'rest', null, a.id);
       });
       for (const task of sample) {
         const zone = cargoZone(task.status), n = counts[zone] || 0; counts[zone] = n + 1;
         if (zone === 'queued') {
-          // Waiting cargo rides on the deck (truck-local), so it arrives with the truck.
+          // Deck-local child of the truck → same translation/yaw as the vehicle.
           const slot = bedCargo(n, length);
-          crate(truck, task, zone, slot.x, slot.y, slot.z);
+          crate(truck.deck, task, zone, slot.x, slot.y, slot.z);
         } else if (zone === 'stored') {
           const row = Math.floor(n / 5);
           crate(lane, task, zone, (n % 5 - 2) * .8, .3 + (row % 3) * 1.2, -7 + (Math.floor(row / 3) % 2) * .7);
@@ -238,8 +256,8 @@ function createFactory(root) {
           const ai = rosterIndex.has(task.owner) ? rosterIndex.get(task.owner) : 0;
           const key = 'proc-' + ai;
           const pn = procCounts[key] || 0; procCounts[key] = pn + 1;
-          const bx = benchX(ai, roster.length || 1);
-          crate(lane, task, zone, bx + (pn % 2 ? .28 : -.28), 1.42 + Math.floor(pn / 2) * .5, YARD.benchZ);
+          const slot = grid.slots[ai] || grid.slots[0];
+          crate(lane, task, zone, slot.x + (pn % 2 ? .28 : -.28), 1.42 + Math.floor(pn / 2) * .5, slot.z);
         } else if (zone === 'inspection') {
           crate(lane, task, zone, (n % 4 - 1.5) * .65, .58 + Math.floor(n / 4) * .55, -4);
         } else {
@@ -299,7 +317,7 @@ function createFactory(root) {
       if (p.role === 'blocked') a.rotation.x = -2.5;
       else if (carrying) a.rotation.x = -1.15;
       else if (walking) a.rotation.x = Math.sin(t * 9 + i * Math.PI + p.phase) * .42;
-      else if (working) a.rotation.x = -.78 + (t ? Math.sin(t * 5 + i) * .32 : 0);
+      else if (working) a.rotation.x = -.78 + (t ? Math.sin(t * 3.2 + i) * .28 : 0);
       else a.rotation.x = t ? Math.sin(t * 1.3 + i + p.phase) * .1 : 0;
     });
     if (p.carried) p.carried.visible = carrying;
@@ -309,18 +327,18 @@ function createFactory(root) {
     for (const p of people) {
       if (reduced.matches) {
         // Reduced motion: every worker freezes at its station, cargo stays on the vehicle.
-        const z = p.role === 'carry' ? YARD.standZ : p.standZ;
-        p.g.position.set(p.homeX, 0, z); p.g.rotation.y = Math.PI;
+        p.g.position.set(p.homeX, 0, p.standZ); p.g.rotation.y = Math.PI;
         posePerson(p, false, false, p.role === 'carry' || p.role === 'inspect', 0);
         continue;
       }
       if (p.role === 'carry') {
-        // Shuttle: tail → bench (carrying) → bench work → back to the tail, empty.
+        // Shuttle: tail → own bench (carrying) → bench work (arms only) → back empty.
         p.clock += dt;
-        const step = carryCycle(p.clock);
+        const step = carryCycle(p.clock, p.standZ);
         p.g.position.z = step.z;
         p.g.position.x += (p.homeX - p.g.position.x) * Math.min(1, dt * 4);
-        p.g.rotation.y = step.facing;
+        // Face the route while walking; lock yaw at the bench so only arms move.
+        p.g.rotation.y = step.walking ? step.facing : Math.PI;
         posePerson(p, step.walking, step.carrying, step.working, t);
         continue;
       }
@@ -334,10 +352,10 @@ function createFactory(root) {
         p.g.rotation.y = Math.atan2(dx, dz);
         walking = true;
       } else {
-        // Idle sway where the agent waits; poses keep the workshop from looking frozen.
-        p.g.position.x = p.homeX + Math.sin(t * 1.2 + p.phase) * .06;
-        p.g.position.z = p.standZ + Math.cos(t * .9 + p.phase) * .05;
-        p.g.rotation.y = Math.PI + Math.sin(t * .5 + p.phase) * .2;
+        // Planted at the station: body faces the bench; only arms animate.
+        p.g.position.x = p.homeX;
+        p.g.position.z = p.standZ;
+        p.g.rotation.y = Math.PI;
       }
       posePerson(p, walking, false, !walking && p.role !== 'rest', t);
     }
