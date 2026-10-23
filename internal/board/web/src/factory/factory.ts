@@ -167,6 +167,18 @@ function createFactory(root) {
     g.userData.task = task; pickables.push(g);
     return g;
   }
+  function benchX(i, count) {
+    if (count <= 1) return 0;
+    const span = Math.min(4.6, 1.15 * (count - 1));
+    return -span / 2 + (i / (count - 1)) * span;
+  }
+  function addWorkbench(lane, x, z) {
+    box(lane, 1.15, .18, 1.15, '#c5b38b', x, 1.28, z);
+    for (const dx of [-.42, .42]) {
+      for (const dz of [-.42, .42]) box(lane, .1, 1.05, .1, '#75896c', x + dx, .55, z + dz);
+    }
+    box(lane, 1.05, .04, .08, '#a8946a', x, 1.4, z - .5);
+  }
   function rebuild(groups, agents) {
     // Remember where every moving piece was, so a new snapshot never restarts a
     // walk-in or a carry cycle. Polling only re-places static geometry.
@@ -184,15 +196,35 @@ function createFactory(root) {
       const large = g.size !== 'small', length = large ? 4.8 : 3.1;
       const color = large ? '#6b8b78' : '#c4a45c';
       const truck = makeTruck(lane, length, color, index % 2 ? 1 : -1, g.id);
-      // Unloading dock, processing bench, inspection station, warehouse racks.
+      // Unloading dock, shared inspection, warehouse. One workbench per Agent below.
       box(lane, 5.6, .35, YARD.dockDepth, '#c0cbb4', 0, .15, YARD.dockZ);
-      for (const bx of [-1.1, 1.1]) box(lane, .13, 1.2, 1.1, '#75896c', bx, .6, YARD.benchZ);
-      box(lane, 3, .2, 1.5, '#c5b38b', 0, 1.3, YARD.benchZ);
       box(lane, 2.8, .3, 1.6, '#bac6d1', 0, .4, -4);
       for (const bx of [-2.5, 2.5]) box(lane, .12, 3.8, 1.7, '#6d8465', bx, 1.9, -7);
       for (const y of [.2, 1.4, 2.6, 3.8]) box(lane, 5.2, .12, 1.8, '#a9bc99', 0, y, -7);
-      const counts = {}, owners = new Map();
+      const counts = {}, owners = new Map(), procCounts = {};
       const sample = g.tasks.slice(0, 72);
+      for (const task of sample) {
+        const zone = cargoZone(task.status);
+        if (task.owner) {
+          const held = owners.get(task.owner);
+          if (!held) owners.set(task.owner, { zone, task });
+          else if ((zoneRank[zone] ?? 0) > (zoneRank[held.zone] ?? 0)) { held.zone = zone; held.task = task; }
+        }
+      }
+      const active = [...owners].filter(([, o]) => !['stored', 'cancelled'].includes(o.zone)).slice(0, 4);
+      const idle = agents.filter(a => a.project_id === g.id && !a.task_id && a.status !== 'offline' && !owners.has(a.id)).slice(0, 2);
+      const roster = [...active.map(([owner]) => owner), ...idle.map(a => a.id)].slice(0, 5);
+      const rosterIndex = new Map(roster.map((id, i) => [id, i]));
+      roster.forEach((id, i) => addWorkbench(lane, benchX(i, roster.length || 1), YARD.benchZ));
+      if (!roster.length) addWorkbench(lane, 0, YARD.benchZ);
+      active.forEach(([owner, o]) => {
+        const i = rosterIndex.get(owner) ?? 0;
+        worker(lane, benchX(i, roster.length), o.zone, { ...o.task, project_id: g.id }, owner);
+      });
+      idle.forEach((a) => {
+        const i = rosterIndex.get(a.id) ?? 0;
+        worker(lane, benchX(i, roster.length), 'rest', null, a.id);
+      });
       for (const task of sample) {
         const zone = cargoZone(task.status), n = counts[zone] || 0; counts[zone] = n + 1;
         if (zone === 'queued') {
@@ -203,23 +235,17 @@ function createFactory(root) {
           const row = Math.floor(n / 5);
           crate(lane, task, zone, (n % 5 - 2) * .8, .3 + (row % 3) * 1.2, -7 + (Math.floor(row / 3) % 2) * .7);
         } else if (zone === 'processing') {
-          crate(lane, task, zone, (n % 4 - 1.5) * .65, 1.45 + Math.floor(n / 4) * .55, YARD.benchZ);
+          const ai = rosterIndex.has(task.owner) ? rosterIndex.get(task.owner) : 0;
+          const key = 'proc-' + ai;
+          const pn = procCounts[key] || 0; procCounts[key] = pn + 1;
+          const bx = benchX(ai, roster.length || 1);
+          crate(lane, task, zone, bx + (pn % 2 ? .28 : -.28), 1.42 + Math.floor(pn / 2) * .5, YARD.benchZ);
         } else if (zone === 'inspection') {
           crate(lane, task, zone, (n % 4 - 1.5) * .65, .58 + Math.floor(n / 4) * .55, -4);
         } else {
           crate(lane, task, zone, -2.2 + (n % 3) * .7, .1 + Math.floor(n / 6) * .55, 1.6 + Math.floor((n % 6) / 3) * .7);
         }
-        if (task.owner) {
-          const held = owners.get(task.owner);
-          if (!held) owners.set(task.owner, { zone, task });
-          else if ((zoneRank[zone] ?? 0) > (zoneRank[held.zone] ?? 0)) { held.zone = zone; held.task = task; }
-        }
       }
-      const active = [...owners].filter(([, o]) => !['stored', 'cancelled'].includes(o.zone)).slice(0, 4);
-      active.forEach(([owner, o], i) => worker(lane, -2.1 + i * 1.4, o.zone, { ...o.task, project_id: g.id }, owner));
-      // Idle registered agents stay visible without a fictional assignment.
-      const idle = agents.filter(a => a.project_id === g.id && !a.task_id && a.status !== 'offline' && !owners.has(a.id)).slice(0, 2);
-      idle.forEach((a, i) => worker(lane, 2 + i * .8, 'rest', null, a.id));
     });
     for (const key of [...peopleState.keys()]) if (!people.some(p => p.key === key)) peopleState.delete(key);
     for (const id of [...truckState.keys()]) if (!trucks.some(t => t.projectId === id)) truckState.delete(id);

@@ -216,10 +216,13 @@ test('board view preference defaults to board and persists explicit topology cho
   run(`var saved={};
     localStorage={getItem:key=>saved[key]||null,setItem:(key,value)=>saved[key]=value};
     lastSnap=null;
+    filters.project='p1';
     ['view-board','view-topo','columns','topology'].forEach(id=>{
       const el=document.getElementById(id);
       el.classList={_s:new Set(), toggle(name,on){ if(on) this._s.add(name); else this._s.delete(name); }};
       el.setAttribute=()=>{};
+      el.disabled=false;
+      el.title='';
       el.hidden=false;
       el.textContent='';
     });`);
@@ -233,6 +236,36 @@ test('board view preference defaults to board and persists explicit topology cho
   assert.equal(run('document.getElementById("topology").hidden'), false);
   run('setView("board")');
   assert.equal(run('boardView'), 'board');
+});
+
+test('topology requires a single project; all-projects forces board view', () => {
+  const run = app();
+  run(`var saved={};
+    localStorage={getItem:key=>saved[key]||null,setItem:(key,value)=>saved[key]=value};
+    lastSnap=null;
+    filters.project='';
+    ['view-board','view-topo','columns','topology'].forEach(id=>{
+      const el=document.getElementById(id);
+      el.classList={_s:new Set(), toggle(name,on){ if(on) this._s.add(name); else this._s.delete(name); }};
+      el.setAttribute=(k,v)=>{ el['attr_'+k]=v; };
+      el.disabled=false;
+      el.title='';
+      el.hidden=false;
+      el.textContent='';
+    });`);
+  assert.equal(run('canUseTopo()'), false);
+  run('setView("topo")');
+  assert.equal(run('boardView'), 'board');
+  assert.equal(run('document.getElementById("view-topo").disabled'), true);
+  run('setProjectFilter("proj-a")');
+  assert.equal(run('canUseTopo()'), true);
+  assert.equal(run('document.getElementById("view-topo").disabled'), false);
+  run('setView("topo")');
+  assert.equal(run('boardView'), 'topo');
+  run('setProjectFilter("")');
+  assert.equal(run('boardView'), 'board');
+  assert.equal(run('document.getElementById("topology").hidden'), true);
+  assert.equal(run('document.getElementById("view-topo").disabled'), true);
 });
 
 test('uiLang switches board column labels between en and zh', () => {
