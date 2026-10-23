@@ -224,12 +224,27 @@ func truncate(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
+// PageHTML 返回装配后的单文件页面：样式与脚本由嵌入资源注入，
+// HTTP 服务与静态快照导出共用同一份产物。
 func PageHTML() string {
-	return pageHTML
+	return strings.NewReplacer(
+		"{{MAW_THEME_JS}}", strings.TrimSpace(themeJS),
+		"{{MAW_STYLES}}", strings.TrimSpace(boardCSS),
+		"{{MAW_APP_JS}}", strings.TrimSpace(boardAppJS),
+	).Replace(pageHTML)
 }
 
 //go:embed page.html
 var pageHTML string
+
+//go:embed assets/bootstrap/theme.js
+var themeJS string
+
+//go:embed assets/legacy/board.css
+var boardCSS string
+
+//go:embed assets/legacy/board-app.js
+var boardAppJS string
 
 func Write(home string, snap Snapshot) (string, error) {
 	dir := filepath.Join(home, "board")

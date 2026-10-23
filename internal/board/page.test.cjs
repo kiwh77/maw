@@ -3,11 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-// Exercise the shipped inline application, with only startup and DOM edges stubbed.
+// Exercise the shipped application resources, with only startup and DOM edges stubbed.
 function app() {
-  const html = fs.readFileSync(__dirname + '/page.html', 'utf8');
-  const source = html.match(/<script id="board-app">([\s\S]*?)<\/script>/)[1];
-  const theme = html.match(/<script id="theme-init">([\s\S]*?)<\/script>/)[1];
+  const source = fs.readFileSync(__dirname + '/assets/legacy/board-app.js', 'utf8');
+  const theme = fs.readFileSync(__dirname + '/assets/bootstrap/theme.js', 'utf8');
   const elements = new Map();
   const document = {
     documentElement: { lang: 'en' },

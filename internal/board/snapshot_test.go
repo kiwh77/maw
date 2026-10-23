@@ -88,3 +88,56 @@ func TestAPIBoardHandler(t *testing.T) {
 		t.Fatalf("body=%s", rr.Body.String())
 	}
 }
+
+func TestPageHTMLAssemblesPublishedAssets(t *testing.T) {
+	html := PageHTML()
+	for _, want := range []string{
+		`<script id="theme-init">`,
+		`const THEMES`,
+		`<style>`,
+		`--bg: #141618`,
+		`<script id="board-app">`,
+		`const I18N`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("page missing %q", want)
+		}
+	}
+	if strings.Contains(html, "{{MAW_") {
+		t.Fatal("page still has unresolved asset slots")
+	}
+}
+
+func TestRootPageServesAssembledAssets(t *testing.T) {
+	h := newHandler(nil, nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
+	if rr.Code != 200 {
+		t.Fatalf("code=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "const I18N") || strings.Contains(body, "{{MAW_") {
+		t.Fatalf("served page is not assembled")
+	}
+}
+
+func TestStaticSnapshotLoadsWithoutWriteActions(t *testing.T) {
+	dir := t.TempDir()
+	htmlPath, err := Write(dir, BuildSnapshot([]*db.Task{{ID: "T-1", Status: "ready"}}, nil, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(raw)
+	if !strings.Contains(html, "const I18N") || strings.Contains(html, "{{MAW_") {
+		t.Fatal("static snapshot is not assembled")
+	}
+	for _, forbidden := range []string{`method: "POST"`, `method:"POST"`, `/api/status`} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("static snapshot exposes write action %q", forbidden)
+		}
+	}
+}
