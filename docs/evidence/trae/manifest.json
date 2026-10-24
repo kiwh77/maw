@@ -1,0 +1,22 @@
+{
+  "schema": "maw.evidence.trae/manifest/v1",
+  "task": "VN-306",
+  "generated_at": "2026-10-24T00:15:00Z",
+  "platform": "darwin",
+  "probe_scope": {
+    "commands": [
+      ["<TRAE_CLI>", "--version"],
+      ["<TRAE_CLI>", "--help"]
+    ],
+    "side_effects": "只读；不登录、不发模型任务、不改配置",
+    "not_done": [
+      "未为凑验收安装 Trae CLI",
+      "未验证 IDE 与 CLI 共享登录",
+      "未验证取消传播"
+    ]
+  },
+  "entry_classes": [
+    {"class": "ide_chat", "mode": "manual_client", "managed": false},
+    {"class": "cli", "mode": "managed_cli", "managed": "only_when_probe_and_auth_pass"}
+  ]
+}
