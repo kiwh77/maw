@@ -1,0 +1,56 @@
+/* 设置页的视图局部样式（VN-725）。
+ *
+ * 只放共享组件覆盖不到的排版：表单容器宽度、错误列表、动作区。
+ * 颜色一律取 tokens，不写死色值——深浅主题靠 token 换，不靠这里分支。
+ */
+
+.settings-head h1 {
+  margin: 0 0 var(--space-tight, 4px);
+  font-size: var(--font-title, 20px);
+  color: var(--text);
+}
+
+.settings-save-status {
+  margin: var(--space-tight, 4px) 0 var(--space-block, 16px);
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-tight, 8px);
+  max-width: 560px;
+}
+
+.settings-fieldset {
+  margin: 0 0 var(--space-block, 16px);
+  padding: 0;
+  border: 0;
+}
+
+.settings-fieldset legend {
+  padding: 0;
+  margin-bottom: var(--space-tight, 4px);
+}
+
+.settings-errors {
+  margin: var(--space-tight, 8px) 0;
+  padding-left: 18px;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-tight, 8px);
+  margin-top: var(--space-block, 16px);
+}
+
+/* 窄屏：输入框铺满，动作按钮不断字。 */
+@media (max-width: 720px) {
+  .settings-form {
+    max-width: none;
+  }
+
+  .settings-actions .button {
+    flex: 1 1 auto;
+  }
+}

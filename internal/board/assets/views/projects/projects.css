@@ -1,0 +1,30 @@
+/* 工程列表的视图局部样式（VN-725）。
+ *
+ * 列表本身复用共享 .table；这里只处理「参考值」那列的弱化提示，
+ * 让建议值与硬约束在视觉上也能分开。
+ */
+
+.projects-head h1 {
+  margin: 0 0 var(--space-tight, 4px);
+  font-size: var(--font-title, 20px);
+  color: var(--text);
+}
+
+.projects-count {
+  margin: 0 0 var(--space-block, 16px);
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+}
+
+/* 参考值列：数字照常，说明用弱化色，不与上限混为一谈。 */
+.table td[data-field="ref"] .field-hint {
+  margin: 2px 0 0;
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  .table td[data-field="ref"] .field-hint {
+    max-width: 14ch;
+  }
+}
