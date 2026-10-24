@@ -1,0 +1,11 @@
+{
+  "schema": "maw.evidence.zcode/manifest/v1",
+  "task": "VN-307",
+  "generated_at": "2026-10-24T00:20:00Z",
+  "platform": "darwin",
+  "probe_scope": {
+    "commands": [["<ZCODE_CLI>", "--version"]],
+    "side_effects": "只读；不改用户配置、不选模型、不复制秘密",
+    "not_done": ["未实测模型调用", "未实测取消／恢复"]
+  }
+}
