@@ -75,4 +75,16 @@
 // 结束判定只有 `result` 记录算数：subtype=success 且 is_error=false 且正文非空 → completed；
 // error_during_execution／is_error=true → failed（其中认证缺失单独归 auth_required）；
 // 缺记录、空正文、未识别 subtype、退出码与记录冲突 → unknown（保持占用，待核实）。
+//
+// # 轮次用量与恢复能力（VN-308）
+//
+// 用量只从 result 记录解析（ParseUsage）：字段存在（C17）与「input 已含缓存分解」
+// （C18）是实测结论——缓存单独记账、total = input + output；口径是 delta，因为一次
+// 运行恰好一条 result（C08），来源没有跨运行累计计数。assistant 记录上的 usage（C19）、
+// num_turns（C20）、total_cost_usd（C21）语义未验证，一律不解析；usage 缺失返回 nil
+// 保持 unknown，不返回全 0 冒充实测。等待区间与共享轮次没有样本，绝不发明。
+//
+// 会话恢复是 unknown（C24）：Launch 拒绝 ResumeSessionID，Recovery 把同一结论暴露给
+// 调用方，ResumeTarget 对任何请求都失败——最近会话不作为恢复目标，不存在静默兜底。
+// 决策依据见 docs/evidence/codebuddy/vn308-usage-recovery.md。
 package codebuddy
