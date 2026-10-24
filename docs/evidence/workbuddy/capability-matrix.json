@@ -1,0 +1,215 @@
+{
+  "schema": "maw.evidence.workbuddy/capability-matrix/v1",
+  "source": {
+    "task": "VN-305",
+    "evidence_dir": "docs/evidence/workbuddy",
+    "platform": "darwin",
+    "generated_at": "2026-10-24T00:05:00Z",
+    "collected_by": "codebuddy-goalagents-10",
+    "probe_scope": "只读：--version 与 --help；未登录、未发模型任务、未改配置"
+  },
+  "states": {
+    "observed": "本轮实测到该行为，样本可复核",
+    "unobserved": "可能具备，但本轮没有构造出可观测条件（例如认证先行失败，从未产出结果记录）",
+    "unknown": "存在字段或现象，但语义/口径未验证，不得当作已知能力使用",
+    "unsupported": "有证据表明两包在该点上不一致，不能互相替代"
+  },
+  "version_binding": {
+    "valid_for_versions": {
+      "cn": "2.161.0",
+      "intl": "2.161.0"
+    },
+    "invalidated_by": [
+      "bundled_cli_version_change",
+      "entry_path_change",
+      "runtime_change",
+      "platform_change",
+      "app_pairing_change"
+    ],
+    "rule": "两包随包 CLI 版本相同，版本号不能区分来源；能力归属按发行包 + 入口 + 运行时 + 平台四元组成立，任一变化后 observed 行一律降级为 unobserved，需重新采集"
+  },
+  "distributions": [
+    {
+      "kind": "cn",
+      "app_name": "WorkBuddy",
+      "app_version": "5.8.3",
+      "bundle_id": "com.tencent.workbuddy.mac",
+      "entry_suffix": "Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+      "bundled_cli": "2.161.0",
+      "model_ids": [
+        "auto",
+        "glm-5v-turbo",
+        "glm-5.1",
+        "glm-5.0-turbo",
+        "glm-5.0",
+        "glm-4.7",
+        "kimi-k2.5",
+        "minimax-m2.7",
+        "deepseek-v3-2-volc"
+      ]
+    },
+    {
+      "kind": "intl",
+      "app_name": "WorkBuddy AI",
+      "app_version": "5.8.4",
+      "bundle_id": "com.workbuddy.workbuddy-ai",
+      "entry_suffix": "Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+      "bundled_cli": "2.161.0",
+      "model_ids": [
+        "fast-model",
+        "balanced-model",
+        "primary-model",
+        "deep-model"
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "W01",
+      "capability": "entry.version_probe",
+      "state": "observed",
+      "samples": ["S01-version-probe"],
+      "note": "两包随包入口 --version 均退出 0，stdout 单行 2.161.0（8 字节，65–70ms）"
+    },
+    {
+      "id": "W02",
+      "capability": "entry.help_probe",
+      "state": "observed",
+      "samples": ["S02-help-probe"],
+      "note": "两包 --help 均退出 0，104 行；CN 12706 字节、intl 12654 字节，唯一差异是 --model 枚举"
+    },
+    {
+      "id": "W03",
+      "capability": "entry.runtime_node",
+      "state": "observed",
+      "samples": [],
+      "note": "两包入口首行均为 `#!/usr/bin/env node`；运行时身份由入口解析得出"
+    },
+    {
+      "id": "W04",
+      "capability": "print.headless_mode",
+      "state": "observed",
+      "samples": ["S02-help-probe"],
+      "note": "帮助清单列出 -p/--print；最小调用证据（X01）确认进程能跑到认证检查这一步"
+    },
+    {
+      "id": "W05",
+      "capability": "output_format.json",
+      "state": "observed",
+      "samples": ["S02-help-probe"],
+      "note": "帮助清单给出 --output-format 取值 text／json／stream-json；X01 实际使用 json 调用"
+    },
+    {
+      "id": "W06",
+      "capability": "output_format.stream_json",
+      "state": "unobserved",
+      "samples": ["S02-help-probe"],
+      "note": "帮助清单声明了 stream-json，但两包从未产出过一条 stream-json 记录（认证先行失败），记录形状未观测"
+    },
+    {
+      "id": "W07",
+      "capability": "event_stream.partial_messages",
+      "state": "unobserved",
+      "samples": ["S02-help-probe"],
+      "note": "--include-partial-messages 已在帮助清单中，但没有 stream-json 样本可验证其增量语义"
+    },
+    {
+      "id": "W08",
+      "capability": "event_stream.record_sequence",
+      "state": "unobserved",
+      "samples": [],
+      "note": "没有任何记录样本，记录顺序／去重语义无从判定"
+    },
+    {
+      "id": "W09",
+      "capability": "result.record_present",
+      "state": "unobserved",
+      "samples": [],
+      "note": "两包均未完成过回合，result 记录从未出现；单条 json 结果形状未观测，判完成必须等证据"
+    },
+    {
+      "id": "W10",
+      "capability": "result.exit_zero_without_result",
+      "state": "observed",
+      "samples": ["X01-auth-required"],
+      "note": "认证缺失形态是退出码 0 + stdout 空 + stderr 有错误：退出码不能作为成功依据"
+    },
+    {
+      "id": "W11",
+      "capability": "auth.missing_credentials_detectable",
+      "state": "observed",
+      "samples": ["X01-auth-required"],
+      "note": "唯一稳定信号是 stderr 文本 `Authentication required`；与 CodeBuddy 走 result.errors 的路径不同"
+    },
+    {
+      "id": "W12",
+      "capability": "permission.mode_flag",
+      "state": "observed",
+      "samples": ["S02-help-probe"],
+      "note": "帮助清单列出 --permission-mode 及 acceptEdits／bypassPermissions／default／plan／dontAsk／auto"
+    },
+    {
+      "id": "W13",
+      "capability": "mcp.strict_config_flag",
+      "state": "observed",
+      "samples": ["S02-help-probe"],
+      "note": "帮助清单列出 --mcp-config 与 --strict-mcp-config"
+    },
+    {
+      "id": "W14",
+      "capability": "launch.port_auto_assign",
+      "state": "observed",
+      "samples": ["S02-help-probe"],
+      "note": "帮助清单写明 --port 默认 auto-assign；2.173.0 上必须显式 --port 0 的经验不适用于本包，故不继承"
+    },
+    {
+      "id": "W15",
+      "capability": "model.enumeration",
+      "state": "observed",
+      "samples": ["S02-help-probe"],
+      "note": "两包 --model 枚举分别登记：CN 9 个具体模型 ID，intl 4 个占位 ID"
+    },
+    {
+      "id": "W16",
+      "capability": "model.list_interchangeable",
+      "state": "unsupported",
+      "samples": ["S02-help-probe"],
+      "note": "两包帮助清单唯一差异行就是 --model 枚举，模型取值不可跨包复制"
+    },
+    {
+      "id": "W17",
+      "capability": "usage.fields_present",
+      "state": "unobserved",
+      "samples": [],
+      "note": "没有 result 记录，用量字段是否存在未观测"
+    },
+    {
+      "id": "W18",
+      "capability": "turn.num_turns_semantics",
+      "state": "unknown",
+      "samples": [],
+      "note": "--max-turns 存在（帮助清单），但其计数语义未验证"
+    },
+    {
+      "id": "W19",
+      "capability": "session.resume",
+      "state": "unobserved",
+      "samples": ["S02-help-probe"],
+      "note": "帮助清单列出 -r/--resume，但恢复语义与会话存在性都未验证"
+    },
+    {
+      "id": "W20",
+      "capability": "session.no_persistence_flag",
+      "state": "observed",
+      "samples": ["S02-help-probe"],
+      "note": "帮助清单列出 --no-session-persistence；最小调用证据里一并使用"
+    },
+    {
+      "id": "W21",
+      "capability": "cancel.graceful_stop",
+      "state": "unknown",
+      "samples": [],
+      "note": "未验证取消传播与优雅停止"
+    }
+  ]
+}
