@@ -23,7 +23,34 @@
 | 全局状态库 + 跨工程看板（`maw board` / `maw serve`） | 已交付 |
 | 跨工程 Agent 状态注入（`maw status report` / `POST /api/status`） | 已交付 |
 | 富事件流（`/api/feed`、SSE `event` 帧） | 已交付 |
+| vNext 工作台视图（13 个视图、工程与详情双栏、静态导出只读） | 已交付 |
+| 只读观测 API（`timeline` / `activity` / `sessions` / `analytics` / `notifications`、能力探测、SSE 流） | 已交付 |
+| 受管单次执行（`maw managed start`） | 已交付 —— **仅 macOS** |
+| 自动派发（`[managed] auto_enabled`） | 默认关闭，实验级，**仅 macOS** |
+| 受管模型调用 | 不支持（暂无实测证据） |
 | Tauri 桌面壳 + 托盘通知 | [进行中](clients/desktop/README.md) |
+
+## 支持范围
+
+默认模式是**人工闭环**：Agent 自己领题、自己提交、自己合入。受管执行由 maw 替你起进程，
+只在 macOS 上被声称支持——因为原生起停与回收只在那台平台上被实际观测过。
+为 Linux / Windows 交叉编译出二进制**不**代表那里的受管执行可用，那两个平台只保留人工接入。
+
+能力分级看证据，不看愿望：**已验证**（有端到端证据）、**实验**（有接口与单测、缺端到端证据，需满足前置条件）、
+**不支持**（无证据，永不启用）。某个 CLI 能在你这台机器上跑起来，只证明它的人工闭环可用，
+不等于它的全部能力都通过了验收。
+
+- 操作指南：[docs/operations/vnext/operations-guide.zh-CN.md](docs/operations/vnext/operations-guide.zh-CN.md)
+- 升级与迁移：[docs/operations/vnext/upgrade-notes.zh-CN.md](docs/operations/vnext/upgrade-notes.zh-CN.md)
+- 平台支持矩阵（唯一出处）：[docs/verification/vnext/release/platform-matrix.zh-CN.md](docs/verification/vnext/release/platform-matrix.zh-CN.md)
+
+「现在到底开着什么」不要靠文档猜，问运行时：
+
+```bash
+maw managed status --json    # auto_enabled / platform_supported / limit
+curl -s http://127.0.0.1:7420/api/runtime | jq '.auto_execution.extensions'
+```
+
 
 ## 安装
 
@@ -130,8 +157,14 @@ maw board --serve     # http://127.0.0.1:7420/
 ## 测试
 
 ```bash
-CGO_ENABLED=0 go test ./...
+CGO_ENABLED=0 go test ./...                                   # Go 核心与跨进程集成
+node --test internal/board/page.test.cjs                      # 页面装配与视图注册表
+npm --prefix tests/browser test                               # 真实浏览器验收
+python3 -m unittest discover -s docs/operations/vnext -p 'test_*.py'   # 运维文档与代码是否一致
 ```
+
+最后一项会在三种情况下变红：操作指南里的能力级别与 `internal/app/runtime.go` 注册表不一致、
+受管平台声明与平台矩阵不一致、升级说明少了必需步骤（停旧写端／一致备份／故障恢复／`unknown` 解除／拒绝降级）。
 
 ## 贡献与安全
 

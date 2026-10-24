@@ -11,6 +11,17 @@
 3. 中枢就绪后 WebView 导航到 `http://127.0.0.1:7420/`（与浏览器版同一套 HTML）；托盘「显示看板」会再次尝试拉起
 4. 订阅 `/api/events`：收到 `event` / `board-changed` 时更新托盘标题；`event` 可弹出系统通知
 
+## 状态与边界
+
+- 仅在 **macOS** 上构建与实测；对 Linux / Windows 没有原生构建或行为承诺。
+- 前置条件：本机能找到 `maw`（`MAW_BIN` / `PATH` / 常见安装目录）。桌面壳不持有库、不持有任务队列，
+  只负责起中枢并渲染它的页面。
+- 桌面壳**不**发起受管执行（`maw managed start` 是命令行动作）、**不**改变能力支持范围、
+  也**不**把静态导出变成可写（导出页面是只读的）。
+
+能力分级、受管执行上限与升级规则见
+[docs/operations/vnext/operations-guide.zh-CN.md](../../docs/operations/vnext/operations-guide.zh-CN.md)。
+
 ## 开发
 
 前置：Rust、[Tauri CLI](https://v2.tauri.app/start/)、本机已安装 `maw`。
@@ -45,4 +56,4 @@ cargo tauri build
 
 ## 状态
 
-图标与托盘资源已接入；`cargo tauri build` 前需本机安装 Tauri CLI。
+图标与托盘资源已接入；`cargo tauri build` 前需本机安装 Tauri CLI。整体仍是进行中：只在 macOS 上验证过。

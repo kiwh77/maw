@@ -23,8 +23,37 @@ Design: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: [docs/ROADMAP.md](docs/ROADMA
 | Global DB + cross-project board (`maw board` / `maw serve`) | Shipped |
 | Cross-project status inject (`maw status report` / `POST /api/status`) | Shipped |
 | Rich event feed (`/api/feed`, SSE `event` frames) | Shipped |
+| vNext workbench views (13 views, project/detail panes, read-only static export) | Shipped |
+| Read-only observability API (`timeline` / `activity` / `sessions` / `analytics` / `notifications`, capabilities, SSE stream) | Shipped |
+| Managed single run (`maw managed start`) | Shipped — **macOS only** |
+| Automatic dispatch (`[managed] auto_enabled`) | Off by default, experimental, **macOS only** |
+| Managed model invocation | Not supported (no evidence yet) |
 | Tauri desktop shell + tray notifications | [In progress](clients/desktop/README.md) |
 | English / Chinese docs, board UI, CLI, protocol, skills | Shipped |
+
+## Support scope
+
+The default mode is the **manual loop**: your agent claims, commits, submits, and merges. Managed execution
+starts processes for you and is only claimed to work on macOS, where native start/stop/reclaim has actually been
+observed. Cross-compiling for Linux or Windows does **not** make managed execution supported there — those
+platforms keep the manual path.
+
+Capability tiers are evidence-based, not aspirational: **verified** (end-to-end evidence), **experimental**
+(interface + unit tests, no end-to-end evidence, needs prerequisites), **unsupported** (no evidence, never
+enabled). A CLI that runs on your machine only proves the manual loop for that source — it does not mean every
+capability for it passed acceptance.
+
+- Operations guide: [docs/operations/vnext/operations-guide.zh-CN.md](docs/operations/vnext/operations-guide.zh-CN.md)
+- Upgrade & migration: [docs/operations/vnext/upgrade-notes.zh-CN.md](docs/operations/vnext/upgrade-notes.zh-CN.md)
+- Platform matrix (single source of truth): [docs/verification/vnext/release/platform-matrix.zh-CN.md](docs/verification/vnext/release/platform-matrix.zh-CN.md)
+
+Ask the runtime instead of the docs what is enabled right now:
+
+```bash
+maw managed status --json    # auto_enabled / platform_supported / limit
+curl -s http://127.0.0.1:7420/api/runtime | jq '.auto_execution.extensions'
+```
+
 
 ## Install
 
@@ -132,8 +161,15 @@ Desktop (Tauri, reuses board page): [clients/desktop/](clients/desktop/README.md
 ## Tests
 
 ```bash
-CGO_ENABLED=0 go test ./...
+CGO_ENABLED=0 go test ./...                                   # Go core + cross-process integration
+node --test internal/board/page.test.cjs                      # page assembly, view registry
+npm --prefix tests/browser test                               # real-browser acceptance
+python3 -m unittest discover -s docs/operations/vnext -p 'test_*.py'   # ops docs vs. code
 ```
+
+The ops-doc suite fails if the operations guide drifts from `internal/app/runtime.go` (capability levels),
+from the platform matrix (managed platforms), or if the upgrade notes lose a required step
+(stop old writers / consistent backup / recovery / `unknown` resolution / downgrade refusal).
 
 ## Contributing & security
 

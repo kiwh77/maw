@@ -13,6 +13,17 @@ Wraps the `maw serve` (`maw board --serve`) board page in a desktop window and u
 
 Tray menu language follows `MAW_LANG` / system locale (`en` / `zh`).
 
+## Status and scope
+
+- Built and exercised **on macOS only**. No native build or behavior claim for Linux / Windows.
+- Precondition: a local `maw` binary reachable via `MAW_BIN`, `PATH`, or the common install prefixes.
+  The shell does not own the DB or the task queue — it only starts a hub and renders its page.
+- The shell does **not** start managed runs (`maw managed start` is a CLI action), does not change capability
+  support, and does not make a static export writable (exported pages are read-only).
+
+Capability tiers, managed-execution limits, and upgrade rules:
+[docs/operations/vnext/operations-guide.zh-CN.md](../../docs/operations/vnext/operations-guide.zh-CN.md).
+
 ## Development
 
 Requires Rust, [Tauri CLI](https://v2.tauri.app/start/), and a local `maw` install.
