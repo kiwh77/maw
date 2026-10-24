@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bridge;
+mod pump;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -9,8 +12,9 @@ use std::time::Duration;
 use tauri::{
     include_image,
     menu::{Menu, MenuItem},
+    plugin::Plugin,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, Url, WindowEvent,
+    Manager, Runtime, Url, Webview, WindowEvent,
 };
 
 const HUB: &str = "http://127.0.0.1:7420";
@@ -18,7 +22,30 @@ const HUB_ADDR: &str = "127.0.0.1:7420";
 
 struct HubChild(Mutex<Option<Child>>);
 
-fn ui_lang_zh() -> bool {
+/// NavGuard 是 webview 的导航白名单（VN-902）。
+///
+/// 挂在应用级而不是某一处 `navigate` 调用上：页面里的链接、脚本跳转、面板内的
+/// 表单提交都要经过它。判据在 `bridge::nav`，这里只负责把「不许」变成「取消导航」。
+struct NavGuard;
+
+impl<R: Runtime> Plugin<R> for NavGuard {
+    fn name(&self) -> &'static str {
+        "maw-nav-guard"
+    }
+
+    fn on_navigation(&mut self, _webview: &Webview<R>, url: &Url) -> bool {
+        match bridge::nav::allows(url) {
+            Ok(()) => true,
+            Err(denied) => {
+                // 只记原因，不记 URL 原文：URL 里可能带查询参数。
+                eprintln!("desktop bridge: blocked navigation ({})", denied.reason());
+                false
+            }
+        }
+    }
+}
+
+pub(crate) fn ui_lang_zh() -> bool {
     for key in ["MAW_LANG", "LC_ALL", "LC_MESSAGES", "LANG"] {
         if let Ok(v) = std::env::var(key) {
             let t = v.trim().to_ascii_lowercase();
@@ -208,10 +235,18 @@ fn ensure_hub(state: &HubChild) -> bool {
 
 fn open_hub_window(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
-        if let Ok(url) = Url::parse(&format!("{HUB}/")) {
-            let _ = w.navigate(url);
-        } else {
-            let _ = w.reload();
+        // 导航目标走白名单：只有本机 hub 根地址会被接受，其它一律留在引导页。
+        match bridge::nav::hub_root() {
+            Ok(url) => {
+                let _ = w.navigate(url);
+            }
+            Err(denied) => {
+                eprintln!(
+                    "desktop bridge: refused hub navigation ({})",
+                    denied.reason()
+                );
+                let _ = w.reload();
+            }
         }
         let _ = w.show();
         let _ = w.set_focus();
@@ -221,6 +256,8 @@ fn open_hub_window(app: &tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(NavGuard)
         .manage(HubChild(Mutex::new(None)))
         .setup(|app| {
             let ready = ensure_hub(app.state::<HubChild>().inner());
@@ -229,6 +266,10 @@ fn main() {
             } else {
                 eprintln!("hub not ready; window shows bootstrap page until maw serve is available");
             }
+
+            // 提醒桥接与「hub 是否就绪」解耦：订阅线程自己退避重连，
+            // hub 晚一点起来也能接上，不需要重启桌面壳。
+            pump::spawn(app.handle().clone());
 
             let (show_label, quit_label) = tray_labels();
             let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
@@ -274,6 +315,9 @@ fn main() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 // Hide to tray instead of quitting.
+                //
+                // 关窗只是收起界面：桌面壳不持有 Runner，也从不因界面动作去停
+                // 受管运行；运行的推进与停止由 hub/CLI 负责，窗口关掉不影响它们。
                 let _ = window.hide();
                 api.prevent_close();
             }
