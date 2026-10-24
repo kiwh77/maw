@@ -18,9 +18,15 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        run: CGO_ENABLED=0 go test ./...
+        run: CGO_ENABLED=0 go test ./... -count=1
 
-      - name: Build binaries
+      # 发布前先钉死支持范围：受管执行只在 macOS 上有原生证据，
+      # 下面交叉编译出来的 linux/windows 产物是「能构建、能人工接入」，不是「受管可用」。
+      # 这条用例与 docs/verification/vnext/release/platform-matrix.zh-CN.md 同源。
+      - name: Platform matrix guard
+        run: CGO_ENABLED=0 go test ./tests/platform -count=1 -run 'OnlyDarwin|Matrix|ReleaseTargets'
+
+      - name: Cross-compile binaries (非原生实测)
         run: |
           set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
