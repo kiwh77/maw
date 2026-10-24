@@ -283,3 +283,234 @@ test.describe("VN-704 统一布局内接入受管闭环视图", () => {
     await expect(page.locator("#vnext-view .badge").filter({ hasText: /^可接任务$/ })).toHaveCount(0);
   });
 });
+
+// ---------- VN-705：回顾统计与设置入口 ----------
+//
+// 本组用例不依赖构建产物：把 assets 下的源模块按需从磁盘喂给浏览器，
+// 页面仍是生产 page.html（由 tests/browser 基座提供），因此验证的是
+// 「shell 源模块挂进真实页面」这条路径，而不是打包后的 bundle。
+//
+// 运行：npm --prefix tests/browser test -- --grep 'VN-705'
+
+const ASSETS_DIR = path.resolve(__dirname, "..");
+const SERVED_PREFIXES = [
+  "/assets/shell/",
+  "/assets/i18n/",
+  "/assets/views/",
+  "/assets/styles/",
+  "/assets/components/",
+];
+
+function assetContentType(file: string) {
+  if (file.endsWith(".mjs") || file.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (file.endsWith(".css")) return "text/css; charset=utf-8";
+  return "text/plain; charset=utf-8";
+}
+
+async function serveSourceModules(page) {
+  await page.route("**/*", async route => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (!SERVED_PREFIXES.some(prefix => pathname.startsWith(prefix))) return route.continue();
+    const file = path.join(ASSETS_DIR, pathname.replace(/^\/assets\//, ""));
+    if (!fs.existsSync(file)) return route.fulfill({ status: 404, body: "missing" });
+    return route.fulfill({ status: 200, contentType: assetContentType(file), body: fs.readFileSync(file) });
+  });
+}
+
+type MountSpec = {
+  path?: string;
+  lang?: string;
+  readOnly?: boolean;
+  payloads?: Record<string, unknown>;
+  capabilities?: Record<string, unknown> | null;
+};
+
+async function mountFromSource(page, spec: MountSpec = {}) {
+  await serveSourceModules(page);
+  await page.goto(spec.path || "/");
+  await page.evaluate(async input => {
+    const mod = await import("/assets/shell/board-shell.mjs");
+    const calls: string[] = [];
+    (window as any).__dataCalls = calls;
+    const sources: Record<string, any> = {};
+    Object.entries(input.payloads || {}).forEach(([kind, payload]) => {
+      sources[kind] = async () => { calls.push(kind); return payload; };
+    });
+    sources.capabilities = async () => input.capabilities ?? null;
+    (window as any).__shell = mod.mountShell({
+      sources,
+      lang: input.lang || "zh",
+      readOnly: input.readOnly,
+    });
+    // 视图加载是异步的：等两轮宏任务再交给断言。
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }, spec as any);
+}
+
+const TIMELINE_PARTIAL = {
+  ok: true,
+  status: "partial",
+  completeness: "partial",
+  capability: { name: "timeline", supported: true },
+  items: [
+    { interval_id: "iv_run_1", kind: "cli_process", run_id: "run_1", start_at: "2026-10-24T01:00:00Z", end_at: "2026-10-24T01:40:00Z", quality: "observed" },
+    { interval_id: "iv_wait_1", kind: "explicit_wait", run_id: "run_1", start_at: "2026-10-24T02:00:00Z", end_at: null, quality: "observed" },
+  ],
+  window: { start: "2026-10-24T00:00:00Z", end: "2026-10-24T06:00:00Z", timezone: "Asia/Shanghai", hours: 6 },
+  watermark: { cursor: 12, complete_before: 11, received_at: "2026-10-24T06:05:00Z", gaps: [{ from: 11, to: 12, reason: "ingest_lag" }] },
+};
+
+const ANALYTICS_READY = {
+  ok: true,
+  status: "ready",
+  completeness: "complete",
+  capability: { name: "stats", supported: true },
+  report: {
+    scope: { project_id: "p-harness" },
+    completeness: "complete",
+    deliveries: { count: 3, superseded: 0, by_mode: {} },
+    usage: { turn_count: 5, tokens: { total_tokens: 1200, input_tokens: 900, output_tokens: 300 }, coverage: { observed_turns: 5, observed_denom: 5, ratio: 1 } },
+    timeline: { engineering_seconds: 5400, cli_process_seconds: 4800, explicit_wait_seconds: 600 },
+    by_source: [{ source_ns: "codebuddy", turn_count: 5 }],
+    by_day: [{ day: "2026-10-24", delivery_count: 3, turn_count: 5 }],
+  },
+};
+
+const SETTINGS_POLICY = {
+  ok: true,
+  auto_execution: { enabled: false, managed_execution_limit: 2, config_version: 3, platform_supported: true },
+};
+
+test.describe("VN-705 挂载回顾统计与设置入口", () => {
+  test("VN-705 导航登记回顾／统计／设置，切页保留工程筛选与面包屑", async ({ page }) => {
+    await mountFromSource(page, {
+      path: "/?view=timeline&project=p-harness",
+      payloads: { timeline: TIMELINE_PARTIAL, analytics: ANALYTICS_READY },
+    });
+
+    const nav = page.locator("#vnext-nav");
+    await expect(nav.locator("[data-view]")).toHaveCount(13);
+    await expect(nav.locator(".section-label").nth(0)).toHaveText("流程");
+    await expect(nav.locator(".section-label").nth(1)).toHaveText("控制");
+    await expect(nav.locator(".section-label").nth(2)).toHaveText("回顾");
+    await expect(nav.locator(".section-label").nth(3)).toHaveText("设置");
+
+    // 直达链接恢复上下文：分组进面包屑，工程进标题位。
+    await expect(page.locator("#crumb-scope")).toHaveText("回顾");
+    await expect(page.locator("#workspace-name")).toHaveText("p-harness");
+    await expect(page.locator("#page-h1")).toHaveText("执行时间轴");
+    await expect(page.locator("#vnext-view .timeline__bar")).toHaveCount(2);
+
+    // 切到统计：筛选不走丢，地址仍带着工程。
+    await nav.locator('[data-view="analytics"]').click();
+    await expect(page.locator("#page-h1")).toHaveText("交付与用量统计");
+    await expect(page.locator("#crumb-scope")).toHaveText("回顾");
+    await expect(page.locator("#workspace-name")).toHaveText("p-harness");
+    const url = new URL(page.url());
+    expect(url.searchParams.get("view")).toBe("analytics");
+    expect(url.searchParams.get("project")).toBe("p-harness");
+    expect(url.hash).toBe("#p-harness");
+    const route = await page.evaluate(() => (window as any).__shell.route());
+    expect(route.view).toBe("analytics");
+    expect(route.project).toBe("p-harness");
+  });
+
+  test("VN-705 未选工程时给出「先选工程」而不是空表", async ({ page }) => {
+    await mountFromSource(page, { path: "/?view=activity", payloads: {} });
+
+    const notice = page.locator('#vnext-view .vnext-notice[data-state="no_project"]');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("先选择一个工程");
+    await expect(page.locator("#vnext-view table")).toHaveCount(0);
+    // 一个数据请求都不该发出去。
+    expect(await page.evaluate(() => (window as any).__dataCalls)).toEqual([]);
+  });
+
+  test("VN-705 来源能力缺失时降级文案与空态一致", async ({ page }) => {
+    await mountFromSource(page, {
+      path: "/?view=analytics&project=p-harness",
+      payloads: { analytics: ANALYTICS_READY },
+      capabilities: { stats: { supported: false, reason: "source_not_configured" } },
+    });
+
+    await expect(page.locator("#vnext-view .vnext-status")).toContainText("当前中枢版本未提供该数据");
+    await expect(page.locator("#vnext-view .vnext-status")).toContainText("缺失的数据不会被标成完成");
+    await expect(page.locator("#vnext-view table")).toHaveCount(0);
+    // 能力已知不支持，就不做无望请求。
+    expect(await page.evaluate(() => (window as any).__dataCalls)).not.toContain("analytics");
+  });
+
+  test("VN-705 回顾视图标出只读与覆盖不全", async ({ page }) => {
+    await mountFromSource(page, {
+      path: "/?view=timeline&project=p-harness",
+      payloads: { timeline: TIMELINE_PARTIAL },
+    });
+
+    await expect(page.locator('#vnext-view [data-readonly-notice="timeline"]')).toContainText("只读");
+    // 覆盖不全只是横幅：视图自己把状态标成 unknown（partial 也照此），
+    // 但已观测的区间仍然照常画出来——不是失败，也不补满。
+    await expect(page.locator("#vnext-view .timeline")).toHaveAttribute("data-status", "unknown");
+    await expect(page.locator("#vnext-view .timeline .empty-state")).toContainText("不完整");
+    await expect(page.locator("#vnext-view .timeline__bar")).toHaveCount(2);
+    // 未闭合区间按「未知／未闭合」呈现，不补成完整时长。
+    expect(await page.locator("#vnext-view .timeline__bar--unknown").count()).toBeGreaterThan(0);
+    await expect(page.locator("#vnext-view .timeline__cursors")).toContainText("12");
+  });
+
+  test("VN-705 静态导出下设置页只读：保留数值、禁用保存并说明原因", async ({ page }) => {
+    await mountFromSource(page, {
+      path: "/?view=settings",
+      readOnly: true,
+      payloads: { settings: SETTINGS_POLICY },
+    });
+
+    await expect(page.locator("#vnext-view form[data-readonly=\"1\"]")).toHaveCount(1);
+    const submit = page.locator('#vnext-view form button[type="submit"]');
+    await expect(submit).toBeDisabled();
+    await expect(page.locator('#vnext-view [data-readonly-notice="settings"]')).toContainText("没有开放策略写入入口");
+    // 策略值照常显示：只读不改内容（数值在输入框里，用 value 断言）。
+    await expect(page.locator("#vnext-view #settings-limit")).toHaveValue("2");
+    await expect(page.locator("#vnext-view #settings-limit")).toBeEditable();
+    expect(await page.evaluate(() => (window as any).__shell.readOnly())).toBe(true);
+  });
+
+  test("VN-705 有写入口时设置页不被降级成只读", async ({ page }) => {
+    await mountFromSource(page, {
+      path: "/?view=settings",
+      readOnly: false,
+      payloads: { settings: SETTINGS_POLICY },
+    });
+
+    await expect(page.locator("#vnext-view form").first()).toBeVisible();
+    await expect(page.locator("#vnext-view form button[type=\"submit\"]")).toBeEnabled();
+    await expect(page.locator('#vnext-view [data-readonly-notice="settings"]')).toHaveCount(0);
+  });
+
+  test("VN-705 工程清单说明快照缺策略，不把每行读成关闭", async ({ page }) => {
+    await mountFromSource(page, {
+      path: "/?view=projects",
+      payloads: { projects: { projects: [{ id: "p-harness", name: "Harness", max_parallel: 2 }] } },
+    });
+
+    await expect(page.locator("#vnext-view [data-policy-missing]")).toContainText("没有带各工程的执行策略");
+    await expect(page.locator("#vnext-view tbody tr")).toHaveCount(1);
+  });
+
+  test("VN-705 390px 窄屏下回顾页不横向溢出，地址上下文仍可恢复", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mountFromSource(page, {
+      path: "/?view=timeline&project=p-harness",
+      payloads: { timeline: TIMELINE_PARTIAL },
+    });
+
+    // 注：≤700px 时 legacy 样式表 `[.sidebar]{display:none}` 会隐藏整个侧栏，
+    // 导航因此在该断点不可见。这属于旧布局（internal/board/assets/legacy/board.css），
+    // 不在本卡写盘范围内，已作为视觉一致性问题交给 VN-984；这里只验证本卡产出的
+    // 内容本身不溢出、且上下文仍能从地址恢复。
+    await expect(page.locator("#vnext-view .timeline")).toBeVisible();
+    await expect(page.locator("#workspace-name")).toHaveText("p-harness");
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+});

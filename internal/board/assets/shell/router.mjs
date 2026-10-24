@@ -19,7 +19,18 @@ export const PARAM_STATUS = "status";
 export const PARAM_SEARCH = "q";
 export const PARAM_DETAIL = "id";
 
-const FILTER_KEYS = [PARAM_PROJECT, PARAM_AGENT, PARAM_STATUS, PARAM_SEARCH];
+/**
+ * 筛选参数的「参数名 → 路由字段」对照。
+ *
+ * 搜索词的参数名是 `q`、字段名是 `search`：两者不同名，早先直接拿参数名当字段名
+ * 取值，导致 `q` 永远序列化不出去（切页/刷新就丢搜索词）。这里显式成对登记。
+ */
+const FILTER_KEYS = [
+  [PARAM_PROJECT, "project"],
+  [PARAM_AGENT, "agent"],
+  [PARAM_STATUS, "status"],
+  [PARAM_SEARCH, "search"],
+];
 
 /** 合法的 legacy 工程锚点：非空且不含 `=`（我们的路由参数只出现在 query 里）。 */
 export function isLegacyProjectAnchor(hash = "") {
@@ -71,9 +82,9 @@ export function serializeQuery(route = {}) {
   const view = route.view || DEFAULT_VIEW;
   if (view === DEFAULT_VIEW) return "";
   params.set(PARAM_VIEW, view);
-  FILTER_KEYS.forEach(key => {
-    const value = route[key] || "";
-    if (value) params.set(key, value);
+  FILTER_KEYS.forEach(([param, field]) => {
+    const value = route[field] || "";
+    if (value) params.set(param, value);
   });
   if (route.detail) params.set(PARAM_DETAIL, route.detail);
   const query = params.toString();

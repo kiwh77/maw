@@ -309,15 +309,17 @@ async function loadShellModules() {
 test('VN-704 注册表同时登记 legacy 与 vnext 视图且分组稳定', async () => {
   const { registry } = await loadShellModules();
   const views = registry.createRegistry();
-  assert.deepEqual(views.ids, ['board', 'factory', 'topo', 'nodes', 'tasks', 'runs', 'deliveries']);
+  // 前七项是 VN-704 的执行视图，VN-705 在其后追加回顾／统计／设置；顺序是对外契约。
+  assert.deepEqual(views.ids.slice(0, 7), ['board', 'factory', 'topo', 'nodes', 'tasks', 'runs', 'deliveries']);
   assert.deepEqual(views.legacyIds, ['board', 'factory', 'topo']);
-  assert.deepEqual(views.vnextIds, ['nodes', 'tasks', 'runs', 'deliveries']);
+  assert.deepEqual(views.vnextIds.slice(0, 4), ['nodes', 'tasks', 'runs', 'deliveries']);
+  assert.equal(views.ids.length, views.legacyIds.length + views.vnextIds.length);
   assert.equal(views.get('nodes').headingKey, 'heading.nodes');
   assert.equal(views.get('nope'), null);
   // 未知视图不猜测，回退到看板。
   assert.equal(registry.resolveView(views, 'nope').id, 'board');
   const groups = views.navModel();
-  assert.deepEqual(groups.map(group => group.id), ['flow', 'control']);
+  assert.deepEqual(groups.map(group => group.id), ['flow', 'control', 'review', 'settings']);
   assert.deepEqual(groups[1].items.map(def => def.id), ['nodes', 'tasks', 'runs', 'deliveries']);
 });
 
@@ -431,4 +433,207 @@ test('VN-704 页面在 legacy 之后挂载 shell，且不强制依赖 bundle', (
   // 样式只消费共享 token，不写死色值。
   const css = fs.readFileSync(__dirname + '/assets/shell/shell.css', 'utf8');
   assert.equal(/#[0-9a-fA-F]{3,6}/.test(css), false);
+});
+
+// ---------- VN-705：挂载回顾统计与设置入口 ----------
+
+async function loadReviewModules() {
+  return {
+    registry: await import(shellUrl('/assets/shell/view-registry.mjs')),
+    router: await import(shellUrl('/assets/shell/router.mjs')),
+    i18n: await import(shellUrl('/assets/i18n/board-i18n.mjs')),
+    context: await import(shellUrl('/assets/shell/view-context.mjs')),
+    shell: await import(shellUrl('/assets/shell/board-shell.mjs')),
+  };
+}
+
+test('VN-705 回顾／统计／设置登记为独立分组，与执行视图共用同一份注册表', async () => {
+  const { registry, i18n } = await loadReviewModules();
+  const views = registry.createRegistry();
+
+  assert.deepEqual(views.navModel().map(group => group.id), ['flow', 'control', 'review', 'settings']);
+  const review = views.navModel().find(group => group.id === 'review');
+  assert.deepEqual(review.items.map(def => def.id), ['timeline', 'activity', 'sessions', 'analytics']);
+  const settings = views.navModel().find(group => group.id === 'settings');
+  assert.deepEqual(settings.items.map(def => def.id), ['projects', 'settings']);
+
+  // 每个视图的四组语言键都必须存在，且中英都有；缺一版等于没做完。
+  views.all.forEach(def => {
+    [def.titleKey, def.headingKey, def.descKey, def.eyebrowKey].forEach(key => {
+      assert.notEqual(i18n.translate(key, 'zh'), key, 'missing zh: ' + key);
+      assert.notEqual(i18n.translate(key, 'en'), key, 'missing en: ' + key);
+    });
+  });
+  assert.deepEqual(Object.keys(i18n.DICTIONARY.zh).sort(), Object.keys(i18n.DICTIONARY.en).sort());
+
+  // 分组标题也是语言键，不是硬编码中文。
+  views.navModel().forEach(group => {
+    assert.notEqual(i18n.translate(group.labelKey, 'zh'), group.labelKey);
+  });
+
+  // 观测类视图按工程物化，必须在注册表里声明，不能到渲染时再猜。
+  assert.deepEqual(views.vnextIds.filter(id => views.requiresProject(id)),
+    ['timeline', 'activity', 'sessions', 'analytics']);
+  assert.equal(views.requiresProject('projects'), false);
+  assert.equal(views.requiresProject('settings'), false);
+});
+
+test('VN-705 切换回顾与统计保留同一套筛选，URL 与面包屑能恢复上下文', async () => {
+  const { registry, router } = await loadReviewModules();
+  const views = registry.createRegistry();
+  const known = id => Boolean(views.get(id));
+
+  const route = router.parseRoute('?view=timeline&project=p-9&agent=a-1&status=done&q=VN-70', '#p-9', known);
+  assert.equal(route.view, 'timeline');
+  assert.equal(route.project, 'p-9');
+  assert.equal(route.agent, 'a-1');
+  assert.equal(route.status, 'done');
+  assert.equal(route.search, 'VN-70');
+
+  // 同一份路由切到统计，筛选原样带走；地址可再次解析回相同状态。
+  const switched = router.withRoute(route, { view: 'analytics', detail: '' });
+  assert.equal(router.serializeRoute(switched), '/?view=analytics&project=p-9&agent=a-1&status=done&q=VN-70#p-9');
+  const back = router.parseRoute('?view=analytics&project=p-9&agent=a-1&status=done&q=VN-70', '#p-9', known);
+  const { fromHash, ...comparable } = back;
+  assert.deepEqual(comparable, switched);
+  assert.equal(fromHash, false, '显式 ?project= 优先，不再算作仅靠锚点恢复');
+
+  // 面包屑：分组格由 shell 独占，工程写在 #workspace-name（旧看板同一口径）。
+  assert.equal(registry.groupLabelKey(views.get(back.view).group), 'nav.review');
+  assert.equal(back.project, 'p-9');
+
+  // 未知视图仍然回退看板，不会留在一个空白页上。
+  assert.equal(router.parseRoute('?view=ghost&project=p-9', '', known).view, 'board');
+});
+
+test('VN-705 观测适配：能力缺失降级为「未提供该数据」，不构造空成功', async () => {
+  const { context } = await loadReviewModules();
+
+  const unsupported = { status: 'unsupported', capability: { name: 'stats', supported: false, reason: 'source_not_configured' } };
+  const missing = context.analyticsStateFrom(unsupported);
+  assert.equal(missing.status, 'error');
+  assert.equal(missing.reason, 'unavailable');
+  assert.equal(missing.capability, 'source_not_configured');
+
+  // 端点整条缺失与「能力没接」走同一条降级路径。
+  assert.equal(context.timelineStateFrom({ unavailable: true }).reason, 'unavailable');
+  assert.equal(context.activityStateFrom({ unsupported: [{ capability: 'activity', reason: 'window_too_large' }] }).status, 'error');
+  assert.equal(context.sessionsStateFrom(null).status, 'error');
+  assert.equal(context.analyticsStateFrom({ status: 'ready' }).status, 'error');
+
+  // 覆盖不全仍然可用：状态保留 unknown，不降级成失败，也不补成满值。
+  const partial = context.timelineStateFrom({
+    status: 'partial',
+    completeness: 'partial',
+    items: [{ interval_id: 'iv_1', kind: 'cli_process', start_at: '2026-10-24T01:00:00Z', end_at: '2026-10-24T01:30:00Z', quality: 'observed' }],
+    window: { start: '2026-10-24T00:00:00Z', end: '2026-10-24T06:00:00Z', timezone: 'Asia/Shanghai', hours: 6 },
+    watermark: { cursor: 41, complete_before: 39, received_at: '2026-10-24T06:00:00Z', gaps: [{ from: 39, to: 41, reason: 'ingest_lag' }] },
+  });
+  assert.equal(partial.status, 'ready');
+  assert.equal(partial.completeness, 'partial');
+  assert.equal(partial.intervals.length, 1);
+  assert.equal(partial.cursors.state_cursor, 41);
+  assert.equal(partial.cursors.projection_cursor, 39);
+  assert.equal(partial.cursors.gap_count, 1);
+  assert.equal(partial.window.hours, 6);
+
+  const unknown = context.timelineStateFrom({ status: 'unknown', completeness: 'unknown', items: [] });
+  assert.equal(unknown.status, 'unknown');
+  assert.equal(unknown.cursors, null, '没有水位就不编游标数字');
+
+  const sessions = context.sessionsStateFrom({ status: 'ready', completeness: 'complete', items: [{ session_id: 's1', turns: [] }] });
+  assert.equal(sessions.sessions.length, 1);
+  assert.equal(context.activityStateFrom({ status: 'ready', hours: null }).status, 'error');
+});
+
+test('VN-705 缺工程时不发请求也不出空表：状态是「未选上下文」', async () => {
+  const { context, shell } = await loadReviewModules();
+
+  assert.equal(context.needsProject('timeline'), true);
+  assert.equal(context.needsProject('nodes'), false);
+  assert.equal(shell.needsProject('analytics'), true);
+  assert.deepEqual(context.NO_PROJECT_STATE, { status: 'no_project', reason: 'project_required' });
+
+  // 地址按工程拼，工程身份必须转义，避免拼出另一个路径。
+  assert.equal(shell.projectResourcePath('timeline', 'p 1/2'), '/api/v1/projects/p%201%2F2/timeline');
+  assert.equal(shell.projectResourcePath('analytics', 'p-1'), '/api/v1/projects/p-1/analytics');
+  assert.equal(shell.projectResourcePath('nodes', 'p-1'), '');
+  assert.equal(shell.projectResourcePath('timeline', '  '), '');
+  assert.equal(shell.capabilitiesPath('p-1'), '/api/v1/projects/p-1/observability/capabilities');
+
+  // 没有工程的默认数据源不打网络：直接判不可用，由挂载层换成「先选工程」。
+  let asked = 0;
+  const sources = shell.createDefaultSources({ fetch: () => { asked += 1; return Promise.resolve({ ok: true, json: async () => ({}) }); } });
+  assert.deepEqual(await sources.timeline({ project: '' }), { unavailable: true });
+  assert.equal(asked, 0);
+});
+
+test('VN-705 设置页只搬字段不补默认值，只读由地址与中枢版本决定', async () => {
+  const { context, shell } = await loadReviewModules();
+  const { normalizePolicy } = await import(shellUrl('/assets/views/settings/settings-view.mjs'));
+
+  const state = context.settingsStateFrom(
+    { ok: true, auto_execution: { enabled: true, managed_execution_limit: 2, config_version: 7, platform_supported: true } },
+    { normalizePolicy }
+  );
+  assert.equal(state.status, 'ready');
+  // 命名对齐：中枢说 enabled / config_version，策略认 auto_enabled / revision。
+  assert.equal(state.policy.autoEnabled, true);
+  assert.equal(state.policy.limit, 2);
+  assert.equal(state.policy.revision, 7);
+  assert.equal(state.platformSupported, true);
+  // 缺的字段保持 null，不替服务端宣布 0 或 1。
+  assert.equal(state.policy.capacity, null);
+  assert.equal(state.policy.ref, null);
+  assert.equal(state.policy.retentionDays, null);
+  assert.equal(state.readOnly, false);
+
+  const readOnly = context.settingsStateFrom({ auto_execution: { enabled: false } }, { normalizePolicy, readOnly: true });
+  assert.equal(readOnly.readOnly, true);
+  assert.equal(readOnly.readOnlyReason, 'static_export');
+
+  // 服务端没说平台是否支持时保持 undefined，不猜成「支持」。
+  assert.equal(context.settingsStateFrom({ policy: {} }, { normalizePolicy }).platformSupported, undefined);
+  assert.equal(context.settingsStateFrom({ unavailable: true }).status, 'error');
+
+  // 静态导出就是 file:// 打开的页面：没有同源中枢，写入口必须关。
+  assert.equal(shell.isStaticExport({ location: { protocol: 'file:' } }), true);
+  assert.equal(shell.isStaticExport({ location: { protocol: 'http:' } }), false);
+
+  const exports = shell.createDefaultSources(null);
+  assert.equal(typeof exports.settings, 'function');
+  assert.equal(typeof exports.saveSettings, 'undefined', '本构建没有策略写入口，不提供假的保存函数');
+});
+
+test('VN-705 工程清单复用看板快照，并说明快照缺策略而不是默认成关闭', async () => {
+  const { context } = await loadReviewModules();
+  const state = context.projectsStateFrom({
+    projects: [{ id: 'p-1', name: 'Alpha', max_parallel: 3 }],
+  });
+  assert.equal(state.status, 'ok');
+  assert.equal(state.projects[0].max_parallel_reference, 3, 'max_parallel 与 max_parallel_reference 是同一个建议并行数');
+  // 参考值出现不代表中枢说过自动模式开还是关：策略仍算未知。
+  assert.equal(state.policyKnown, false);
+
+  const noPolicy = context.projectsStateFrom({ projects: [{ id: 'p-2', name: 'Beta' }] });
+  assert.equal(noPolicy.policyKnown, false);
+  const withPolicy = context.projectsStateFrom({ projects: [{ id: 'p-3', policy: { auto_enabled: true, managed_execution_limit: 2 } }] });
+  assert.equal(withPolicy.policyKnown, true);
+
+  assert.equal(context.projectsStateFrom({}).status, 'error');
+  assert.equal(context.projectsStateFrom({ unavailable: true }).status, 'error');
+  assert.equal(context.projectsStateFrom({ projects: [] }).status, 'ok');
+});
+
+test('VN-705 页面骨架留出面包屑范围位，静态导出不引入绝对资源路径', () => {
+  const html = fs.readFileSync(__dirname + '/page.html', 'utf8');
+  assert.match(html, /id="crumb-scope"/);
+  assert.match(html, /id="crumb-scope-slash"/);
+  // 范围位在视图名之前：读起来是 工作台 / 回顾 / 工程 / 视图。
+  assert.ok(html.indexOf('id="crumb-scope"') < html.indexOf('id="workspace-name"'));
+  assert.equal(/src="\/assets\//.test(html), false);
+
+  const css = fs.readFileSync(__dirname + '/assets/shell/shell.css', 'utf8');
+  assert.match(css, /\.vnext-notice/);
+  assert.equal(/#[0-9a-fA-F]{3,6}/.test(css), false, '样式只消费共享 token，不写死色值');
 });
