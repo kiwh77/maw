@@ -215,8 +215,9 @@ func TestBoardRoutesKeepFiltersAndExposeEvents(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "prefers-color-scheme: light") || !strings.Contains(w.Body.String(), `new EventSource("/api/events")`) {
-		t.Fatal("page did not include themes and realtime client")
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, "prefers-color-scheme: light") || !strings.Contains(body, `id="app"`) || !strings.Contains(body, "board-web.js") {
+		t.Fatal("page did not include themes and vue mount shell")
 	}
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/events", nil))

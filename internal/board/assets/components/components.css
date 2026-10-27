@@ -3,13 +3,12 @@
  * 装配方式：
  *   @import "../styles/tokens.css";      // 唯一色值与尺寸源
  *   @import "./components.css";          // 组件层
+ * 生产路径由 board-web injectStyles 等价注入（tokens 必须在本文件之前）。
  *
  * 约定（契约 §1、§14）：
  * - 组件层只允许 var(--token)，不得出现新的色值字面量；
  * - 不引入第二套 token、字体或图标库；
  * - 新增页面以本包为默认样式，页面局部差异必须在任务卡登记理由。
- *
- * 既有 Board 仍走 legacy/board.css（VN-704 负责迁移接线），本包不改变其行为。
  */
 
 @import "./badge.css";

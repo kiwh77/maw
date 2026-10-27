@@ -22,3 +22,4 @@ output/
 .vscode/
 clients/desktop/src-tauri/target/
 coverage.out
+test-results/

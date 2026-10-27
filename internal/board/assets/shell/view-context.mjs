@@ -55,11 +55,24 @@ export function tasksStateFromSnapshot(snapshot) {
   };
 }
 
+/**
+ * 读列表字段：契约用 `items`，视图用资源名（nodes/runs/deliveries）。
+ * 两套命名并存时优先资源名，避免把分页外壳判成 invalid_payload。
+ */
+function listField(payload, name) {
+  if (Array.isArray(payload[name])) return payload[name];
+  if (Array.isArray(payload.items)) return payload.items;
+  return null;
+}
+
 /** 节点列表响应 → 节点视图状态。 */
 export function nodesStateFrom(payload) {
   if (!payload || typeof payload !== "object") return errorState("missing_payload");
+  if (payload.unauthenticated === true || payload.status === 401) {
+    return { status: "unauthenticated", reason: "unauthenticated" };
+  }
   if (payload.unavailable) return errorState("unavailable");
-  const nodes = Array.isArray(payload.nodes) ? payload.nodes : null;
+  const nodes = listField(payload, "nodes");
   if (!nodes) return errorState("invalid_payload");
   return { status: "ok", nodes };
 }
@@ -67,8 +80,11 @@ export function nodesStateFrom(payload) {
 /** 运行列表响应 → 运行视图状态；`reconciliation` 等字段原样保留。 */
 export function runsStateFrom(payload) {
   if (!payload || typeof payload !== "object") return errorState("missing_payload");
+  if (payload.unauthenticated === true || payload.status === 401) {
+    return { status: "unauthenticated", reason: "unauthenticated" };
+  }
   if (payload.unavailable) return errorState("unavailable");
-  const runs = Array.isArray(payload.runs) ? payload.runs : null;
+  const runs = listField(payload, "runs");
   if (!runs) return errorState("invalid_payload");
   return { status: "ok", runs };
 }
@@ -76,8 +92,11 @@ export function runsStateFrom(payload) {
 /** 交付列表响应 → 交付视图状态；`pending` 与 `pass` 不在此合并。 */
 export function deliveriesStateFrom(payload) {
   if (!payload || typeof payload !== "object") return errorState("missing_payload");
+  if (payload.unauthenticated === true || payload.status === 401) {
+    return { status: "unauthenticated", reason: "unauthenticated" };
+  }
   if (payload.unavailable) return errorState("unavailable");
-  const deliveries = Array.isArray(payload.deliveries) ? payload.deliveries : null;
+  const deliveries = listField(payload, "deliveries");
   if (!deliveries) return errorState("invalid_payload");
   return { status: "ok", deliveries };
 }
@@ -115,6 +134,9 @@ export function stateForKind(kind, payload, options = {}) {
  */
 function observabilityBase(payload) {
   if (!payload || typeof payload !== "object") return { error: errorState("missing_payload") };
+  if (payload.unauthenticated === true || payload.status === 401) {
+    return { error: { status: "unauthenticated", reason: "unauthenticated" } };
+  }
   if (payload.unavailable === true) return { error: errorState("unavailable") };
   const cap = payload.capability;
   if (cap && cap.supported === false) {
@@ -300,7 +322,8 @@ export function findDetail(kind, payload, id) {
       : Array.isArray(payload.deliveries) ? payload.deliveries
         : Array.isArray(payload.tasks) ? payload.tasks
           : Array.isArray(payload.allTasks) ? payload.allTasks
-            : [];
+            : Array.isArray(payload.items) ? payload.items
+              : [];
   const keys = DETAIL_KEYS[kind] || ["id"];
   const wanted = String(id);
   for (const item of list) {

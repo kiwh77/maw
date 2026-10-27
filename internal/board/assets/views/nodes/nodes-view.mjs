@@ -276,11 +276,9 @@ export function renderNodeList(state = {}, options = {}) {
   if (state.status === "expired") return emptyState(lang, ["nodes.expired", "nodes.expired.hint"]);
 
   const nodes = Array.isArray(state.nodes) ? state.nodes : [];
-  const header = '<header class="nodes-head"><h1>' + esc(t("nodes.title", lang)) + "</h1>" +
-    '<p class="field-hint">' + esc(t("nodes.subtitle", lang)) + "</p></header>";
 
   if (!nodes.length) {
-    return header + emptyState(lang, ["nodes.empty", "nodes.empty.hint"]);
+    return emptyState(lang, ["nodes.empty", "nodes.empty.hint"]);
   }
 
   const now = options.now ?? Date.now();
@@ -306,8 +304,7 @@ export function renderNodeList(state = {}, options = {}) {
     evaluateReadiness(node, { ...options, now }).executable
   ).length;
 
-  return header +
-    '<p class="field-hint">' + esc(nodes.length + " " + t("nodes.count", lang)) + " · " +
+  return '<p class="field-hint">' + esc(nodes.length + " " + t("nodes.count", lang)) + " · " +
     esc(executableCount + " " + t("nodes.executable", lang)) + "</p>" +
     '<div class="table-wrap"><table class="table"><thead><tr>' +
     "<th>" + esc(lang === "en" ? "Node" : "节点") + "</th>" +
@@ -386,14 +383,11 @@ export function renderNodeDetail(node, options = {}) {
     : "";
 
   return '<article class="node-detail">' +
-    '<header class="nodes-head">' +
-    '<a class="button button--compact" id="nodes-back" href="#/nodes">' +
-    esc(t("detail.back", lang)) + "</a>" +
-    "<h1>" + esc(node.name || node.id) + "</h1>" +
-    '<p class="field-hint">' + esc(node.id) + " · " + esc(node.adapter || "—") + "</p>" +
+    '<p class="field-hint">' + esc(node.name || node.id) + " · " + esc(node.id) +
+    " · " + esc(node.adapter || "—") + " " +
     badge(t("verdict." + ready.verdict, lang), VERDICT_BADGE[ready.verdict]) +
     badge(t("intake." + ready.intake, lang), ready.intake === "paused" ? "badge--warn" : "badge--in_review") +
-    "</header>" +
+    "</p>" +
     reasons +
     '<section class="drawer__section"><h3>' + esc(t("detail.title", lang)) + "</h3>" + versionNote +
     '<div class="table-wrap"><table class="table"><thead><tr>' +

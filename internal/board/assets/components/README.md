@@ -39,8 +39,10 @@ npm --prefix tests/browser test -- --grep 'VN-702'
 
 ## 与既有 Board 的关系（重要）
 
-- `legacy/board.css` 是既有 Board 的高密度实现，由 `internal/board/board.go` 以 `go:embed` 注入 `{{MAW_STYLES}}`。
-- 本卡的 Surface 不含 `board.go` 与 `page.html`，因此**接线由 VN-704 完成**（其 write_scope 含 `page.html`、`assets/shell`）。
-  在此之前 `legacy/style.css` 不被加载，既有 Board 行为不变。
-- 接线时不得保留两套 token：`board.css` 的 `:root` 需与 `tokens.css` 合并，只改一边视为漂移（契约 §14）。
-- 抽屉的 `role="dialog"`、`aria-modal`、背景 `inert` 与焦点返回属于页面侧行为（VN-704），本包只冻结外观与动效。
+- `legacy/board.css` 是既有 Board 的高密度实现，由 `internal/board/board.go` 以 `go:embed` 注入 `{{MAW_STYLES}}`（颜色／字体族）。
+- **生产接线**：`internal/board/web/src/main.ts` 的 `injectStyles` 按
+  `tokens.css → components.css → shell.css → 视图 CSS` 注入 `#maw-vnext-styles`。
+  `legacy/style.css` 仍作测试／手工装配入口，顺序与上一致。
+- 不得保留互相漂移的两套 token：`board.css` 的 `:root` 颜色须与 `tokens.css` 同值；
+  字级／密度／动效以 `tokens.css` 为唯一源（契约 §14）。
+- 抽屉的 `role="dialog"`、`aria-modal`、背景 `inert` 与焦点返回属于页面侧行为，本包只冻结外观与动效。

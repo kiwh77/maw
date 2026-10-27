@@ -392,9 +392,7 @@ export function renderRunList(state = {}, options = {}) {
   if (state.status === "expired") return emptyState(lang, ["runs.expired", "runs.expired.hint"]);
 
   const runs = Array.isArray(state.runs) ? state.runs : [];
-  const header = '<header class="nodes-head"><h1>' + safeText(t("runs.list", lang)) + "</h1>" +
-    '<p class="field-hint">' + safeText(t("runs.subtitle", lang)) + "</p></header>";
-  if (!runs.length) return header + emptyState(lang, ["runs.empty", "runs.empty.hint"]);
+  if (!runs.length) return emptyState(lang, ["runs.empty", "runs.empty.hint"]);
 
   const rows = runs.map(run => {
     const layers = describeLayers(run);
@@ -411,8 +409,7 @@ export function renderRunList(state = {}, options = {}) {
       "</tr>";
   }).join("");
 
-  return header +
-    '<p class="field-hint">' + safeText(runs.length + " " + t("runs.count", lang)) + "</p>" +
+  return '<p class="field-hint">' + safeText(runs.length + " " + t("runs.count", lang)) + "</p>" +
     '<div class="table-wrap"><table class="table"><thead><tr>' +
     ["id", "layer.run", "rec.confirmed", "layer.delivery", "layer.task", "occ.title"].map(key =>
       "<th>" + safeText(t(key === "id" ? "oc.id" : key, lang)) + "</th>"
@@ -455,10 +452,8 @@ export function renderRunDetail(run = {}, options = {}) {
     : '<p class="field-hint">' + safeText(t("log.empty", lang)) + "</p>";
 
   return '<article class="run-detail">' +
-    '<header class="nodes-head">' +
-    "<h1>" + safeText(run.run_id || run.id) + "</h1>" +
-    '<p class="field-hint">' + safeText(t("gen.label", lang)) + " " + safeText(run.generation ?? "—") + "</p>" +
-    "</header>" +
+    '<p class="field-hint">' + safeText(run.run_id || run.id) + " · " +
+    safeText(t("gen.label", lang)) + " " + safeText(run.generation ?? "—") + "</p>" +
     '<div class="table-wrap"><table class="table">' +
     layerRow("layer.run", t("phase." + layers.run.phase, lang) + " · " + t("rec." + layers.run.reconciliation, lang),
       "layer.run.note", lang, phaseBadgeClass(layers.run.phase)) +

@@ -77,11 +77,9 @@ const DETAIL_RENDERERS = Object.freeze({
 });
 
 const TASKS_SOURCE = "/api/board";
-const KIND_ENDPOINTS = Object.freeze({
-  nodes: "/api/v1/nodes",
-  runs: "/api/v1/runs",
-  deliveries: "/api/v1/deliveries",
-});
+
+/** 控制类资源：服务端只有 `/api/v1/projects/{id}/…`，没有全局列表。 */
+const CONTROL_RESOURCES = Object.freeze(["nodes", "runs", "deliveries"]);
 
 /**
  * 按工程物化的观测资源名。
@@ -116,6 +114,14 @@ export function projectResourcePath(kind, projectId) {
   const id = String(projectId || "").trim();
   if (!id) return "";
   return "/api/v1/projects/" + encodeURIComponent(id) + "/" + resource;
+}
+
+/** 构造控制类（节点／运行／交付）按工程地址。 */
+export function controlResourcePath(kind, projectId) {
+  if (CONTROL_RESOURCES.indexOf(kind) < 0) return "";
+  const id = String(projectId || "").trim();
+  if (!id) return "";
+  return "/api/v1/projects/" + encodeURIComponent(id) + "/" + kind;
 }
 
 /** 构造能力发现地址。 */
@@ -157,24 +163,112 @@ function safeStorage(win) {
 /** 构造默认数据源：网络不可用或端点不存在时返回显式失败载荷。 */
 export function createDefaultSources(win, fetchImpl = null) {
   const doFetch = fetchImpl || (win && typeof win.fetch === "function" ? win.fetch.bind(win) : null);
-  async function getJSON(url) {
-    if (!doFetch) return { unavailable: true };
+  let sessionPromise = null;
+
+  async function ensureSession() {
+    if (!doFetch) return false;
+    if (!sessionPromise) {
+      sessionPromise = (async () => {
+        try {
+          const res = await doFetch("/api/session", {
+            method: "POST",
+            headers: { Accept: "application/json" },
+            credentials: "same-origin",
+          });
+          return Boolean(res && res.ok);
+        } catch (_) {
+          return false;
+        }
+      })();
+    }
+    const ok = await sessionPromise;
+    if (!ok) sessionPromise = null;
+    return ok;
+  }
+
+  async function getJSON(url, opts = {}) {
+    if (!doFetch) return { unavailable: true, status: 0 };
+    if (opts.auth) await ensureSession();
     try {
-      const res = await doFetch(url, { headers: { Accept: "application/json" } });
-      if (!res || !res.ok) return { unavailable: true, status: res ? res.status : 0 };
+      let res = await doFetch(url, {
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+      });
+      if (res && res.status === 401 && opts.auth) {
+        sessionPromise = null;
+        if (await ensureSession()) {
+          res = await doFetch(url, {
+            headers: { Accept: "application/json" },
+            credentials: "same-origin",
+          });
+        }
+      }
+      if (!res || !res.ok) {
+        const fail = { unavailable: true, status: res ? res.status : 0 };
+        if (res && res.status === 401) fail.unauthenticated = true;
+        return fail;
+      }
       return await res.json();
     } catch (_) {
       return { unavailable: true, status: 0 };
     }
   }
+
+  function withNamedList(kind, payload) {
+    if (!payload || payload.unavailable === true) return payload;
+    if (!Array.isArray(payload[kind]) && Array.isArray(payload.items)) {
+      return { ...payload, [kind]: payload.items };
+    }
+    return payload;
+  }
+
+  async function fetchControl(kind, projectId) {
+    const url = controlResourcePath(kind, projectId);
+    if (!url) return { unavailable: true, status: 0 };
+    return withNamedList(kind, await getJSON(url, { auth: true }));
+  }
+
+  async function fetchControlAll(kind) {
+    const board = await getJSON(TASKS_SOURCE);
+    if (!board || board.unavailable === true) return board || { unavailable: true, status: 0 };
+    const projects = Array.isArray(board.projects) ? board.projects : [];
+    const ids = projects
+      .map(p => String((p && (p.id || p.project_id)) || "").trim())
+      .filter(Boolean);
+    if (!ids.length) return { [kind]: [], items: [] };
+    const parts = await Promise.all(ids.map(id => fetchControl(kind, id)));
+    if (parts.every(p => p && p.unauthenticated === true)) {
+      return { unavailable: true, status: 401, unauthenticated: true };
+    }
+    if (parts.every(p => p && p.unavailable === true)) {
+      return { unavailable: true, status: (parts[0] && parts[0].status) || 0 };
+    }
+    const items = parts.flatMap(p => {
+      if (!p || p.unavailable === true) return [];
+      if (Array.isArray(p[kind])) return p[kind];
+      if (Array.isArray(p.items)) return p.items;
+      return [];
+    });
+    return { [kind]: items, items };
+  }
+
   /** 观测资源：地址由工程决定，缺工程不拼地址、直接报不可用。 */
   function projectSource(kind) {
     return async route => {
       const url = projectResourcePath(kind, route && route.project);
-      if (!url) return { unavailable: true };
-      return getJSON(url);
+      if (!url) return { unavailable: true, status: 0 };
+      return getJSON(url, { auth: true });
     };
   }
+
+  function controlSource(kind) {
+    return async route => {
+      const project = String((route && route.project) || "").trim();
+      if (project) return fetchControl(kind, project);
+      return fetchControlAll(kind);
+    };
+  }
+
   return {
     async tasks(route) {
       const params = new URLSearchParams();
@@ -184,9 +278,9 @@ export function createDefaultSources(win, fetchImpl = null) {
       const query = params.toString();
       return getJSON(TASKS_SOURCE + (query ? "?" + query : ""));
     },
-    async nodes() { return getJSON(KIND_ENDPOINTS.nodes); },
-    async runs() { return getJSON(KIND_ENDPOINTS.runs); },
-    async deliveries() { return getJSON(KIND_ENDPOINTS.deliveries); },
+    nodes: controlSource("nodes"),
+    runs: controlSource("runs"),
+    deliveries: controlSource("deliveries"),
     timeline: projectSource("timeline"),
     activity: projectSource("activity"),
     sessions: projectSource("sessions"),
@@ -203,7 +297,7 @@ export function createDefaultSources(win, fetchImpl = null) {
     async capabilities(projectId) {
       const url = capabilitiesPath(projectId);
       if (!url) return null;
-      const payload = await getJSON(url);
+      const payload = await getJSON(url, { auth: true });
       if (!payload || payload.unavailable === true) return null;
       const list = Array.isArray(payload.capabilities) ? payload.capabilities : null;
       if (!list) return null;
@@ -355,7 +449,8 @@ export function createShell(options = {}) {
   }
 
   function ensureDetail() {
-    if (detailRoot) return detailRoot;
+    const existing = byId(doc, "vnext-detail");
+    if (existing) return existing;
     const panel = doc.createElement("section");
     panel.id = "vnext-detail";
     panel.className = "vnext-detail";
@@ -367,7 +462,12 @@ export function createShell(options = {}) {
       '<button type="button" class="vnext-detail__close" id="vnext-detail-close">×</button>' +
       "</div>" +
       '<div class="vnext-detail__body" id="vnext-detail-body"></div>';
-    (doc.body || doc.documentElement).appendChild(panel);
+    // 挂到内容区：与列表并列，详情时替换列表而非浮层盖住筛选头。
+    const host = (root && root.parentNode) || byId(doc, "content") ||
+      (doc.querySelector && doc.querySelector(".content")) ||
+      doc.body || doc.documentElement;
+    if (root && root.parentNode === host) host.insertBefore(panel, root.nextSibling);
+    else host.appendChild(panel);
     return panel;
   }
 
@@ -378,7 +478,7 @@ export function createShell(options = {}) {
     if (label) label.textContent = t("nav.workbench");
     nav.classList.add("vnext-nav");
     nav.setAttribute("aria-label", t("aria.workbench"));
-    nav.innerHTML = registry.navModel().map(group =>
+    nav.innerHTML = registry.sidebarNavModel().map(group =>
       '<div class="section-label">' + esc(t(group.labelKey)) + "</div>" +
       group.items.map(def => {
         const active = def.id === state.route.view;
@@ -432,11 +532,59 @@ export function createShell(options = {}) {
     if (hints) hints.hidden = true;
   }
 
+  /**
+   * 按视图门控看板 chrome，避免 vnext 菜单页仍挂着筛选条 / Board 切换。
+   *
+   *   - legacy：stats + filters + view-toggle + 搜索全显
+   *   - control/review/settings：整条看板 chrome 隐藏（工程筛选仅服务流程视图）
+   */
+  function setBoardChrome(def) {
+    const isLegacy = Boolean(def && def.legacy);
+    const showStats = isLegacy;
+    const showFilters = isLegacy;
+    const showToggle = isLegacy;
+    const showSearch = isLegacy;
+
+    const stats = byId(doc, "stats");
+    if (stats) stats.hidden = !showStats;
+
+    const filters = byId(doc, "filters");
+    if (filters) filters.hidden = !showFilters;
+
+    const toggle = byId(doc, "view-toggle");
+    if (toggle) {
+      toggle.hidden = !showToggle;
+      const buttons = toggle.querySelectorAll
+        ? toggle.querySelectorAll("[data-view]")
+        : [];
+      Array.prototype.forEach.call(buttons, btn => {
+        // vnext 清掉 legacy 高亮；回 legacy 时按当前视图恢复，不依赖 win.setView。
+        const active = showToggle && def && btn.dataset.view === def.id;
+        btn.classList.toggle("active", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+
+    const count = byId(doc, "board-count");
+    if (count) count.hidden = !showToggle;
+
+    const search = byId(doc, "task-search");
+    if (search) {
+      const box = search.closest ? search.closest(".search-box") : null;
+      if (box) box.hidden = !showSearch;
+      else search.hidden = !showSearch;
+    }
+
+    const toolbar = doc.querySelector ? doc.querySelector(".toolbar") : null;
+    if (toolbar) toolbar.hidden = !showFilters && !showToggle && !showSearch;
+  }
+
   function showLegacy(def) {
     if (root) root.hidden = true;
     if (detailRoot) detailRoot.hidden = true;
     const hints = byId(doc, "hint-center");
     if (hints) hints.hidden = false;
+    setBoardChrome(def);
     if (typeof win.setView === "function") {
       win.setView(def.id);
       return;
@@ -576,8 +724,11 @@ export function createShell(options = {}) {
     const panel = ensureDetail();
     if (!panel) return;
     const id = state.route.detail;
+    const hideList = () => { if (root) root.hidden = true; };
+    const showList = () => { if (root && !def.legacy) root.hidden = false; };
     if (def.legacy || !id) {
       panel.hidden = true;
+      showList();
       if (def.id !== "tasks" && state.lastLegacyDetail && typeof win.closeDrawer === "function") {
         win.closeDrawer();
       }
@@ -586,6 +737,7 @@ export function createShell(options = {}) {
     }
     if (def.id === "tasks") {
       panel.hidden = true;
+      showList();
       if (state.lastLegacyDetail !== id) {
         state.lastLegacyDetail = id;
         if (typeof win.openDrawer === "function") win.openDrawer(id, state.route.project || "");
@@ -596,6 +748,7 @@ export function createShell(options = {}) {
     if (!renderDetailFn) {
       // 没有详情面的视图（回顾／统计／设置）：不做「找不到这一项」的假提示。
       panel.hidden = true;
+      showList();
       return;
     }
     const item = findDetail(def.id, currentPayload(def.id), id);
@@ -610,6 +763,7 @@ export function createShell(options = {}) {
         : '<p class="field-hint">' + esc(t("detail.missing")) + " " + esc(t("detail.missing.hint")) + "</p>";
     }
     panel.hidden = false;
+    hideList();
     const back = byId(doc, "vnext-detail-back");
     const close = byId(doc, "vnext-detail-close");
     if (back) back.textContent = t("detail.back");
@@ -686,8 +840,11 @@ export function createShell(options = {}) {
       return handle;
     }
     hideLegacyContainers();
+    setBoardChrome(def);
     updateChrome(def);
-    if (root) root.hidden = false;
+    // 有详情面时列表已由 renderDetail 隐藏，勿再强制显示。
+    const detailOpen = Boolean(state.route.detail && DETAIL_RENDERERS[def.id]);
+    if (root && !detailOpen) root.hidden = false;
     paint(def, currentState(def.id));
     void load(def.id, state.route);
     return handle;
@@ -762,6 +919,18 @@ export function createShell(options = {}) {
       if (searchTimer) win.clearTimeout(searchTimer);
       searchTimer = win.setTimeout(syncFiltersToRoute, 180);
     });
+    // vnext 下拦截 legacy toggle：改走 shell.navigate，避免 #columns 与 #vnext-view 叠层。
+    on(byId(doc, "view-toggle"), "click", event => {
+      const current = resolveView(registry, state.route.view);
+      if (current.legacy) return;
+      const button = event.target && event.target.closest
+        ? event.target.closest("[data-view]")
+        : null;
+      if (!button || !button.dataset.view) return;
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      if (typeof event.stopPropagation === "function") event.stopPropagation();
+      handle.navigate(button.dataset.view);
+    }, true);
     // legacy 用 replaceState 改工程锚点，不触发 hashchange，这里补一次同步。
     on(byId(doc, "project-nav"), "click", () => {
       win.setTimeout(() => {

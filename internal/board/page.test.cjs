@@ -293,6 +293,16 @@ test('built web bundle exposes the mount placeholder API', () => {
   assert.match(source, /mountBoard/);
 });
 
+test('built web bundle inlines tokens.css so production pages define shared density vars', () => {
+  const source = fs.readFileSync(__dirname + '/assets/dist/board-web.js', 'utf8');
+  // injectStyles 必须以 tokens 为唯一字级／间距源；缺定义时组件 var(--font-body) 等在浏览器为空。
+  assert.match(source, /--font-body:\s*13px/);
+  assert.match(source, /--line-body:\s*1\.5/);
+  assert.match(source, /--row-height:\s*36px/);
+  assert.match(source, /--space-block:\s*16px/);
+  assert.match(source, /maw-vnext-styles/);
+});
+
 // ---------- VN-704：统一布局挂载层 ----------
 
 const shellUrl = path => require('node:url').pathToFileURL(__dirname + path).href;
@@ -340,14 +350,21 @@ test('VN-704 路由保留旧工程锚点并让 vnext 视图可往返', async () 
   assert.equal(detail.detail, 'run_1');
   assert.equal(router.serializeRoute(detail), '/?view=runs&project=abc&id=run_1#abc');
 
-  // board 视图忽略 id，旧详情抽屉行为不被改写。
-  assert.equal(router.parseRoute('?id=t-1', '', known).detail, '');
-  // 未知视图回退看板，且不把 id 带进来。
+  // 无工程且无合法 view 时默认 nodes；board 视图才忽略 id。
+  assert.equal(router.parseRoute('?id=t-1', '', known).view, 'nodes');
+  assert.equal(router.parseRoute('?view=board&id=t-1', '', known).detail, '');
+  // 未知视图：无工程回退 nodes（可带 id），有工程回退 board（board 忽略 id）。
   const unknown = router.parseRoute('?view=ghost&id=x', '', known);
-  assert.equal(unknown.view, 'board');
-  assert.equal(unknown.detail, '');
+  assert.equal(unknown.view, 'nodes');
+  assert.equal(unknown.detail, 'x');
+  assert.equal(router.parseRoute('?view=ghost&project=p-9&id=x', '', known).view, 'board');
+  assert.equal(router.parseRoute('?view=ghost&project=p-9&id=x', '', known).detail, '');
   assert.equal(router.serializeQuery({ view: 'board', project: 'abc' }), '');
   assert.equal(router.sameRoute(detail, router.parseRoute('?view=runs&project=abc&id=run_1', '', known)), true);
+  assert.deepEqual(
+    views.sidebarNavModel().map(group => group.id),
+    ['control', 'review', 'settings'],
+  );
 });
 
 test('VN-704 全局语言只由语言簿收口并回退不产生 undefined', async () => {
@@ -416,17 +433,13 @@ test('VN-704 数据适配显式区分失败与待核实，pending/unknown 不被
   assert.equal(ctx.lang, 'zh');
 });
 
-test('VN-704 页面在 legacy 之后挂载 shell，且不强制依赖 bundle', () => {
+test('VN-704 页面以 Vue 挂载点 + board-web bundle 启动', () => {
   const html = fs.readFileSync(__dirname + '/page.html', 'utf8');
-  assert.match(html, /id="vnext-nav"/);
-  assert.match(html, /id="vnext-view"/);
-  assert.match(html, /id="vnext-detail"/);
-  const legacyAt = html.indexOf('id="board-app"');
-  const bundleAt = html.indexOf('id="board-web"');
-  const bootAt = html.indexOf('id="workbench-bootstrap"');
-  assert.ok(legacyAt >= 0 && bundleAt > legacyAt, 'bundle loads after the legacy app');
-  assert.ok(bootAt > bundleAt, 'bootstrap runs after the bundle tag');
-  assert.match(html, /typeof window\.MawBoard\.mountShell !== "function"\) return;/);
+  assert.match(html, /id="app"/);
+  assert.match(html, /id="board-web"/);
+  assert.match(html, /src="assets\/board-web\.js"/);
+  assert.equal(html.includes('id="board-app"'), false);
+  assert.equal(html.includes('workbench-bootstrap'), false);
   const shell = fs.readFileSync(__dirname + '/assets/shell/board-shell.mjs', 'utf8');
   assert.match(shell, /export function mountShell/);
   assert.match(shell, /export function createShell/);
@@ -564,7 +577,7 @@ test('VN-705 缺工程时不发请求也不出空表：状态是「未选上下�
   // 没有工程的默认数据源不打网络：直接判不可用，由挂载层换成「先选工程」。
   let asked = 0;
   const sources = shell.createDefaultSources({ fetch: () => { asked += 1; return Promise.resolve({ ok: true, json: async () => ({}) }); } });
-  assert.deepEqual(await sources.timeline({ project: '' }), { unavailable: true });
+  assert.deepEqual(await sources.timeline({ project: '' }), { unavailable: true, status: 0 });
   assert.equal(asked, 0);
 });
 
@@ -627,11 +640,13 @@ test('VN-705 工程清单复用看板快照，并说明快照缺策略而不是�
 
 test('VN-705 页面骨架留出面包屑范围位，静态导出不引入绝对资源路径', () => {
   const html = fs.readFileSync(__dirname + '/page.html', 'utf8');
-  assert.match(html, /id="crumb-scope"/);
-  assert.match(html, /id="crumb-scope-slash"/);
-  // 范围位在视图名之前：读起来是 工作台 / 回顾 / 工程 / 视图。
-  assert.ok(html.indexOf('id="crumb-scope"') < html.indexOf('id="workspace-name"'));
+  assert.match(html, /id="app"/);
   assert.equal(/src="\/assets\//.test(html), false);
+  // 面包屑范围位迁到 Vue App；相对资源路径仍由 page 引用。
+  const app = fs.readFileSync(__dirname + '/web/src/App.vue', 'utf8');
+  assert.match(app, /id="crumb-scope"/);
+  assert.match(app, /id="workspace-name"/);
+  assert.ok(app.indexOf('id="crumb-scope"') < app.indexOf('id="workspace-name"'));
 
   const css = fs.readFileSync(__dirname + '/assets/shell/shell.css', 'utf8');
   assert.match(css, /\.vnext-notice/);

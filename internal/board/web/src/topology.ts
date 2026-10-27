@@ -5,7 +5,7 @@
  * - 平滑曲线连接 + 中点圆点；
  * - 空白拖拽平移、Ctrl／⌘ + 滚轮缩放、适应画布／重布局；
  * - 悬停高亮相邻依赖，其余节点与边降透明度；
- * - 筛选外依赖以虚线 stub 表示；多工程 band 纵向堆叠并保留标题。
+ * - 筛选外依赖以虚线 stub 表示；多工程 band 纵向堆叠（不显示工程名／波次标签）。
  * - 状态文案由调用方 `statusLabels` 注入（中文／英文 i18n）。
  *
  * 颜色全部来自 `board.css` 的语义 token，节点为 HTML 节点，主题切换即时生效。
@@ -49,7 +49,6 @@ export interface TopologyStrings {
   relayout: string
   legend: string
   legendCross: string
-  wave: string
   stubTitle: string
   stubHint: string
 }
@@ -77,18 +76,13 @@ const DEFAULTS: TopologyStrings = {
   relayout: '重布局',
   legend: '依赖方向：前置 → 后续',
   legendCross: '虚线：当前视图外的依赖',
-  wave: 'W',
   stubTitle: '筛选外 / 历史依赖',
   stubHint: '不在当前视图',
 }
 
 const BAND_GAP = 40
-const BAND_HEAD_H = 30
-const WAVE_HEAD_H = 18
 
 const CARD_SHAPE = 'maw-topo-card'
-const BAND_SHAPE = 'maw-topo-band'
-const WAVE_SHAPE = 'maw-topo-wave'
 
 interface CardPayload {
   kind: 'card'
@@ -106,19 +100,6 @@ interface CardPayload {
   stubTitle: string
   stubHint: string
 }
-
-interface BandPayload {
-  kind: 'band'
-  name: string
-  count: string
-}
-
-interface WavePayload {
-  kind: 'wave'
-  label: string
-}
-
-type NodePayload = CardPayload | BandPayload | WavePayload
 
 function cardElement(payload: CardPayload): HTMLElement {
   const el = document.createElement('div')
@@ -143,37 +124,17 @@ function cardElement(payload: CardPayload): HTMLElement {
   return el
 }
 
-function bandElement(payload: BandPayload): HTMLElement {
-  const el = document.createElement('div')
-  el.className = 'topo-x6-band'
-  el.innerHTML =
-    '<span class="band-name">' + esc(payload.name) + '</span>' +
-    '<span class="band-count">' + esc(payload.count) + '</span>'
-  return el
-}
-
-function waveElement(payload: WavePayload): HTMLElement {
-  const el = document.createElement('div')
-  el.className = 'topo-x6-wave'
-  el.textContent = payload.label
-  return el
-}
-
 let shapesRegistered = false
 
 function ensureShapes(): void {
   if (shapesRegistered) return
   shapesRegistered = true
   const render = (cell: unknown): HTMLElement => {
-    const payload = (cell as { getData?: () => NodePayload }).getData?.()
-    if (!payload) return document.createElement('div')
-    if (payload.kind === 'band') return bandElement(payload)
-    if (payload.kind === 'wave') return waveElement(payload)
+    const payload = (cell as { getData?: () => CardPayload }).getData?.()
+    if (!payload || payload.kind !== 'card') return document.createElement('div')
     return cardElement(payload)
   }
   Shape.HTML.register({ shape: CARD_SHAPE, html: render })
-  Shape.HTML.register({ shape: BAND_SHAPE, html: render })
-  Shape.HTML.register({ shape: WAVE_SHAPE, html: render })
 }
 
 function esc(value: unknown): string {
@@ -271,36 +232,6 @@ function addNodes(instance: Instance, strings: TopologyStrings): void {
   const selected = instance.options.selected
   let offsetY = 0
   for (const band of instance.options.bands) {
-    graph.addNode({
-      id: 'band:' + band.pid,
-      shape: BAND_SHAPE,
-      x: 0,
-      y: offsetY,
-      width: band.width,
-      height: BAND_HEAD_H,
-      zIndex: 3,
-      data: {
-        kind: 'band',
-        name: band.name,
-        count: band.countText ?? band.tasks.length + ' · ' + band.edgeCount,
-      } satisfies BandPayload,
-    })
-
-    const depths = new Set<number>()
-    for (const [, pos] of band.positions) depths.add(pos.x)
-    for (const x of depths) {
-      graph.addNode({
-        id: 'wave:' + band.pid + ':' + x,
-        shape: WAVE_SHAPE,
-        x,
-        y: offsetY + BAND_HEAD_H,
-        width: 200,
-        height: WAVE_HEAD_H,
-        zIndex: 1,
-        data: { kind: 'wave', label: strings.wave + Math.round(x / (200 + 72)) } satisfies WavePayload,
-      })
-    }
-
     for (const [id, pos] of band.positions) {
       const task = band.byId.get(id) || { id, project_id: band.pid }
       const stub = !!pos.stub || !band.byId.has(id)
@@ -310,7 +241,7 @@ function addNodes(instance: Instance, strings: TopologyStrings): void {
         id: nodeKey(band.pid, id),
         shape: CARD_SHAPE,
         x: pos.x,
-        y: offsetY + BAND_HEAD_H + WAVE_HEAD_H + pos.y,
+        y: offsetY + pos.y,
         width: 200,
         height: 98,
         zIndex: 2,
@@ -331,7 +262,7 @@ function addNodes(instance: Instance, strings: TopologyStrings): void {
       })
     }
 
-    offsetY += BAND_HEAD_H + WAVE_HEAD_H + band.height + BAND_GAP
+    offsetY += band.height + BAND_GAP
   }
 }
 
@@ -345,6 +276,7 @@ function addEdges(instance: Instance): void {
         source: { cell: nodeKey(band.pid, edge.from), anchor: { name: 'right' } },
         target: { cell: nodeKey(band.pid, edge.to), anchor: { name: 'left' } },
         connector: { name: 'smooth' },
+        zIndex: 0,
         labels: [
           {
             markup: [{ tagName: 'circle', selector: 'dot' }],

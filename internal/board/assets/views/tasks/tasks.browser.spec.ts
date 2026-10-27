@@ -93,7 +93,8 @@ test.describe("VN-722 任务创建与指定派发", () => {
       { tasks: [readyTask, deadlockTask], allTasks: ALL_TASKS },
       { lang: "en" }
     ));
-    await expect(page.locator("h1")).toHaveText("Tasks");
+    await expect(page.locator(".table")).toBeVisible();
+    await expect(page.locator(".field-hint").first()).toContainText("tasks");
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);

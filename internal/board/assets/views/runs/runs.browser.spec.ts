@@ -94,7 +94,8 @@ test.describe("VN-723 运行详情与待核实", () => {
       { runs: [run(), run({ run_id: "run_2", reconciliation_state: "unknown" })] },
       { lang: "en" }
     ));
-    await expect(page.locator("h1")).toHaveText("Runs");
+    await expect(page.locator(".table")).toBeVisible();
+    await expect(page.locator(".field-hint").first()).toContainText("runs");
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);

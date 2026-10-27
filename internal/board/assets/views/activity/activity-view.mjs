@@ -419,10 +419,6 @@ export function renderActivity(state = {}, options = {}) {
   const selectedHour = options.selectedHour == null ? null : options.selectedHour;
   const selected = selectedHour == null ? null : cells[selectedHour];
 
-  const header = '<header class="activity__head nodes-head"><h1>' +
-    safeText(t("activity.title", lang)) + "</h1>" +
-    '<p class="field-hint">' + safeText(t("activity.subtitle", lang)) + "</p></header>";
-
   const toolbar = '<div class="activity__toolbar" role="toolbar">' +
     '<span class="field-hint">' + safeText(day) + " · " + safeText(timezone) + "</span>" +
     projectFilter(state, lang) +
@@ -438,7 +434,7 @@ export function renderActivity(state = {}, options = {}) {
   const allZeroOrMissing = !hasAny;
 
   if (allZeroOrMissing && !showMissingBanner) {
-    return '<div class="activity" data-status="empty">' + header + toolbar +
+    return '<div class="activity" data-status="empty">' + toolbar +
       metricCharts(state, lang, selectedHour) +
       emptyState(lang, ["activity.empty", "activity.empty.hint"]) + "</div>";
   }
@@ -449,7 +445,7 @@ export function renderActivity(state = {}, options = {}) {
     safeText(showMissingBanner && status === "ready" ? "unknown" : (status || "ready")) +
     '" data-day="' + safeText(day) + '" data-tz="' + safeText(timezone) + '"' +
     ' data-selected-hour="' + (selectedHour == null ? "" : selectedHour) + '">' +
-    header + toolbar + banner +
+    toolbar + banner +
     metricCharts(state, lang, selectedHour) +
     detail + "</div>";
 }

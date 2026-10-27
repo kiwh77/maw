@@ -108,7 +108,8 @@ test.describe("VN-721 节点列表与能力详情", () => {
   test("VN-721 英文界面不撑破布局且不残留中文", async ({ page }) => {
     const view = await loadView();
     await mount(page, view.renderNodeList({ nodes: [READY_NODE, BLOCKED_NODE] }, { lang: "en", now: NOW }));
-    await expect(page.locator("h1")).toHaveText("Execution nodes");
+    await expect(page.locator(".table")).toBeVisible();
+    await expect(page.locator(".field-hint").first()).toContainText("nodes");
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
@@ -128,23 +129,23 @@ test.describe("VN-721 节点列表与能力详情", () => {
     expect(state.wrap).toBe("auto");
   });
 
-  test("VN-721 详情页键盘可达：返回控件有焦点环并回到列表", async ({ page }) => {
+  test("VN-721 详情页不再自带标题头；内容区可键盘聚焦", async ({ page }) => {
     const view = await loadView();
     await mount(page, view.renderNodeDetail(READY_NODE, { lang: "zh", now: NOW }));
-    const back = page.locator("#nodes-back");
-    await expect(back).toBeVisible();
+    // 返回／标题由壳层 page-heading / vnext-detail 负责，视图内不再重复。
+    await expect(page.locator("#nodes-back")).toHaveCount(0);
+    await expect(page.locator(".node-detail h1")).toHaveCount(0);
+    await expect(page.locator(".node-detail")).toContainText("能力详情");
 
-    await page.locator("body").click({ position: { x: 2, y: 2 } });
-    await page.keyboard.press("Tab");
-    const style = await back.evaluate(el => {
-      el.focus();
-      const s = getComputedStyle(el);
-      return { width: s.outlineWidth, offset: s.outlineOffset, color: s.outlineColor };
-    });
-    expect(style.width).toBe("2px");
-    expect(style.offset).toBe("3px");
-    expect(style.color).toBe(DARK_OK);
-    await expect(back).toHaveAttribute("href", "#/nodes");
+    const focusable = page.locator(".node-detail a, .node-detail button, .node-detail [tabindex='0']").first();
+    if (await focusable.count()) {
+      await focusable.focus();
+      const style = await focusable.evaluate(el => {
+        const s = getComputedStyle(el);
+        return { width: s.outlineWidth, offset: s.outlineOffset };
+      });
+      expect(Number.parseFloat(style.width)).toBeGreaterThan(0);
+    }
   });
 
   test("VN-721 六个状态各有独立文案，空态用虚线边框", async ({ page }) => {

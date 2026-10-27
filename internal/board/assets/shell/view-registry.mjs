@@ -27,8 +27,14 @@
  * @property {boolean} requiresProject 是否必须先选定工程
  */
 
-/** 首屏默认视图：保持旧直达链接与旧看板行为。 */
+/** 有工程时的默认视图（toolbar 可进看板）。 */
 export const DEFAULT_VIEW = "board";
+
+/** 无工程时的默认视图（左栏无 flow，落到 control）。 */
+export const DEFAULT_VIEW_NO_PROJECT = "nodes";
+
+/** 侧栏不展示的分组（看板/工坊/拓扑改由选中工程后的 toolbar 进入）。 */
+export const SIDEBAR_HIDDEN_GROUPS = Object.freeze(["flow"]);
 
 /**
  * 导航分组。
@@ -109,6 +115,10 @@ export function createRegistry(defs = VIEW_DEFS) {
         group.items.push(def);
       });
       return groups;
+    },
+    /** 侧栏导航：去掉 flow（board/factory/topo）。 */
+    sidebarNavModel() {
+      return this.navModel().filter(group => SIDEBAR_HIDDEN_GROUPS.indexOf(group.id) < 0);
     },
   };
 }

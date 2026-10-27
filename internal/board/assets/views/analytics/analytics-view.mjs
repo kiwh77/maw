@@ -402,15 +402,11 @@ export function renderAnalytics(state = {}, options = {}) {
   const showUnknownBanner = status === "unknown" || completeness === "partial" ||
     completeness === "unknown";
 
-  const header = '<header class="analytics__head nodes-head"><h1>' +
-    safeText(t("analytics.title", lang)) + "</h1>" +
-    '<p class="field-hint">' + safeText(t("analytics.subtitle", lang)) + "</p></header>";
-
   const hasData = rep.deliveries.count != null || rep.usage.turn_count != null ||
     rep.timeline.engineering_seconds != null;
 
   if (!hasData && !showUnknownBanner) {
-    return '<div class="analytics" data-status="empty">' + header +
+    return '<div class="analytics" data-status="empty">' +
       emptyState(lang, ["analytics.empty", "analytics.empty.hint"]) + "</div>";
   }
 
@@ -421,7 +417,7 @@ export function renderAnalytics(state = {}, options = {}) {
 
   return '<div class="analytics" data-status="' +
     safeText(showUnknownBanner && status === "ready" ? "unknown" : (status || "ready")) + '">' +
-    header + banner +
+    banner +
     '<div class="analytics__cards">' +
     renderDeliveriesCard(rep, lang) + renderInvestCard(rep, lang) + renderUsageCard(rep, lang) +
     "</div>" +

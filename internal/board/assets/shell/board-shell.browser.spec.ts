@@ -39,6 +39,7 @@ const LAYOUT_CSS = `
   .nav-item.active { background: var(--hover); color: var(--accent); }
   .section-label { font: 600 10px/1.6 var(--mono, monospace); letter-spacing: .12em; text-transform: uppercase;
     color: var(--muted); padding: 6px 8px 2px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
   .board { display: grid; gap: 12px; }
   .table { width: 100%; border-collapse: collapse; }
   .table th, .table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--line); }
@@ -64,29 +65,47 @@ const BASE_HTML = `<!DOCTYPE html>
   </aside>
   <main class="workspace">
     <header class="topbar">
-      <div class="breadcrumb"><span class="dim">Workspace</span><span class="slash">/</span><strong id="workspace-name">All projects</strong></div>
+      <div class="breadcrumb"><span class="dim">Workspace</span><span class="slash">/</span><strong id="crumb-scope"></strong><span id="crumb-scope-slash" class="slash" hidden>/</span><strong id="workspace-name">All projects</strong></div>
       <select id="lang-select"><option value="en">EN</option><option value="zh">中</option></select>
     </header>
     <div class="content">
       <div class="page-heading"><div class="eyebrow">OPERATIONS / BOARD</div>
         <h1 id="page-h1">Task board</h1><p id="page-desc"></p></div>
-      <div id="filters"></div>
+      <section class="stats" id="stats"></section>
+      <div class="toolbar">
+        <div class="filters" id="filters">
+          <select id="f-project"><option value="">All projects</option></select>
+          <select id="f-agent"><option value="">All Agents</option></select>
+          <select id="f-status"><option value="">All statuses</option></select>
+        </div>
+        <div class="toolbar-right">
+          <div class="board-meta-left">
+            <div class="view-toggle" id="view-toggle" role="group">
+              <button type="button" id="view-board" data-view="board" class="active" aria-pressed="true">Board</button>
+              <button type="button" id="view-factory" data-view="factory" aria-pressed="false">Workshop</button>
+              <button type="button" id="view-topo" data-view="topo" aria-pressed="false">Topology</button>
+            </div>
+            <span id="board-count">Loading tasks…</span>
+          </div>
+          <label class="search-box"><input type="search" id="task-search"/></label>
+        </div>
+      </div>
       <div class="board" id="columns"><div class="lane">Ready</div></div>
       <div class="topo" id="topology" hidden></div>
       <section id="factory" hidden></section>
       <section class="vnext" id="vnext-view" hidden></section>
+      <section class="vnext-detail" id="vnext-detail" role="region" hidden>
+        <div class="vnext-detail__head">
+          <button type="button" class="vnext-detail__back" id="vnext-detail-back"></button>
+          <h2 class="vnext-detail__title" id="vnext-detail-title"></h2>
+          <button type="button" class="vnext-detail__close" id="vnext-detail-close">×</button>
+        </div>
+        <div class="vnext-detail__body" id="vnext-detail-body"></div>
+      </section>
       <div id="hint-center"></div>
     </div>
   </main>
 </div>
-<section class="vnext-detail" id="vnext-detail" role="region" hidden>
-  <div class="vnext-detail__head">
-    <button type="button" class="vnext-detail__back" id="vnext-detail-back"></button>
-    <h2 class="vnext-detail__title" id="vnext-detail-title"></h2>
-    <button type="button" class="vnext-detail__close" id="vnext-detail-close">×</button>
-  </div>
-  <div class="vnext-detail__body" id="vnext-detail-body"></div>
-</section>
 </body>
 </html>`;
 
@@ -167,11 +186,18 @@ test.describe("VN-704 统一布局内接入受管闭环视图", () => {
 
     const nav = page.locator("#vnext-nav");
     await expect(nav).toBeVisible();
-    // 三个 legacy 流程视图 + 四个 vnext 控制视图，分组标题来自全局语言簿。
-    await expect(nav.locator("[data-view]")).toHaveCount(7);
-    await expect(nav.locator(".section-label").first()).toHaveText("流程");
+    // 侧栏不展示流程组（看板／工坊／拓朴改由 toolbar）。
+    await expect(nav.locator("[data-view]")).toHaveCount(10);
+    await expect(nav.locator(".section-label").first()).toHaveText("控制");
+    await expect(nav.locator('[data-view="board"]')).toHaveCount(0);
 
-    // 默认落在看板，legacy 容器保持可见，vnext 容器隐藏。
+    // 无工程默认落到节点；legacy 容器隐藏，vnext 可见。
+    await expect(page.locator("#vnext-view")).toBeVisible();
+    await expect(page.locator("#columns")).toBeHidden();
+    await expect(page.locator("#page-h1")).toHaveText("执行节点");
+    await expect(page.locator("#vnext-view tbody tr")).toHaveCount(2);
+
+    await page.evaluate(() => (window as any).__shell.navigate("board"));
     await expect(page.locator("#columns")).toBeVisible();
     await expect(page.locator("#vnext-view")).toBeHidden();
 
@@ -198,7 +224,7 @@ test.describe("VN-704 统一布局内接入受管闭环视图", () => {
 
     await page.selectOption("#lang-select", "en");
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page.locator("#vnext-nav .section-label").first()).toHaveText("Flow");
+    await expect(page.locator("#vnext-nav .section-label").first()).toHaveText("Control");
 
     await page.locator('#vnext-nav [data-view="nodes"]').click();
     await expect(page.locator("#page-h1")).toHaveText("Execution nodes");
@@ -239,6 +265,7 @@ test.describe("VN-704 统一布局内接入受管闭环视图", () => {
 
     const detail = page.locator("#vnext-detail");
     await expect(detail).toBeVisible();
+    await expect(page.locator("#vnext-view")).toBeHidden();
     await expect(page.locator("#vnext-detail-title")).toHaveText("run_1");
     // 运行的对账未知必须显式写「待核实」，不能当作完成。
     await expect(page.locator("#vnext-detail-body")).toContainText("待核实");
@@ -281,6 +308,55 @@ test.describe("VN-704 统一布局内接入受管闭环视图", () => {
     await expect(page.locator("#vnext-view .vnext-status")).toContainText("未提供该数据");
     await expect(page.locator("#vnext-view tbody tr")).toHaveCount(0);
     await expect(page.locator("#vnext-view .badge").filter({ hasText: /^可接任务$/ })).toHaveCount(0);
+  });
+
+  test("VN-704 看板 chrome 按视图门控：settings/tasks 全藏、board 全显", async ({ page }) => {
+    await mountWorkbench(page, {
+      fixtures: {
+        tasks: { tasks: [TASK_UNKNOWN], allTasks: [TASK_UNKNOWN] },
+        settings: {
+          ok: true,
+          auto_execution: { enabled: false, managed_execution_limit: 2, config_version: 3, platform_supported: true },
+        },
+      },
+    });
+
+    const chromeHidden = async () => page.evaluate(() => ({
+      stats: Boolean(document.getElementById("stats")?.hidden),
+      filters: Boolean(document.getElementById("filters")?.hidden),
+      toggle: Boolean(document.getElementById("view-toggle")?.hidden),
+      count: Boolean(document.getElementById("board-count")?.hidden),
+      search: Boolean(document.querySelector(".search-box")?.hidden),
+      toolbar: Boolean(document.querySelector(".toolbar")?.hidden),
+      columns: Boolean(document.getElementById("columns")?.hidden),
+      vnext: Boolean(document.getElementById("vnext-view")?.hidden),
+      boardActive: document.getElementById("view-board")?.classList.contains("active") === true,
+    }));
+
+    // 无工程默认落到 nodes；先切 board 再断言流程 chrome。
+    await page.evaluate(() => (window as any).__shell.navigate("board"));
+    expect(await chromeHidden()).toEqual({
+      stats: false, filters: false, toggle: false, count: false,
+      search: false, toolbar: false, columns: false, vnext: true, boardActive: true,
+    });
+
+    await page.evaluate(() => (window as any).__shell.navigate("tasks"));
+    expect(await chromeHidden()).toEqual({
+      stats: true, filters: true, toggle: true, count: true,
+      search: true, toolbar: true, columns: true, vnext: false, boardActive: false,
+    });
+
+    await page.evaluate(() => (window as any).__shell.navigate("settings"));
+    expect(await chromeHidden()).toEqual({
+      stats: true, filters: true, toggle: true, count: true,
+      search: true, toolbar: true, columns: true, vnext: false, boardActive: false,
+    });
+
+    await page.evaluate(() => (window as any).__shell.navigate("board"));
+    expect(await chromeHidden()).toEqual({
+      stats: false, filters: false, toggle: false, count: false,
+      search: false, toolbar: false, columns: false, vnext: true, boardActive: true,
+    });
   });
 });
 
@@ -326,8 +402,14 @@ type MountSpec = {
 };
 
 async function mountFromSource(page, spec: MountSpec = {}) {
+  // 生产入口已是 Vue 整页；本套用例验证 board-shell 源模块，需独占 DOM。
+  // 先落到 harness 同源，再 setContent 换成静态骨架，避免 Vue 抢写 #vnext-nav。
   await serveSourceModules(page);
-  await page.goto(spec.path || "/");
+  await page.goto("/");
+  await page.setContent(BASE_HTML.replace("__CSS__", loadCSS()), { waitUntil: "domcontentloaded" });
+  await page.evaluate(path => {
+    history.replaceState({}, "", path || "/");
+  }, spec.path || "/");
   await page.evaluate(async input => {
     const mod = await import("/assets/shell/board-shell.mjs");
     const calls: string[] = [];
@@ -389,11 +471,11 @@ test.describe("VN-705 挂载回顾统计与设置入口", () => {
     });
 
     const nav = page.locator("#vnext-nav");
-    await expect(nav.locator("[data-view]")).toHaveCount(13);
-    await expect(nav.locator(".section-label").nth(0)).toHaveText("流程");
-    await expect(nav.locator(".section-label").nth(1)).toHaveText("控制");
-    await expect(nav.locator(".section-label").nth(2)).toHaveText("回顾");
-    await expect(nav.locator(".section-label").nth(3)).toHaveText("设置");
+    await expect(nav.locator("[data-view]")).toHaveCount(10);
+    await expect(nav.locator(".section-label").nth(0)).toHaveText("控制");
+    await expect(nav.locator(".section-label").nth(1)).toHaveText("回顾");
+    await expect(nav.locator(".section-label").nth(2)).toHaveText("设置");
+    await expect(nav.locator('[data-view="board"]')).toHaveCount(0);
 
     // 直达链接恢复上下文：分组进面包屑，工程进标题位。
     await expect(page.locator("#crumb-scope")).toHaveText("回顾");
@@ -484,6 +566,74 @@ test.describe("VN-705 挂载回顾统计与设置入口", () => {
     await expect(page.locator("#vnext-view form").first()).toBeVisible();
     await expect(page.locator("#vnext-view form button[type=\"submit\"]")).toBeEnabled();
     await expect(page.locator('#vnext-view [data-readonly-notice="settings"]')).toHaveCount(0);
+    // 设置组不是筛选目标：看板 chrome 必须整体隐藏。
+    const chrome = await page.evaluate(() => ({
+      stats: Boolean(document.getElementById("stats")?.hidden),
+      filters: Boolean(document.getElementById("filters")?.hidden),
+      toggle: Boolean(document.getElementById("view-toggle")?.hidden),
+      toolbar: Boolean(document.querySelector(".toolbar")?.hidden),
+    }));
+    expect(chrome).toEqual({ stats: true, filters: true, toggle: true, toolbar: true });
+  });
+
+  test("VN-705 control 视图隐藏工程筛选头；回 board 全显", async ({ page }) => {
+    await mountFromSource(page, {
+      path: "/?view=tasks&project=p-harness",
+      payloads: { tasks: { tasks: [], allTasks: [] } },
+    });
+
+    const chromeHidden = async () => page.evaluate(() => ({
+      stats: Boolean(document.getElementById("stats")?.hidden),
+      filters: Boolean(document.getElementById("filters")?.hidden),
+      toggle: Boolean(document.getElementById("view-toggle")?.hidden),
+      search: Boolean(document.querySelector(".search-box")?.hidden),
+      toolbar: Boolean(document.querySelector(".toolbar")?.hidden),
+      vnext: Boolean(document.getElementById("vnext-view")?.hidden),
+    }));
+
+    expect(await chromeHidden()).toEqual({
+      stats: true, filters: true, toggle: true, search: true, toolbar: true, vnext: false,
+    });
+
+    await page.evaluate(() => (window as any).__shell.navigate("board"));
+    expect(await chromeHidden()).toEqual({
+      stats: false, filters: false, toggle: false, search: false, toolbar: false, vnext: true,
+    });
+  });
+
+  test("VN-705 打开节点详情时列表隐藏、详情占满内容区", async ({ page }) => {
+    await mountFromSource(page, {
+      path: "/?view=nodes&project=p-harness",
+      payloads: {
+        nodes: {
+          nodes: [{
+            id: "node_a",
+            name: "CodeBuddy local",
+            adapter: "codebuddy",
+            presence: { online: true, last_seen: new Date().toISOString() },
+            auth: { state: "ready" },
+            capability: {
+              declared: ["non_interactive"],
+              verified: ["non_interactive"],
+              cli_version: "1.4.0",
+              verified_version: "1.4.0",
+              verified_at: new Date().toISOString(),
+            },
+            slots: { total: 1, busy: 0 },
+            intake: "open",
+          }],
+        },
+      },
+    });
+
+    await page.locator("#vnext-view tbody tr").first().click();
+    await expect(page.locator("#vnext-detail")).toBeVisible();
+    await expect(page.locator("#vnext-view")).toBeHidden();
+    await expect(page.locator("#filters")).toBeHidden();
+
+    await page.locator("#vnext-detail-back").click();
+    await expect(page.locator("#vnext-detail")).toBeHidden();
+    await expect(page.locator("#vnext-view")).toBeVisible();
   });
 
   test("VN-705 工程清单说明快照缺策略，不把每行读成关闭", async ({ page }) => {

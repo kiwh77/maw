@@ -73,7 +73,7 @@ test.describe("VN-725 工程列表与策略概览", () => {
     const view = await loadView();
     await mount(page, view.renderProjectList({ projects: [READY, NOT_READY] }, { lang: "zh" }));
 
-    await expect(page.locator("h1")).toHaveText("工程");
+    await expect(page.locator(".projects-count")).toContainText("工程");
     for (const label of ["自动模式", "计算上限", "节点容量", "max_parallel 参考值"]) {
       await expect(page.locator("th", { hasText: label })).toHaveCount(1);
     }
@@ -110,7 +110,7 @@ test.describe("VN-725 工程列表与策略概览", () => {
     const view = await loadView();
     await mount(page, view.renderProjectList({ projects: [READY, NOT_READY] }, { lang: "en" }));
 
-    await expect(page.locator("h1")).toHaveText("Projects");
+    await expect(page.locator(".projects-count")).toContainText("projects");
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);

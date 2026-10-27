@@ -132,11 +132,10 @@ export function renderProjectList(state = {}, options = {}) {
   if (status === "unknown") return emptyState(lang, ["projects.unknown", "projects.unknown.hint"]);
 
   const projects = Array.isArray(state.projects) ? state.projects : [];
-  const header = '<header class="projects-head"><h1>' + esc(t("projects.title", lang)) + "</h1>" +
-    '<p class="field-hint">' + esc(t("projects.subtitle", lang)) + "</p>" +
-    '<p class="projects-count">' + projects.length + " " + esc(t("projects.count", lang)) + "</p></header>";
+  const count = '<p class="projects-count field-hint">' + projects.length + " " +
+    esc(t("projects.count", lang)) + "</p>";
 
-  if (!projects.length) return header + emptyState(lang, ["projects.empty", "projects.empty.hint"]);
+  if (!projects.length) return count + emptyState(lang, ["projects.empty", "projects.empty.hint"]);
 
   const rows = projects.map(project => {
     const view = projectPolicy(project, options);
@@ -155,7 +154,7 @@ export function renderProjectList(state = {}, options = {}) {
       "</tr>";
   }).join("");
 
-  return header +
+  return count +
     '<table class="table"><thead><tr>' +
     ["name", "auto", "limit", "capacity", "ref", "workspace"]
       .map(col => "<th>" + esc(t("projects.col." + col, lang)) + "</th>").join("") +

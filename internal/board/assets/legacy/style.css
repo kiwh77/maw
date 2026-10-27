@@ -5,13 +5,12 @@
  *   2. ../components/components.css —— 徽标、表格、表单、空态、抽屉与基础层
  *
  * 与 board.css 的关系：legacy/board.css 是既有 Board 的高密度实现，
- * 由 internal/board/board.go 以 go:embed 注入 {{MAW_STYLES}}。
- * 本卡（VN-702）的 Surface 不含 board.go 与 page.html，因此这里先建立共享入口，
- * 由 VN-704（持有 page.html / assets/shell）完成接线；在此之前本文件不被加载，
- * 既有 Board 行为不变。
+ * 由 internal/board/board.go 以 go:embed 注入 {{MAW_STYLES}}（颜色／字体族）。
+ * vnext 字级／间距／组件样式由 board-web `injectStyles` 注入 tokens.css 等；
+ * 本文件仍是「手工／测试装配」入口，与生产 inject 顺序保持一致。
  *
- * 迁移约束：接线时不得同时保留两套 token —— board.css 的 :root 需按契约 §14
- * 与 tokens.css 合并，只改一边视为漂移。
+ * 迁移约束：不得同时保留互相漂移的两套 token —— board.css 的 :root 颜色须与
+ * tokens.css 同值（契约 §14）；字级／密度以 tokens.css 为唯一源。
  */
 
 @import "../styles/tokens.css";

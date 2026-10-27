@@ -394,10 +394,6 @@ export function renderTimeline(state = {}, options = {}) {
   const showUnknownBanner = status === "unknown" || completeness === "partial" ||
     completeness === "unknown";
 
-  const header = '<header class="timeline__head nodes-head"><h1>' +
-    safeText(t("timeline.title", lang)) + "</h1>" +
-    '<p class="field-hint">' + safeText(t("timeline.subtitle", lang)) + "</p></header>";
-
   const toolbar = '<div class="timeline__toolbar" role="toolbar">' +
     '<span class="field-hint">' + safeText(t("toolbar.window", lang)) + ": " +
     safeText(formatAxis(dateCtx.start, dateCtx.timezone)) + " – " +
@@ -423,7 +419,7 @@ export function renderTimeline(state = {}, options = {}) {
     : "";
 
   if (!bars.length && status !== "unknown") {
-    return '<div class="timeline" data-status="empty">' + header + toolbar + legend(lang) +
+    return '<div class="timeline" data-status="empty">' + toolbar + legend(lang) +
       emptyState(lang, ["timeline.empty", "timeline.empty.hint"]) + cursors + "</div>";
   }
 
@@ -445,7 +441,7 @@ export function renderTimeline(state = {}, options = {}) {
   return '<div class="timeline" data-status="' +
     safeText(showUnknownBanner && status === "ready" ? "unknown" : (status || "ready")) +
     '" data-hours="' + dateCtx.hours + '" data-selected="' + safeText(focus.selectedId || "") + '">' +
-    header + toolbar + legend(lang) + banner +
+    toolbar + legend(lang) + banner +
     '<div class="timeline__lanes">' + lanesHtml + "</div>" +
     detail + cursors + "</div>";
 }

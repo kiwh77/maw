@@ -577,6 +577,8 @@ function setView(value) {
   updateTopoButtonState();
   if (lastSnap) renderWorkspace(lastSnap);
 }
+// shell.showLegacy 通过 win.setView 回切 legacy 容器与 toggle 高亮。
+if (typeof window !== "undefined") window.setView = setView;
 
 let searchTerm = "";
 let boardView = "board";
@@ -1428,7 +1430,6 @@ function renderTopoCanvas(root, bands) {
       relayout: t("topo.relayout"),
       legend: t("topo.legend"),
       legendCross: t("topo.legend_cross"),
-      wave: "W",
       stubTitle: t("topo.outside"),
       stubHint: t("topo.not_in_view"),
     },
@@ -1467,7 +1468,6 @@ function renderTopology(s) {
         return renderTopoNode(task, pos, band.indeg, band.outdeg);
       }).join("");
       return '<section class="topo-band" data-project="'+esc(band.pid)+'">'+
-        '<div class="topo-band-label"><span>'+esc(band.name)+'</span><span class="count">'+band.tasks.length+' 任务 · '+band.edgeCount+' 边</span></div>'+
         '<div class="topo-canvas" style="width:'+band.width+'px;height:'+band.height+'px">'+
           '<svg class="topo-edges" viewBox="0 0 '+band.width+' '+band.height+'" width="'+band.width+'" height="'+band.height+'" aria-hidden="true">'+
             '<defs><marker id="'+markerId+'" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>'+

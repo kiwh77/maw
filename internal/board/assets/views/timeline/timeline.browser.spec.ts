@@ -133,7 +133,7 @@ test.describe("VN-741 分层执行时间轴", () => {
       { intervals: intervals() },
       { lang: "en", dateContext: ctx }
     ));
-    await expect(page.locator("h1")).toHaveText("Execution timeline");
+    await expect(page.locator(".timeline__toolbar")).toBeVisible();
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);

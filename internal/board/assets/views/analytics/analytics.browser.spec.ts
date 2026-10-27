@@ -136,7 +136,7 @@ test.describe("VN-744 交付与用量统计", () => {
   test("VN-744 英文界面不残留中文且无横向滚动", async ({ page }) => {
     const view = await loadView();
     await mount(page, view.renderAnalytics({ report: report() }, { lang: "en" }));
-    await expect(page.locator("h1")).toHaveText("Delivery & usage statistics");
+    await expect(page.locator(".analytics__cards")).toBeVisible();
     expect(await page.locator("body").innerText()).not.toMatch(/[\u4e00-\u9fa5]/);
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);

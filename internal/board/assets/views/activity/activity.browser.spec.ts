@@ -138,7 +138,7 @@ test.describe("VN-742 全天活动与小时下钻", () => {
       projects: [{ id: "p1", label: "Project One" }],
       project_id: "p1",
     }), { lang: "en", selectedHour: 0 }));
-    await expect(page.locator("h1")).toHaveText("Day activity");
+    await expect(page.locator(".activity__toolbar")).toBeVisible();
     expect(await page.locator("body").innerText()).not.toMatch(/[\u4e00-\u9fa5]/);
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);

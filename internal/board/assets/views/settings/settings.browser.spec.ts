@@ -63,7 +63,7 @@ test.describe("VN-725 工程策略与保留设置", () => {
     const policy = view.normalizePolicy(POLICY);
     await mount(page, view.renderSettings({ status: "ready", policy, save: "idle" }, { lang: "zh" }));
 
-    await expect(page.locator("h1")).toHaveText("工程策略与保留");
+    await expect(page.locator(".settings-save-status")).toBeVisible();
     for (const label of ["自动模式", "计算上限", "节点容量", "max_parallel 参考值"]) {
       await expect(page.locator("th", { hasText: label })).toHaveCount(1);
     }
@@ -96,7 +96,8 @@ test.describe("VN-725 工程策略与保留设置", () => {
     const policy = view.normalizePolicy(POLICY);
     await mount(page, view.renderSettings({ status: "ready", policy }, { lang: "en" }));
 
-    await expect(page.locator("h1")).toHaveText("Execution policy & retention");
+    await expect(page.locator(".settings-form")).toBeVisible();
+    await expect(page.locator("[data-no-secret]")).toContainText("no token");
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);

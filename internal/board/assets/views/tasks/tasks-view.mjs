@@ -379,10 +379,8 @@ export function renderTaskList(state = {}, options = {}) {
   if (state.status === "expired") return emptyState(lang, ["tasks.expired", "tasks.expired.hint"]);
 
   const tasks = sortTasks(Array.isArray(state.tasks) ? state.tasks : []);
-  const header = '<header class="nodes-head"><h1>' + esc(t("tasks.title", lang)) + "</h1>" +
-    '<p class="field-hint">' + esc(t("tasks.subtitle", lang)) + "</p></header>";
 
-  if (!tasks.length) return header + emptyState(lang, ["tasks.empty", "tasks.empty.hint"]);
+  if (!tasks.length) return emptyState(lang, ["tasks.empty", "tasks.empty.hint"]);
 
   // 依赖解析必须用全量任务集：筛选后的可见行不足以判断前置是否已完成／已退役。
   const universe = Array.isArray(state.allTasks) && state.allTasks.length ? state.allTasks : tasks;
@@ -427,8 +425,7 @@ export function renderTaskList(state = {}, options = {}) {
 
   const cols = ["id", "title", "priority", "merge_order", "deps", "scope", "node", "state", "dispatch"];
 
-  return header +
-    '<p class="field-hint">' + esc(tasks.length + " " + t("tasks.count", lang)) + " · " +
+  return '<p class="field-hint">' + esc(tasks.length + " " + t("tasks.count", lang)) + " · " +
     esc(dispatchableCount + " " + t("tasks.dispatchable", lang)) + "</p>" +
     '<div class="table-wrap"><table class="table"><thead><tr>' +
     cols.map(col => "<th>" + esc(t("col." + col, lang)) + "</th>").join("") +

@@ -142,7 +142,7 @@ test.describe("VN-743 会话轮次与来源明细", () => {
   test("VN-743 英文界面不残留中文且无横向滚动", async ({ page }) => {
     const view = await loadView();
     await mount(page, view.renderSessions(state(), { lang: "en", selectedId: "sess-2" }));
-    await expect(page.locator("h1")).toHaveText("Source sessions");
+    await expect(page.locator(".sessions__table")).toBeVisible();
     expect(await page.locator("body").innerText()).not.toMatch(/[\u4e00-\u9fa5]/);
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);

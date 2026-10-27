@@ -10,7 +10,7 @@
 //   3. 工程锚点优先取 `?project=`，缺省时取旧 hash，两处始终序列化回 hash；
 //   4. `id` 只在 vnext 视图生效；board 视图忽略它，不改变 legacy 详情抽屉行为。
 
-import { DEFAULT_VIEW } from "./view-registry.mjs";
+import { DEFAULT_VIEW, DEFAULT_VIEW_NO_PROJECT } from "./view-registry.mjs";
 
 export const PARAM_VIEW = "view";
 export const PARAM_PROJECT = "project";
@@ -62,12 +62,13 @@ export function parseRoute(search = "", hash = "", isKnownView = null) {
   }
   const known = typeof isKnownView === "function" ? isKnownView : () => true;
   const requested = params.get(PARAM_VIEW) || "";
-  const view = requested && known(requested) ? requested : DEFAULT_VIEW;
   const anchor = projectFromHash(hash);
-  const project = params.get(PARAM_PROJECT) || anchor;
+  const project = params.get(PARAM_PROJECT) || anchor || "";
+  const fallback = project ? DEFAULT_VIEW : DEFAULT_VIEW_NO_PROJECT;
+  const view = requested && known(requested) ? requested : fallback;
   return {
     view,
-    project: project || "",
+    project,
     agent: params.get(PARAM_AGENT) || "",
     status: params.get(PARAM_STATUS) || "",
     search: params.get(PARAM_SEARCH) || "",

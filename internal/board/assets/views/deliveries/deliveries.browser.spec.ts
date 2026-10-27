@@ -163,7 +163,7 @@ test.describe("VN-724 交付与验收详情", () => {
   test("VN-724 英文界面不残留中文且无页面级横向滚动", async ({ page }) => {
     const view = await loadView();
     await mount(page, view.renderDeliveryDetail(delivery(), { lang: "en", run: { phase: "completed", exit_code: 0 } }));
-    await expect(page.locator("h1")).toContainText("Deliveries");
+    await expect(page.locator(".deliveries-meta")).toBeVisible();
     await expect(page.locator("body")).toContainText("Review and merge");
 
     const overflow = await page.evaluate(() =>

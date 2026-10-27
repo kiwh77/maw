@@ -422,10 +422,9 @@ export function renderSettings(state = {}, options = {}) {
   const save = state.save || SAVE_STATUS.idle;
   const errors = state.errors || [];
 
-  const header = '<header class="settings-head"><h1>' + esc(t("settings.title", lang)) + "</h1>" +
-    '<p class="field-hint">' + esc(t("settings.subtitle", lang)) + "</p>" +
-    '<p class="settings-save-status" data-save="' + esc(save) + '">' +
-    badge(t("save." + save, lang), STATUS_BADGE[save] || "badge--self_check") + "</p></header>";
+  // 标题已由壳层 page-heading 提供；这里只保留保存态。
+  const saveStatus = '<p class="settings-save-status" data-save="' + esc(save) + '">' +
+    badge(t("save." + save, lang), STATUS_BADGE[save] || "badge--self_check") + "</p>";
 
   const form = '<form class="settings-form" data-revision="' + esc(policy.revision ?? "") + '" novalidate>' +
     '<fieldset class="settings-fieldset"><legend class="field-label">' + esc(t("field.auto", lang)) + "</legend>" +
@@ -446,5 +445,5 @@ export function renderSettings(state = {}, options = {}) {
       : "") +
     "</div></form>";
 
-  return header + conceptTable(lang, policy, mode, reasonKey) + form;
+  return saveStatus + conceptTable(lang, policy, mode, reasonKey) + form;
 }

@@ -4,8 +4,9 @@ Board 拓扑页面的前端工程：Vite + TypeScript + [`@antv/x6`](https://x6.
 
 - 入口：`src/main.ts`，导出 `mountBoard` 占位 API 与 X6 的 `Graph`。
 - 产物：`internal/board/assets/dist/board-web.js`（IIFE，全局名 `MawBoard`）。
-- 视觉 token 仍定义在 `internal/board/page.html` 的 `:root`，本包不写死颜色。
-- 本包**不参与 Go 侧装配**：`PageHTML`／`serve.go` 的引用由 VN-707 接入，拓扑交互由 VN-708 实现。
+- 视觉 token 来自 `assets/styles/tokens.css`，由 `src/main.ts` `injectStyles` 打进产物；
+  本包不写死颜色。Go 侧 `{{MAW_STYLES}}` 仍嵌 `legacy/board.css`（高密度壳）。
+- `PageHTML`／`serve.go` 经 `/assets/board-web.js` 加载本产物。
 
 ## 重建
 

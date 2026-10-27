@@ -395,10 +395,6 @@ export function renderSessions(state = {}, options = {}) {
   const showUnknownBanner = status === "unknown" || completeness === "partial" ||
     completeness === "unknown";
 
-  const header = '<header class="sessions__head nodes-head"><h1>' +
-    safeText(t("sessions.title", lang)) + "</h1>" +
-    '<p class="field-hint">' + safeText(t("sessions.subtitle", lang)) + "</p></header>";
-
   const toolbar = '<div class="sessions__toolbar" role="toolbar">' +
     '<span class="sessions__kbd">' + safeText(t("kbd.hint", lang)) + "</span>" +
     (completeness ? '<span class="field-hint">' + safeText(t("cursors.completeness", lang)) + "=" +
@@ -410,7 +406,7 @@ export function renderSessions(state = {}, options = {}) {
     : "";
 
   if (!sessions.length && status !== "unknown") {
-    return '<div class="sessions" data-status="empty">' + header + toolbar +
+    return '<div class="sessions" data-status="empty">' + toolbar +
       emptyState(lang, ["sessions.empty", "sessions.empty.hint"]) + "</div>";
   }
 
@@ -428,7 +424,7 @@ export function renderSessions(state = {}, options = {}) {
   return '<div class="sessions" data-status="' +
     safeText(showUnknownBanner && status === "ready" ? "unknown" : (status || "ready")) +
     '" data-selected="' + safeText(focus.selectedId || "") + '">' +
-    header + toolbar + banner + table + detail + "</div>";
+    toolbar + banner + table + detail + "</div>";
 }
 
 /** 挂载辅助：把键盘事件映射到选中变化（宿主绑定）。 */

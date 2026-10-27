@@ -716,15 +716,15 @@ export function renderDeliveryDetail(delivery = {}, options = {}) {
   const stages = describeStages(delivery, { ...options, decision });
   const run = describeRunOutcome(options.run || null);
 
-  const header = '<header><h1>' + safeText(t("view.deliveries.title", lang)) + " · " +
-    safeText(delivery.delivery_id || "—") + "</h1>" +
-    '<p class="field-hint">' + safeText(t("view.deliveries.bind.instance", lang)) + " " +
+  const header = '<div class="deliveries-meta">' +
+    '<p class="field-hint">' + safeText(delivery.delivery_id || "—") + " · " +
+    safeText(t("view.deliveries.bind.instance", lang)) + " " +
     safeText(delivery.task_instance) + " · " + safeText(t("view.deliveries.bind.version", lang)) + " " +
     safeText(delivery.task_version) + " · " + safeText(modeLabel(delivery.mode, lang)) + "</p>" +
     '<div class="field"><button type="button" class="button" data-action="recheck">' +
     safeText(t("view.deliveries.reload", lang)) + "</button>" +
     '<span class="field-hint"> ' + safeText(t("view.deliveries.reload.note", lang)) + "</span></div>" +
-    "</header>";
+    "</div>";
 
   const decisionSection = "<section><h2>" + safeText(t("view.deliveries.section.decision", lang)) + "</h2>" +
     "<p>" + badge(t("view.deliveries.decision." + decision.decision, lang), decisionClass(decision.state)) +
@@ -1024,10 +1024,8 @@ export function renderDeliveryList(state = {}, options = {}) {
   }
 
   const deliveries = asArray(state.deliveries);
-  const header = "<header><h1>" + safeText(t("view.deliveries.title", lang)) + "</h1>" +
-    '<p class="field-hint">' + safeText(t("view.deliveries.subtitle", lang)) + "</p></header>";
   if (!deliveries.length) {
-    return header + emptyState(lang, ["view.deliveries.empty", "view.deliveries.empty.hint"]);
+    return emptyState(lang, ["view.deliveries.empty", "view.deliveries.empty.hint"]);
   }
 
   const rows = deliveries.map(delivery => {
@@ -1060,8 +1058,7 @@ export function renderDeliveryList(state = {}, options = {}) {
       "</tr>";
   }).join("");
 
-  return header +
-    '<p class="field-hint">' + safeText(deliveries.length + " " + t("view.deliveries.count", lang)) + "</p>" +
+  return '<p class="field-hint">' + safeText(deliveries.length + " " + t("view.deliveries.count", lang)) + "</p>" +
     tableWrap([
       "view.deliveries.col.delivery",
       "view.deliveries.col.instance",

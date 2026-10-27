@@ -76,6 +76,15 @@ select.theme-select { font-size: 10px; height: 28px; max-width: 100px; padding-t
 .breadcrumb .dim { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .breadcrumb .slash { color: var(--faint); }
 .breadcrumb strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-select { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: min(420px, 52vw); }
+.project-select__label { font-size: 11px; color: var(--muted); letter-spacing: .04em; white-space: nowrap; }
+.project-select__control {
+  min-width: 160px; max-width: 100%; height: 30px; padding: 0 28px 0 10px;
+  font: 12px var(--sans, inherit); color: var(--text);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  cursor: pointer;
+}
+.project-select__control:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .sub { color: var(--muted); font: 10px var(--mono); white-space: nowrap; display: flex; gap: 9px; align-items: center; }
 .live { display: inline-flex; gap: 6px; align-items: center; color: var(--accent); font: 10px var(--mono); }
 .live.err { color: var(--danger); }
@@ -131,13 +140,13 @@ select:hover, .quiet-button:hover { border-color: var(--line-strong); }
 .topo-band-label { display: flex; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--muted); padding: 12px 2px 10px; }
 .topo-band-label .count { font-size: 10px; color: var(--muted); background: var(--panel); padding: 1px 5px; border-radius: 3px; }
 .topo-canvas { position: relative; min-width: 100%; }
-.topo-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.topo-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 0; }
 .topo-edges path { fill: none; stroke: var(--line-strong); stroke-width: 1.25; }
 .topo-edges path.cross { stroke-dasharray: 4 3; opacity: .75; }
 .topo-edges circle.topo-edge-dot { fill: var(--line-strong); stroke: none; }
 .topo-edges circle.topo-edge-dot.cross { opacity: .75; }
 .topo-edges marker path { fill: var(--line-strong); }
-.topo-node { position: absolute; width: 200px; height: 98px; overflow: hidden; border: 1px solid var(--line); background: var(--card); border-radius: var(--radius); padding: 10px 11px; transition: border-color .15s, background .15s; }
+.topo-node { position: absolute; z-index: 1; width: 200px; height: 98px; overflow: hidden; border: 1px solid var(--line); background: var(--card); border-radius: var(--radius); padding: 10px 11px; transition: border-color .15s, background .15s; }
 .topo-node.clickable { cursor: pointer; }
 .topo-node.clickable:hover { border-color: var(--card-hover-border); background: var(--card-hover); }
 .topo-node.active { border-color: var(--accent); }

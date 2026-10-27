@@ -119,8 +119,7 @@ func TestPageHTMLAssemblesPublishedAssets(t *testing.T) {
 		`const THEMES`,
 		`<style>`,
 		`--bg: #141618`,
-		`<script id="board-app">`,
-		`const I18N`,
+		`id="app"`,
 		`<script id="board-web" src="assets/board-web.js" defer></script>`,
 	} {
 		if !strings.Contains(html, want) {
@@ -129,6 +128,9 @@ func TestPageHTMLAssemblesPublishedAssets(t *testing.T) {
 	}
 	if strings.Contains(html, "{{MAW_") {
 		t.Fatal("page still has unresolved asset slots")
+	}
+	if strings.Contains(html, `id="board-app"`) {
+		t.Fatal("legacy board-app script should not be embedded")
 	}
 }
 
@@ -176,7 +178,7 @@ func TestRootPageServesAssembledAssets(t *testing.T) {
 		t.Fatalf("code=%d", rr.Code)
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "const I18N") || strings.Contains(body, "{{MAW_") {
+	if !strings.Contains(body, `id="app"`) || !strings.Contains(body, "board-web.js") || strings.Contains(body, "{{MAW_") {
 		t.Fatalf("served page is not assembled")
 	}
 }
@@ -192,7 +194,7 @@ func TestStaticSnapshotLoadsWithoutWriteActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(raw)
-	if !strings.Contains(html, "const I18N") || strings.Contains(html, "{{MAW_") {
+	if !strings.Contains(html, `id="app"`) || !strings.Contains(html, "board-web.js") || strings.Contains(html, "{{MAW_") {
 		t.Fatal("static snapshot is not assembled")
 	}
 	for _, forbidden := range []string{`method: "POST"`, `method:"POST"`, `/api/status`} {

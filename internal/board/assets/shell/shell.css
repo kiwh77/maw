@@ -1,7 +1,8 @@
 /* Workbench 挂载层样式（VN-704）。
  *
- * 与共享组件一起注入：shell 在挂载时把 components.css 与本文件作为
- * 一个 <style> 插入页面，不新增第二套 token 或色值字面量。
+ * 与共享组件一起注入：board-web `injectStyles` 顺序为
+ * tokens.css → components.css → 本文件 → 视图局部 CSS。
+ * 不新增第二套 token 或色值字面量。
  * 断点沿用契约 §13 的 1500 / 1100 / 700，不另造断点。
  */
 
@@ -139,19 +140,18 @@
   opacity: .55;
 }
 
-/* ---------- 详情面板 ---------- */
+/* ---------- 详情面板（内容区内全宽，替换列表） ---------- */
 
 .vnext-detail {
-  position: fixed;
-  inset: 56px 24px 24px auto;
-  width: min(560px, calc(100vw - 48px));
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   overflow: auto;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--card);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
   padding: 16px 18px 24px;
-  z-index: 40;
   animation: surface-enter var(--dur-enter, 180ms) var(--ease, ease-out) both;
 }
 
@@ -206,11 +206,6 @@
   .vnext {
     padding-bottom: 24px;
   }
-
-  .vnext-detail {
-    inset: 52px 12px 12px 12px;
-    width: auto;
-  }
 }
 
 @media (max-width: 700px) {
@@ -228,9 +223,7 @@
   }
 
   .vnext-detail {
-    inset: 0;
     border-radius: 0;
     border: 0;
-    width: auto;
   }
 }
