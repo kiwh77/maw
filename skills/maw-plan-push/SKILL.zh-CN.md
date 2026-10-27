@@ -79,12 +79,15 @@ main_branch = "<本波主干>"   # 必填：与任务清单文首一致；apply 
 
 [[task]]
 id = "T-xxx"
-title = "一句话目标"
+title = "动词开头的可交付结果"
+goal = "现状：…。目标：…"
 priority = 10          # 越小越先；同盘串行用 10,20,30…
-deps = []              # 或 ["T-yyy"] 逻辑前置
+deps = []              # 或 ["T-yyy"] 逻辑前置；勿拼成 depends（静默丢弃）
 write_scope = ["path/**"]
-read_scope = []        # 可选
-acceptance = ["可验证的完成条件"]
+read_scope = ["docs/contracts/….md"]   # 实现题强制 ≥1
+acceptance = ["可判定断言（带观察点）"]  # L1 必需
+verify = ["go test ./… -count=1"]       # L1 必需；或 "manual: …"
+not_doing = ["不改 …"]
 merge_order = 10       # 建议与领取/合流顺序一致，步长 10
 ```
 

@@ -27,7 +27,8 @@ description: >-
 1. **`docs/**可执行任务清单*.md`**（或用户指定路径）— 人读任务卡  
 2. 可选同步草案：字段已能映射到 `.multiagent/blueprint.toml`（真正 apply 交给 maw-plan-push）
 
-每题必须能直接填蓝图：`id / title / priority / deps / write_scope / acceptance`。
+每题必须能直接填蓝图 **L1 六项**：`id / title / goal / write_scope / acceptance / verify`。  
+另加 L2：`deps` / `read_scope` / `not_doing` / `priority` / `merge_order`（缺 `verify` 或空 `acceptance` 时 `maw plan apply` 直接拒绝）。
 
 **文首必填主分支**：本波合入与 `maw next` worktree 基线（如 `main` / `dev` / 集成分支）。  
 maw **不写死**分支名 `main`；`init` 探测值只是占位。正式主干在本清单写明，压入蓝图 `[meta] main_branch` 后由 `plan apply` 同步到 config。
@@ -36,8 +37,8 @@ maw **不写死**分支名 `main`；`init` 探测值只是占位。正式主干�
 
 ### 1) 一题一职责
 
-- **Goal** 只用一句话；做完有可跑的 Verify。  
-- **Non-goals** 写清「本包不做」，防止顺手大改。  
+- **Goal** 用两句：`现状：…。目标：…`（动机 + 可观察变化）；做完有独立 **Verify**。  
+- **Non-goals** 写清「本包不做」，压入 `not_doing`，防止顺手大改。  
 - 禁止：一题同时「改契约 + 写实现 + 改前端菜单」。
 
 ### 2) Surface = 未来 write_scope
@@ -74,7 +75,7 @@ maw **不写死**分支名 `main`；`init` 探测值只是占位。正式主干�
 
 ### 5) 依赖只表达真前置
 
-- **Deps**：没有它无法正确开工（契约、端口、表）。  
+- **Deps**：没有它无法正确开工（契约、端口、表）。字段名必须是 `deps`（蓝图）/ `Depends`（清单）；拼成 `depends` 会被**静默丢弃**。  
 - **同 Lane 续作**也可用 Deps 表达「做完 A 再做 A'」（利于 next 亲和），不要只靠口头顺序。  
 - 不要把「最好先做」的跨 Lane 偏好全写成硬依赖（会串行化过度）。  
 - 文档勘误类可 `Depends: 无`，与实现并行。
@@ -82,7 +83,8 @@ maw **不写死**分支名 `main`；`init` 探测值只是占位。正式主干�
 ### 6) 契约 / 实现分离
 
 - 契约题：Surface 仅 `docs/contracts/**`（或设计 md）；**禁止**业务代码。  
-- 实现题：Contract 写「以 T-0xx 为准」；不得发明第二套字段名。
+- 实现题：Contract 写「以 T-0xx 为准」；**Read-scope 必须 ≥1 条指到契约/设计文件**（→ 蓝图 `read_scope`），不得发明第二套字段名。  
+- Steps / Contract 正文留在 md；卡片只索引路径。
 
 ### 7) FE 拆档（若有前端）
 
@@ -95,16 +97,17 @@ maw **不写死**分支名 `main`；`init` 探测值只是占位。正式主干�
 ```markdown
 ### T-0xx <短标题>
 
-- **Goal**：本包唯一职责
-- **Non-goals**：明确不做
+- **Goal**：现状：…。目标：…
+- **Non-goals**：明确不做（→ not_doing）
 - **Depends**：T-… | 无
 - **Surface**：\`path/**\`；禁止 …
 - **Contract**：接口/表/错误码（实现题勿改）；或「见 docs/contracts/….md」
+- **Read-scope**：\`docs/contracts/….md\`（强制 ≥1；→ read_scope）
 - **Steps**：
   1. …
   2. …
-- **Verify**：必须跑通的命令（如 \`go test ./…\` / \`npm run build\`）
-- **Deliverables**：交付物
+- **Acceptance**：≥1 条可判定断言（带观察点；→ acceptance）
+- **Verify**：可执行命令或 \`manual: …\`（独立数组；→ verify；禁止塞进 Acceptance）
 - **Lane**（可选）：模块/域短名，同簇题共用  
 - **maw**（可选，便于压入）：priority=10 · merge_order=10 · write_scope 同上
 ```
@@ -135,18 +138,26 @@ MainLayout + router（FE-SHELL，串行）
 ### 3) 拆卡
 
 按竖井拆实现题；共享文件单独 Owner 题。  
-每题填满模板；**Verify 不能是「手动点点」**。
+每题填满模板；**Verify 与 Acceptance 分开**——命令进 Verify，断言进 Acceptance；允许 `manual: …`，禁止空数组。
 
 ### 4) 并行度与上下文审查（自检）
 
 - [ ] 文首已写 **主分支**，且与真实要合入的分支一致（`git branch -A`）  
 - [ ] 任意两题若 Surface 重叠：要么 Deps 串行，要么标清 priority 序，**禁止**两 Agent 同领  
 - [ ] 同时 `Depends` 已满足的题数 ≥ 计划 worker 数（否则必饿）  
+- [ ] **≥1 个无 deps 入口**（整波全串成一条长链会告警且易饿死）  
 - [ ] 可并行首题分属 **不同 Lane**（否则多人抢同一上下文）  
 - [ ] 任一 Lane 内后续题对前题有 Deps 或同 Surface 族（连续 next 不漂到别域）  
 - [ ] 无「整仓 refactor」题  
 - [ ] 每题 Surface 不包含「必要时再改别的模块」这种开口  
-- [ ] 字段名可映射蓝图（见 [task-card-map.md](task-card-map.md)）
+- [ ] 每题有独立 **Acceptance** + **Verify**；Goal 为「现状/目标」两句；实现题有 **Read-scope**  
+- [ ] 字段名可映射蓝图（见 [task-card-map.md](task-card-map.md)）；**禁止**把 `deps` 拼成 `depends`  
+- [ ] 压入前 `maw plan check`：核对输出的 **deps_depth / layer_widths / 入口数** 与文首 Lane 表一致  
+
+**机器兜底比想象弱（只能靠人眼）：**
+
+- `plan check` **不会**拦：acceptance 写 `works`、两题写同一文件却无 deps、`depends` 拼错被静默丢弃（表现为 `deps_depth=0`、两题同时 ready）  
+- `max_parallel_theory` **只按 deps 算**，`a/**` 与 `a/foo.go` 重叠也会回报可并行 2——重叠必须用人审 Surface
 
 ### 5) 落盘
 
@@ -165,6 +176,7 @@ MainLayout + router（FE-SHELL，串行）
 - 用 CLAIM/台账代替清晰 Surface（台账是占用，不是边界）  
 - 为凑并行把有真实数据依赖的两题标成无 Depends  
 - 先写满 blueprint 再补清单（应先人读边界，再压入）  
+- **Verify 混进 Acceptance**（机器提取不出命令 → apply 报 verify required）  
 - **优先级全局插花**：T-010 前端 → T-011 桌面 → T-012 又回前端（同一 Agent 连领必漂）  
 - 只拆「可并行首题」、不给每条 Lane 准备续题（亲和无锚、再次饥饿）
 
