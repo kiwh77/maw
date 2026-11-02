@@ -14,7 +14,7 @@ function paint() {
     tasks,
     agents,
     lang: board.state.lang,
-    onTask: () => {},
+    onTask: (tid, pid) => board.openTaskDrawer(String(tid || ''), String(pid || '')),
   })
   setFactoryVisible(root.value, true)
 }

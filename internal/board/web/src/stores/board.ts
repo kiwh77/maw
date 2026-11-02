@@ -38,7 +38,7 @@ export type BoardRoute = {
 }
 
 export type Snapshot = {
-  projects?: Array<{ id: string; name?: string; path?: string }>
+  projects?: Array<{ id: string; name?: string; path?: string; main_branch?: string }>
   agents?: Array<Record<string, unknown>>
   tasks?: Array<Record<string, unknown>>
   counts?: Record<string, number>
@@ -54,6 +54,8 @@ export type Snapshot = {
   filter_agent?: string
   filter_status?: string
 }
+
+export type TaskDrawerSel = { tid: string; pid: string }
 
 function countsFromTasks(tasks: Array<Record<string, unknown>> | undefined): Record<string, number> {
   const counts: Record<string, number> = {}
@@ -87,6 +89,8 @@ const state = reactive({
   viewStates: {} as Record<string, unknown>,
   loadToken: 0,
   readOnly: typeof window !== 'undefined' ? isStaticExport(window) : false,
+  /** 看板任务详情抽屉（与 vnext route.detail 分开，避免互相抢路由）。 */
+  drawer: null as TaskDrawerSel | null,
 })
 
 const sources = createDefaultSources(typeof window !== 'undefined' ? window : null)
@@ -144,6 +148,26 @@ export const boardStore = {
     const next = withRoute(state.route, { detail: '' }) as BoardRoute
     writeRoute(next, { history: window.history, location: window.location, replace: true })
     Object.assign(state.route, next)
+  },
+
+  openTaskDrawer(tid: string, pid = '') {
+    const id = String(tid || '').trim()
+    if (!id) return
+    state.drawer = { tid: id, pid: String(pid || '').trim() }
+  },
+
+  closeTaskDrawer() {
+    state.drawer = null
+  },
+
+  patchSnapshotTask(tid: string, pid: string, patch: Record<string, unknown>) {
+    const tasks = state.snapshot?.tasks
+    if (!tasks) return
+    const idx = tasks.findIndex(
+      (x) => String(x.id) === tid && String(x.project_id || '') === String(pid || ''),
+    )
+    if (idx < 0) return
+    tasks[idx] = { ...tasks[idx], ...patch }
   },
 
   syncFromLocation() {

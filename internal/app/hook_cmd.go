@@ -26,12 +26,16 @@ func HookPreCommit(cwd string) (Result, error) {
 	}
 	marker := filepath.Join(root, ".maw", "task.json")
 	if _, err := os.Stat(marker); err != nil {
-		h, err := home.MawHome(cwd)
-		if err == nil {
-			if cfg, err := config.Load(home.ConfigPath(h)); err == nil {
-				main := cfg.Project.MainBranch
-				if br, _ := gitops.CurrentBranch(root); br == main {
-					return nil, i18n.E("err.hook_trunk", "next.use_worktree", main)
+		// 无任务上下文时：仅当声明了 MAW_AGENT 才禁止在主干提交。
+		// maw init 后人类日常提交不应被拦住；主干推送仍由 pre-push 保护。
+		if strings.TrimSpace(os.Getenv("MAW_AGENT")) != "" {
+			h, err := home.MawHome(cwd)
+			if err == nil {
+				if cfg, err := config.Load(home.ConfigPath(h)); err == nil {
+					main := cfg.Project.MainBranch
+					if br, _ := gitops.CurrentBranch(root); br == main {
+						return nil, i18n.E("err.hook_trunk", "next.use_worktree", main)
+					}
 				}
 			}
 		}

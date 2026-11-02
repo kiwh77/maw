@@ -33,6 +33,7 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; overflow: hidden; }
+#app { height: 100%; }
 body { background: var(--bg); color: var(--text); font: 13px/1.5 var(--sans); }
 button, input, select { font: inherit; }
 button { cursor: pointer; }

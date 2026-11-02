@@ -6,6 +6,8 @@ import AppSidebar from './components/AppSidebar.vue'
 import AppChrome from './components/AppChrome.vue'
 import ProjectSelect from './components/ProjectSelect.vue'
 import VnextHost from './components/VnextHost.vue'
+import TaskDrawer from './components/TaskDrawer.vue'
+import JoinPromptButton from './components/JoinPromptButton.vue'
 import BoardView from './views/BoardView.vue'
 import FactoryView from './views/FactoryView.vue'
 import TopoView from './views/TopoView.vue'
@@ -15,6 +17,14 @@ const def = computed(() => resolveView(board.registry, board.state.route.view))
 const scopeLabel = computed(() => {
   const key = groupLabelKey(def.value?.group)
   return key ? board.t(key) : ''
+})
+/** 流程视图 + 已选工程：标题区展示醒目的接入提示词按钮。 */
+const showJoinPrompt = computed(() => {
+  const view = board.state.route.view
+  return Boolean(
+    board.state.route.project &&
+      (view === 'board' || view === 'factory' || view === 'topo'),
+  )
 })
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -122,6 +132,7 @@ const themeValue = readTheme()
               {{ board.t(def?.descKey || 'desc.board') }}
             </p>
           </div>
+          <JoinPromptButton v-if="showJoinPrompt" variant="join" />
         </div>
         <AppChrome />
         <BoardView v-if="board.state.route.view === 'board'" />
@@ -130,5 +141,6 @@ const themeValue = readTheme()
         <VnextHost v-else :view-id="board.state.route.view" />
       </div>
     </main>
+    <TaskDrawer />
   </div>
 </template>

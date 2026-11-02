@@ -30,12 +30,23 @@ const lanes = computed(() =>
   })).filter((lane) => lane.id !== 'attention' || lane.items.length > 0),
 )
 
-function esc(v: unknown) {
-  return String(v ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+const drawer = computed(() => board.state.drawer)
+
+function openTask(task: Record<string, unknown>) {
+  board.openTaskDrawer(String(task.id || ''), String(task.project_id || ''))
+}
+
+function onCardKey(event: KeyboardEvent, task: Record<string, unknown>) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    openTask(task)
+  }
+}
+
+function isActive(task: Record<string, unknown>) {
+  const d = drawer.value
+  if (!d) return false
+  return String(task.id) === d.tid && String(task.project_id || '') === String(d.pid || '')
 }
 </script>
 
@@ -60,9 +71,13 @@ function esc(v: unknown) {
             v-for="task in lane.items"
             :key="String(task.id) + String(task.project_id || '')"
             class="card clickable"
+            :class="{ active: isActive(task) }"
             tabindex="0"
+            role="button"
             :data-tid="String(task.id)"
             :data-pid="String(task.project_id || '')"
+            @click="openTask(task)"
+            @keydown="onCardKey($event, task)"
           >
             <div class="card-top">
               <span class="id">{{ task.id }}</span>
