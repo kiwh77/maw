@@ -35,6 +35,7 @@ func testAuth(t *testing.T) (*localauth.Authenticator, string) {
 func TestStatusRequiresAuthNoAnonymousWrite(t *testing.T) {
 	auth, token := testAuth(t)
 	var reports []StatusReport
+	var logCalls int
 	h := newHandlerOpts(ServeOpts{
 		Load: func(_, _, _ string) (Snapshot, error) {
 			return Snapshot{Total: 1, EventID: 3}, nil
@@ -46,10 +47,17 @@ func TestStatusRequiresAuthNoAnonymousWrite(t *testing.T) {
 		Feed: func(since int64, project, agent string) ([]*db.Event, error) {
 			return []*db.Event{{ID: since + 1, Actor: agent, Type: "external_progress"}}, nil
 		},
+		Log: func(project, agent string, offset int64, fromTail bool) (LogChunk, error) {
+			logCalls++
+			if project != "p1" || agent != "cursor-demo-1" {
+				t.Fatalf("unexpected log args %s %s", project, agent)
+			}
+			return LogChunk{OK: true, Path: "/home/u/log.jsonl", Offset: offset, NextOffset: offset + 4, Chunk: "abcd", EOF: false}, nil
+		},
 		Auth: auth,
 	})
 
-	body, _ := json.Marshal(StatusReport{Actor: "cursor-demo-1", Message: "hi", ProjectID: "p1"})
+	body, _ := json.Marshal(StatusReport{Actor: "cursor-demo-1", Message: "hi", ProjectID: "p1", LogPath: "/tmp/x"})
 
 	// 匿名写必须拒绝
 	rr := httptest.NewRecorder()
@@ -69,7 +77,7 @@ func TestStatusRequiresAuthNoAnonymousWrite(t *testing.T) {
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"ok":true`) {
 		t.Fatalf("authed status code=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if len(reports) != 1 || reports[0].Actor != "cursor-demo-1" {
+	if len(reports) != 1 || reports[0].Actor != "cursor-demo-1" || reports[0].LogPath != "/tmp/x" {
 		t.Fatalf("%v", reports)
 	}
 
@@ -89,6 +97,13 @@ func TestStatusRequiresAuthNoAnonymousWrite(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	if rr.Code != 200 {
 		t.Fatalf("feed code=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/log?project=p1&agent=cursor-demo-1&offset=0&tail=1", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"chunk":"abcd"`) || logCalls != 1 {
+		t.Fatalf("log code=%d body=%s calls=%d", rr.Code, rr.Body.String(), logCalls)
 	}
 
 	rr = httptest.NewRecorder()

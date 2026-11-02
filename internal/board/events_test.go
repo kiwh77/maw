@@ -43,22 +43,22 @@ func TestEventHubBroadcastsAndStopsWhenLastClientLeaves(t *testing.T) {
 	hub := newEventHub(func(_, _, _ string) (Snapshot, error) {
 		calls.Add(1)
 		return Snapshot{Total: int(version.Load())}, nil
-	}, nil, 5*time.Millisecond)
-	one, leaveOne := hub.subscribe()
-	two, leaveTwo := hub.subscribe()
+	}, nil, nil, 5*time.Millisecond)
+	one, leaveOne := hub.subscribe("", "", 0)
+	two, leaveTwo := hub.subscribe("", "", 0)
 	defer leaveOne()
 	defer leaveTwo()
-	for _, updates := range []<-chan hubUpdate{one, two} {
+	for _, client := range []*hubClient{one, two} {
 		select {
-		case <-updates:
+		case <-client.ch:
 		case <-time.After(time.Second):
 			t.Fatal("no initial baseline")
 		}
 	}
 	version.Store(1)
-	for _, updates := range []<-chan hubUpdate{one, two} {
+	for _, client := range []*hubClient{one, two} {
 		select {
-		case <-updates:
+		case <-client.ch:
 		case <-time.After(time.Second):
 			t.Fatal("subscriber missed change")
 		}
@@ -66,7 +66,7 @@ func TestEventHubBroadcastsAndStopsWhenLastClientLeaves(t *testing.T) {
 	leaveOne()
 	version.Store(2)
 	select {
-	case <-two:
+	case <-two.ch:
 	case <-time.After(time.Second):
 		t.Fatal("remaining subscriber missed change")
 	}
@@ -92,8 +92,8 @@ func TestEventHubRecoversFromLoadFailure(t *testing.T) {
 			return Snapshot{}, errors.New("temporary DB error")
 		}
 		return Snapshot{}, nil
-	}, nil, time.Millisecond)
-	updates, leave := hub.subscribe()
+	}, nil, nil, time.Millisecond)
+	client, leave := hub.subscribe("", "", 0)
 	defer leave()
 	select {
 	case <-failed:
@@ -102,7 +102,7 @@ func TestEventHubRecoversFromLoadFailure(t *testing.T) {
 	}
 	fail.Store(false)
 	select {
-	case <-updates:
+	case <-client.ch:
 	case <-time.After(time.Second):
 		t.Fatal("recovery must invalidate client data")
 	}
@@ -124,7 +124,7 @@ func (w *streamRecorder) Flush() {
 }
 
 func TestEventStreamReadyHeartbeatAndCancellation(t *testing.T) {
-	hub := newEventHub(func(_, _, _ string) (Snapshot, error) { return Snapshot{}, nil }, nil, time.Hour)
+	hub := newEventHub(func(_, _, _ string) (Snapshot, error) { return Snapshot{}, nil }, nil, nil, time.Hour)
 	handler := hub.handler(5 * time.Millisecond)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -171,7 +171,7 @@ heartbeatLoop:
 }
 
 func TestEventStreamRejectsOtherMethods(t *testing.T) {
-	hub := newEventHub(nil, nil, time.Second)
+	hub := newEventHub(nil, nil, nil, time.Second)
 	w := httptest.NewRecorder()
 	hub.handler(time.Second).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/events", nil))
 	if w.Code != http.StatusMethodNotAllowed {
@@ -180,16 +180,16 @@ func TestEventStreamRejectsOtherMethods(t *testing.T) {
 }
 
 func TestEventHubDoesNotNotifyForClockOnlyChanges(t *testing.T) {
-	hub := newEventHub(func(_, _, _ string) (Snapshot, error) { return Snapshot{UpdatedAt: time.Now().String()}, nil }, nil, time.Millisecond)
-	updates, leave := hub.subscribe()
+	hub := newEventHub(func(_, _, _ string) (Snapshot, error) { return Snapshot{UpdatedAt: time.Now().String()}, nil }, nil, nil, time.Millisecond)
+	client, leave := hub.subscribe("", "", 0)
 	defer leave()
 	select {
-	case <-updates:
+	case <-client.ch:
 	case <-time.After(time.Second):
 		t.Fatal("no baseline")
 	}
 	select {
-	case <-updates:
+	case <-client.ch:
 		t.Fatal("timestamp triggered an invalidation")
 	case <-time.After(20 * time.Millisecond):
 	}

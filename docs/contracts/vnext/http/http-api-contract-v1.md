@@ -179,6 +179,7 @@ revision 与运行代际（`generation`）是两套条件：revision 管「这�
 | `GET /api/task?id=` | `GET /api/v1/tasks/{instance}?display_id=` | 否 |
 | `GET /api/feed?since=` | `GET /api/v1/events?cursor=` | 否 |
 | `/api/events`（SSE） | `GET /api/v1/events/stream` | 否 |
+| `GET /api/log?project=&agent=&offset=` | （兼容扩展）会话日志按偏移补拉；正文不进库 | 否 |
 | `GET /snapshot.json` | `308` 到 `/api/v1/board` | 否 |
 | `POST /api/status` | `POST /api/v1/status-reports`，仅 loopback | **不写任务状态** |
 
@@ -190,7 +191,8 @@ revision 与运行代际（`generation`）是两套条件：revision 管「这�
 
 - `actor` 必须是本工程已注册的 Agent，否则 `422 unknown_actor`；非 Agent 的外部来源必须显式写 `attribution: "external"` 并带 `client`。
 - 带 `task_id` 时，只允许记录「该 Agent 对这道题的进度／心跳」；`actor` 与任务当前 owner 不一致 → `409 not_owner`。
-- 允许写入的字段只有 `reported_status ∈ {idle, working, blocked, offline}`、`message`、`pct`、`phase`、`heartbeat`。**禁止**通过上报把任务写成 `in_progress`／`done`；任务状态只能走 `status-transitions`／`submissions`／`merges`。
+- 允许写入的字段只有 `reported_status ∈ {idle, working, blocked, offline}`、`message`、`pct`、`phase`、`heartbeat`、以及可选的 `log_path`（会话日志绝对路径，写入 `agents.meta`，正文不进 SQLite）。**禁止**通过上报把任务写成 `in_progress`／`done`；任务状态只能走 `status-transitions`／`submissions`／`merges`。
+- `log_path` 必须为本机 `$HOME` 下的绝对路径（拒绝符号链接逃逸）。看板经 `GET /api/log` 与 SSE `log-append`（`/api/events?log_project=&log_agent=&log_offset=`）近实时尾随；慢客户端丢帧后按 offset 补拉。
 - 上报成功体必须显式声明 `changed_task_status: false`，否则视为越权。
 - loopback 只是部署约束，不是安全边界；脚本仍须带 `actor`。
 

@@ -21,7 +21,7 @@ func TestSubmitReviewMergeShareDeliveryCase(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(f.repo, "mod_d1"), 0o755)
 
 	t.Setenv("MAW_AGENT", "cursor-author")
-	if _, err := Next(f.repo, "cursor-author", false); err != nil {
+	if _, err := Next(f.repo, "cursor-author", false, ""); err != nil {
 		t.Fatalf("next: %v", err)
 	}
 	wt := filepath.Join(f.repo, ".worktrees", "cursor-author")
@@ -109,7 +109,7 @@ func TestBlockUsesDeliveryCase(t *testing.T) {
 	f.seedTask(id, "ready", "", []string{"mod_d1b/**"})
 	_ = os.MkdirAll(filepath.Join(f.repo, "mod_d1b"), 0o755)
 	t.Setenv("MAW_AGENT", "cursor-blk")
-	if _, err := Next(f.repo, "cursor-blk", false); err != nil {
+	if _, err := Next(f.repo, "cursor-blk", false, ""); err != nil {
 		t.Fatalf("next: %v", err)
 	}
 	wt := filepath.Join(f.repo, ".worktrees", "cursor-blk")
@@ -152,7 +152,7 @@ func TestMergePruneBlockedOnUnknownOrEvidenceMismatch(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(f.repo, "mod_d2"), 0o755)
 
 	t.Setenv("MAW_AGENT", "cursor-d2")
-	if _, err := Next(f.repo, "cursor-d2", false); err != nil {
+	if _, err := Next(f.repo, "cursor-d2", false, ""); err != nil {
 		t.Fatalf("next: %v", err)
 	}
 	wt := filepath.Join(f.repo, ".worktrees", "cursor-d2")
@@ -289,7 +289,7 @@ func TestManualCompatStrategyCompletesWithoutGates(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(f.repo, "mod_d3"), 0o755)
 
 	t.Setenv("MAW_AGENT", "cursor-d3")
-	if _, err := Next(f.repo, "cursor-d3", false); err != nil {
+	if _, err := Next(f.repo, "cursor-d3", false, ""); err != nil {
 		t.Fatalf("next: %v", err)
 	}
 	wt := filepath.Join(f.repo, ".worktrees", "cursor-d3")

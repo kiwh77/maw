@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kiwh77/maw/internal/board"
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/delivery"
 	"github.com/kiwh77/maw/internal/engine/model"
@@ -27,10 +28,18 @@ import (
 	"github.com/kiwh77/maw/internal/workspace"
 )
 
-func Next(cwd, agentFlag string, dryRun bool) (Result, error) {
+func Next(cwd, agentFlag string, dryRun bool, logPath string) (Result, error) {
 	pc, err := resolveProject(cwd)
 	if err != nil {
 		return nil, err
+	}
+	logPath = strings.TrimSpace(logPath)
+	if logPath != "" {
+		abs, verr := board.ValidateLogPath(logPath)
+		if verr != nil {
+			return nil, i18n.EW("err.log_path", "next.fix_log_path", verr)
+		}
+		logPath = abs
 	}
 	who, allocated, nameWarn, err := prepareWorker(pc, cwd, agentFlag)
 	if err != nil {
@@ -52,13 +61,16 @@ func Next(cwd, agentFlag string, dryRun bool) (Result, error) {
 			return nil, err
 		}
 		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
-			return bindAgent(tx, pc.ID(), who, "worker", "working", task.ID, task.Worktree, task.Branch)
+			return bindAgent(tx, pc.ID(), who, "worker", "working", task.ID, task.Worktree, task.Branch, logPath)
 		})
 		res := Result{
 			"ok": true, "idempotent": true, "task": task, "agent": who,
 			"project_id": pc.ID(), "worktree": filepath.Join(pc.Repo, task.Worktree),
 			"limits": limitsOf(pc),
 			"next":   i18n.T("next.continue_worktree", filepath.Join(pc.Repo, task.Worktree)),
+		}
+		if logPath != "" {
+			res["log_path"] = logPath
 		}
 		attachAgentNameMeta(res, who, allocated, nameWarn)
 		return res, nil
@@ -110,12 +122,20 @@ func Next(cwd, agentFlag string, dryRun bool) (Result, error) {
 		_ = rollbackClaim(pc, who, task.ID)
 		return nil, err
 	}
+	if logPath != "" {
+		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+			return bindAgent(tx, pc.ID(), who, "worker", "working", task.ID, task.Worktree, task.Branch, logPath)
+		})
+	}
 	_, _ = refreshBoard(pc)
 	res := Result{
 		"ok": true, "task": task, "worktree": wt, "branch": task.Branch, "agent": who,
 		"project_id": pc.ID(), "registered": true, "limits": limitsOf(pc),
 		"env":  map[string]string{"MAW_AGENT": who, "MAW_TASK": task.ID},
 		"next": i18n.T("next.registered", who, wt),
+	}
+	if logPath != "" {
+		res["log_path"] = logPath
 	}
 	attachAgentNameMeta(res, who, allocated, nameWarn)
 	return res, nil
@@ -336,7 +356,7 @@ WHERE project_id = ? AND id = ? AND status = 'ready' AND revision = ?`,
 		_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", t.ID,
 			map[string]any{"from": "ready", "to": "claimed"})
 		// 领取同时登记 Agent 占用：心跳过期判定与看板都靠这一行。
-		if err := bindAgent(tx, pc.ID(), who, "worker", "working", t.ID, wtRel, branch); err != nil {
+		if err := bindAgent(tx, pc.ID(), who, "worker", "working", t.ID, wtRel, branch, ""); err != nil {
 			return err
 		}
 		_ = db.AppendEvent(tx, pc.ID(), who, "agent_registered", t.ID, map[string]any{"status": "working"})
@@ -497,7 +517,7 @@ func Register(cwd, agentFlag, role string) (Result, error) {
 				break
 			}
 		}
-		if err := bindAgent(tx, pc.ID(), who, role, status, taskID, wt, branch); err != nil {
+		if err := bindAgent(tx, pc.ID(), who, role, status, taskID, wt, branch, ""); err != nil {
 			return err
 		}
 		return db.AppendEvent(tx, pc.ID(), who, "agent_registered", taskID, map[string]any{"role": role, "status": status})
@@ -596,7 +616,7 @@ func Progress(cwd, message, taskID string) (Result, error) {
 		if err := db.UpsertTask(tx, t); err != nil {
 			return err
 		}
-		_ = bindAgent(tx, pc.ID(), who, "worker", "working", t.ID, t.Worktree, t.Branch)
+		_ = bindAgent(tx, pc.ID(), who, "worker", "working", t.ID, t.Worktree, t.Branch, "")
 		return db.AppendEvent(tx, pc.ID(), who, "progress", taskID, map[string]any{"message": message})
 	})
 	if err != nil {
@@ -877,7 +897,7 @@ func deliverySubmit(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, erro
 		if err := db.UpsertTask(tx, t); err != nil {
 			return err
 		}
-		return bindAgent(tx, pc.ID(), in.Actor, "worker", "working", t.ID, t.Worktree, t.Branch)
+		return bindAgent(tx, pc.ID(), in.Actor, "worker", "working", t.ID, t.Worktree, t.Branch, "")
 	})
 	if err != nil {
 		return deliveryCaseResult{}, err

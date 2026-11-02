@@ -64,16 +64,16 @@ func TestSSECatchupDoesNotSkipPastBurst(t *testing.T) {
 			out = append(out, &db.Event{ID: since + int64(i) + 1, Type: "progress"})
 		}
 		return out, nil
-	}, 5*time.Millisecond)
+	}, nil, 5*time.Millisecond)
 
-	updates, leave := hub.subscribe()
+	client, leave := hub.subscribe("", "", 0)
 	defer leave()
 
 	deadline := time.After(2 * time.Second)
 	sawCatchup := false
 	for !sawCatchup {
 		select {
-		case u := <-updates:
+		case u := <-client.ch:
 			if u.catchup != nil {
 				sawCatchup = true
 				if u.catchup.Watermark != 500 {

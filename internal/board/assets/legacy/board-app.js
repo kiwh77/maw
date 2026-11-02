@@ -103,6 +103,10 @@ const I18N = {
     "one_click_copy": "One-click copy",
     "join_prompt": "Join prompt",
     "sec.logs": "Task log",
+    "sec.session_log": "Session log",
+    "session_log_none": "No session log linked (agent can report with maw status report --log-path)",
+    "session_log_loading": "Loading session log…",
+    "session_log_path": "Path",
     "copied_prompt": "Prompt copied",
     "load_fail": "Failed to load board data",
     "prio_title": "Schedule priority; lower runs first",
@@ -315,6 +319,10 @@ const I18N = {
     "one_click_copy": "一键复制",
     "join_prompt": "接入提示词",
     "sec.logs": "任务日志",
+    "sec.session_log": "会话日志",
+    "session_log_none": "未关联会话日志（Agent 可用 maw status report --log-path 上报）",
+    "session_log_loading": "正在加载会话日志…",
+    "session_log_path": "路径",
     "copied_prompt": "已复制提示词",
     "load_fail": "无法加载看板数据",
     "prio_title": "调度优先级，数值越小越优先",
@@ -602,6 +610,14 @@ let selectedPid = null;
 let drawerEvents = [];
 let drawerLoading = false;
 let writingProjectHash = false;
+let sessionLogText = "";
+let sessionLogOffset = 0;
+let sessionLogPath = "";
+let sessionLogMissing = true;
+let sessionLogLoading = false;
+let sessionLogAgent = "";
+let sessionLogProject = "";
+let logStream = null;
 
 /** 从 URL #锚点读取工程 ID（刷新后恢复选中）。 */
 function readProjectHash() {
@@ -869,11 +885,117 @@ function syncSelectionHighlight() {
   });
 }
 
+function disconnectLogStream() {
+  if (logStream) {
+    try { logStream.close(); } catch (_) {}
+    logStream = null;
+  }
+}
+
+function resetSessionLogState() {
+  disconnectLogStream();
+  sessionLogText = "";
+  sessionLogOffset = 0;
+  sessionLogPath = "";
+  sessionLogMissing = true;
+  sessionLogLoading = false;
+  sessionLogAgent = "";
+  sessionLogProject = "";
+}
+
+function appendSessionLogChunk(chunk, nextOffset, path) {
+  if (chunk) sessionLogText += chunk;
+  if (typeof nextOffset === "number") sessionLogOffset = nextOffset;
+  if (path) sessionLogPath = path;
+  sessionLogMissing = false;
+  const pre = document.getElementById("session-log-pre");
+  if (pre) {
+    const stick = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 48;
+    pre.textContent = sessionLogText;
+    if (stick) pre.scrollTop = pre.scrollHeight;
+  }
+  const pathEl = document.getElementById("session-log-path");
+  if (pathEl && sessionLogPath) pathEl.textContent = sessionLogPath;
+}
+
+function connectLogStream(projectId, agentId, offset) {
+  disconnectLogStream();
+  if (!projectId || !agentId || typeof EventSource === "undefined") return;
+  const q = new URLSearchParams({
+    log_project: projectId,
+    log_agent: agentId,
+    log_offset: String(offset || 0),
+  });
+  try { logStream = new EventSource("/api/events?" + q); } catch (_) { return; }
+  logStream.addEventListener("log-append", (ev) => {
+    try {
+      const data = JSON.parse(ev.data || "{}");
+      if (data.project_id && data.project_id !== sessionLogProject) return;
+      if (data.agent && data.agent !== sessionLogAgent) return;
+      appendSessionLogChunk(data.chunk || "", data.next_offset, data.path);
+    } catch (_) {}
+  });
+}
+
+async function loadSessionLog(projectId, agentId) {
+  sessionLogProject = projectId || "";
+  sessionLogAgent = agentId || "";
+  if (!projectId || !agentId) {
+    sessionLogMissing = true;
+    sessionLogLoading = false;
+    disconnectLogStream();
+    return;
+  }
+  sessionLogLoading = true;
+  try {
+    const q = new URLSearchParams({
+      project: projectId,
+      agent: agentId,
+      offset: "0",
+      tail: "1",
+      t: String(Date.now()),
+    });
+    const res = await fetch("/api/log?" + q, { cache: "no-store" });
+    if (!res.ok) throw new Error("log unavailable");
+    const d = await res.json();
+    if (projectId !== sessionLogProject || agentId !== sessionLogAgent) return;
+    if (d.missing) {
+      sessionLogMissing = true;
+      sessionLogText = "";
+      sessionLogOffset = 0;
+      sessionLogPath = "";
+      disconnectLogStream();
+      return;
+    }
+    sessionLogMissing = false;
+    sessionLogPath = d.path || "";
+    sessionLogText = d.chunk || "";
+    sessionLogOffset = typeof d.next_offset === "number" ? d.next_offset : 0;
+    connectLogStream(projectId, agentId, sessionLogOffset);
+  } catch (_) {
+    if (projectId !== sessionLogProject || agentId !== sessionLogAgent) return;
+    sessionLogMissing = true;
+    disconnectLogStream();
+  } finally {
+    if (projectId === sessionLogProject && agentId === sessionLogAgent) {
+      sessionLogLoading = false;
+    }
+  }
+}
+
+function findTaskAgent(task) {
+  if (!task || !lastSnap) return null;
+  return (lastSnap.agents || []).find(a =>
+    a.task_id === task.id && (!task.project_id || a.project_id === task.project_id)
+  ) || null;
+}
+
 function closeDrawer() {
   selectedTid = null;
   selectedPid = null;
   detailRequest++;
   drawerEvents = [];
+  resetSessionLogState();
   const mask = document.getElementById("drawer-mask");
   const drawer = document.getElementById("drawer");
   mask.classList.remove("open");
@@ -909,6 +1031,20 @@ async function refreshTaskDetail(tid, pid) {
   }
   if (request !== detailRequest || selectedTid !== tid || selectedPid !== pid) return;
   drawerLoading = false;
+  const task = findTask(tid, pid);
+  const agent = findTaskAgent(task);
+  if (agent && agent.project_id && agent.id) {
+    const same = sessionLogProject === agent.project_id && sessionLogAgent === agent.id;
+    const reportedPath = !!(agent.meta && agent.meta.log_path);
+    if (!same || (sessionLogMissing && reportedPath)) {
+      await loadSessionLog(agent.project_id, agent.id);
+    } else if (!sessionLogMissing && !logStream) {
+      connectLogStream(agent.project_id, agent.id, sessionLogOffset);
+    }
+  } else if (sessionLogAgent || sessionLogProject) {
+    resetSessionLogState();
+  }
+  if (request !== detailRequest || selectedTid !== tid || selectedPid !== pid) return;
   const body = document.getElementById("drawer-body");
   const scroll = body.scrollTop;
   const focusedID = document.activeElement?.id;
@@ -923,6 +1059,8 @@ function openDrawer(tid, pid) {
   drawerReturnFocus = { tid, pid: selectedPid };
   drawerEvents = [];
   drawerLoading = true;
+  resetSessionLogState();
+  sessionLogLoading = true;
   const mask = document.getElementById("drawer-mask");
   const drawer = document.getElementById("drawer");
   clearTimeout(closeTimer);
@@ -981,9 +1119,18 @@ function renderDrawerBody() {
     logsHtml = '<p class="empty">暂无任务日志（需 <code>maw board --serve</code>）</p>';
   }
 
-  const agent = (lastSnap?.agents || []).find(a =>
-    a.task_id === task.id && (!task.project_id || a.project_id === task.project_id)
-  );
+  const agent = findTaskAgent(task);
+  const logPathShort = sessionLogPath || (agent && agent.meta && agent.meta.log_path) || "";
+  let sessionHtml;
+  if (sessionLogLoading) {
+    sessionHtml = '<p class="empty">' + esc(t("session_log_loading")) + '</p>';
+  } else if (sessionLogMissing) {
+    sessionHtml = '<p class="empty">' + esc(t("session_log_none")) + '</p>';
+  } else {
+    sessionHtml =
+      (logPathShort ? '<p class="session-log-meta"><span>' + esc(t("session_log_path")) + '</span> <code id="session-log-path">' + esc(logPathShort) + '</code></p>' : "") +
+      '<pre class="session-log-box" id="session-log-pre">' + esc(sessionLogText) + '</pre>';
+  }
 
   document.getElementById("drawer-body").innerHTML =
     '<div class="drawer-actions">' +
@@ -1006,6 +1153,7 @@ function renderDrawerBody() {
       '<dt>Worktree</dt><dd>' + esc(task.worktree || "—") + '</dd>' +
       '<dt>分支</dt><dd>' + esc(task.branch || "—") + '</dd>' +
       '<dt>Agent</dt><dd>' + esc(agent ? (agent.id + " · " + (agent.status || "") + " · " + (fmtTime(agent.last_seen) || "")) : (task.owner || "—")) + '</dd>' +
+      (logPathShort ? '<dt>会话日志</dt><dd><code style="font-size:.68rem;word-break:break-all">' + esc(logPathShort) + '</code></dd>' : "") +
     '</dl></div>' +
     '<div class="drawer-section"><h3>write_scope</h3>' + listBullets(task.write_scope, t("empty")) + '</div>' +
     '<div class="drawer-section"><h3>read_scope</h3>' + listBullets(task.read_scope, t("none")) + '</div>' +
@@ -1014,6 +1162,7 @@ function renderDrawerBody() {
       '<div class="cmd-box">' + esc(cmd) + '</div></div>' +
     '<div class="drawer-section">' + secCopy(t("join_prompt"), "d-copy-prompt", t("one_click_copy")) +
       '<div class="prompt-box" id="d-prompt">' + esc(prompt) + '</div></div>' +
+    '<div class="drawer-section"><h3>' + esc(t("sec.session_log")) + '</h3>' + sessionHtml + '</div>' +
     '<div class="drawer-section"><h3>任务日志</h3>' + logsHtml + '</div>';
 
   const bind = (id, text, ok) => {

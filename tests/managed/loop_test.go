@@ -293,7 +293,7 @@ func TestManualNextStillAvailable(t *testing.T) {
 		t.Fatalf("managed claim: %v", err)
 	}
 
-	res, err := app.Next(h.repo, "cursor-demo-1", false)
+	res, err := app.Next(h.repo, "cursor-demo-1", false, "")
 	if err != nil {
 		t.Fatalf("manual next must still work: %v", err)
 	}

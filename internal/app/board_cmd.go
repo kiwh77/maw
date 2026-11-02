@@ -192,6 +192,7 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 				Pct:       rep.Pct,
 				Client:    rep.Client,
 				Status:    rep.Status,
+				LogPath:   rep.LogPath,
 			})
 			if err != nil {
 				return nil, err
@@ -201,6 +202,7 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 		Feed: func(since int64, projectID, agent string) ([]*db.Event, error) {
 			return loadEventFeedPage(gdb, since, projectID, agent, board.MaxSSEEventBurst)
 		},
+		Log:     AgentLog,
 		Runtime: runtimeView,
 		Auth:    auth,
 		V1:      v1,
