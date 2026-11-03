@@ -11,10 +11,11 @@ import (
 )
 
 type File struct {
-	Meta        Meta           `toml:"meta"`
-	Tasks       []TaskSpec     `toml:"task"`
-	SharedFiles []SharedFile   `toml:"shared_files"`
-	Gates       map[string]any `toml:"gates"`
+	Meta        Meta            `toml:"meta"`
+	Iterations  []IterationSpec `toml:"iteration"`
+	Tasks       []TaskSpec      `toml:"task"`
+	SharedFiles []SharedFile    `toml:"shared_files"`
+	Gates       map[string]any  `toml:"gates"`
 }
 
 type Meta struct {
@@ -23,11 +24,24 @@ type Meta struct {
 	MainBranch string `toml:"main_branch"` // 本波合入/worktree 基线；plan apply 时同步到 config
 }
 
+// IterationSpec 是一批任务的容器声明（F49/F50/F54）。
+//
+// Status 留空时按 planning 处理；TargetBranch 留空时继承 meta.main_branch。
+type IterationSpec struct {
+	ID           string   `toml:"id"`
+	Name         string   `toml:"name"`
+	Goal         string   `toml:"goal"`
+	TargetBranch string   `toml:"target_branch"`
+	Status       string   `toml:"status"`
+	Deps         []string `toml:"deps"`
+}
+
 type TaskSpec struct {
 	ID         string   `toml:"id"`
 	Title      string   `toml:"title"`
 	Goal       string   `toml:"goal"`
 	Priority   int      `toml:"priority"`
+	Iteration  string   `toml:"iteration"`
 	Deps       []string `toml:"deps"`
 	WriteScope []string `toml:"write_scope"`
 	ReadScope  []string `toml:"read_scope"`
@@ -47,11 +61,19 @@ name = "example"
 version = 1
 main_branch = "main"
 
+[[iteration]]
+id = "IT-001"
+name = "第一批交付"
+goal = "现状：任务散落无批次。目标：统一归属并作为合入单位。"
+target_branch = "main"
+status = "planning"
+
 [[task]]
 id = "T-001"
 title = "更新 README 安装说明"
 goal = "现状：安装步骤缺失。目标：README 含一键安装命令。"
 priority = 1
+iteration = "IT-001"
 deps = []
 write_scope = ["README.md"]
 acceptance = ["README 含 ./install.sh 与 maw --version 说明"]
@@ -63,6 +85,7 @@ id = "T-002"
 title = "实现模块 A 入口"
 goal = "现状：src/a 无入口。目标：可编译的 main 包。"
 priority = 2
+iteration = "IT-001"
 deps = ["T-001"]
 write_scope = ["src/a/**"]
 read_scope = ["src/common/**"]
@@ -71,6 +94,29 @@ verify = ["go build ./src/a/..."]
 not_doing = ["不改 src/common"]
 merge_order = 2
 `
+
+// iterationStatusAliases 同时接受契约里的英文规范值与人读的中文标签。
+var iterationStatusAliases = map[string]string{
+	db.IterationPlanning:  db.IterationPlanning,
+	db.IterationRunning:   db.IterationRunning,
+	db.IterationFinishing: db.IterationFinishing,
+	db.IterationMerged:    db.IterationMerged,
+	db.IterationAbandoned: db.IterationAbandoned,
+	"规划中":                 db.IterationPlanning,
+	"执行中":                 db.IterationRunning,
+	"收尾中":                 db.IterationFinishing,
+	"已合入":                 db.IterationMerged,
+	"已放弃":                 db.IterationAbandoned,
+}
+
+func normalizeIterationStatus(raw string) (string, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return db.IterationPlanning, true
+	}
+	v, ok := iterationStatusAliases[s]
+	return v, ok
+}
 
 func Load(path string) (*File, error) {
 	b, err := os.ReadFile(path)
@@ -97,6 +143,52 @@ func Validate(f *File) []string {
 		errs = append(errs, "blueprint has no [[task]] entries")
 		return errs
 	}
+
+	iterationIDs := map[string]bool{}
+	for _, it := range f.Iterations {
+		id := strings.TrimSpace(it.ID)
+		if id == "" {
+			errs = append(errs, "iteration missing id")
+			continue
+		}
+		if iterationIDs[id] {
+			errs = append(errs, "duplicate iteration id "+id)
+		}
+		iterationIDs[id] = true
+		if strings.TrimSpace(it.Name) == "" {
+			errs = append(errs, id+": iteration name required")
+		}
+		if _, ok := normalizeIterationStatus(it.Status); !ok {
+			errs = append(errs, id+": invalid iteration status "+strings.TrimSpace(it.Status))
+		}
+		if tb := strings.TrimSpace(it.TargetBranch); strings.ContainsAny(tb, " \t\n") {
+			errs = append(errs, id+": target_branch must not contain whitespace")
+		}
+	}
+	iterationGraph := map[string][]string{}
+	for _, it := range f.Iterations {
+		id := strings.TrimSpace(it.ID)
+		if id == "" {
+			continue
+		}
+		var deps []string
+		for _, d := range it.Deps {
+			d = strings.TrimSpace(d)
+			if d == "" {
+				continue
+			}
+			if !iterationIDs[d] {
+				errs = append(errs, id+": unknown iteration dependency "+d)
+				continue
+			}
+			deps = append(deps, d)
+		}
+		iterationGraph[id] = deps
+	}
+	if cyc := findCycle(iterationGraph); cyc != "" {
+		errs = append(errs, "iteration dependency cycle: "+cyc)
+	}
+
 	ids := map[string]bool{}
 	for _, t := range f.Tasks {
 		if t.ID == "" {
@@ -107,6 +199,9 @@ func Validate(f *File) []string {
 			errs = append(errs, "duplicate task id "+t.ID)
 		}
 		ids[t.ID] = true
+		if ref := strings.TrimSpace(t.Iteration); ref != "" && !iterationIDs[ref] {
+			errs = append(errs, t.ID+": unknown iteration "+ref)
+		}
 		if len(t.WriteScope) == 0 {
 			errs = append(errs, t.ID+": write_scope required")
 		}
@@ -376,10 +471,41 @@ func TasksForDB(f *File) []*db.Task {
 			extra["not_doing"] = t.NotDoing
 		}
 		out = append(out, &db.Task{
-			ID: t.ID, Title: t.Title, Status: status,
+			ID: t.ID, IterationID: strings.TrimSpace(t.Iteration), Title: t.Title, Status: status,
 			Priority: prio, MergeOrder: mo, Deps: t.Deps,
 			WriteScope: t.WriteScope, ReadScope: t.ReadScope, Acceptance: t.Acceptance,
 			Extra: extra,
+		})
+	}
+	return out
+}
+
+// IterationsForDB 把蓝图迭代声明转成待写库的迭代模型。
+//
+// 调用方负责补 ProjectID 与时间戳；TargetBranch 未声明时继承 meta.main_branch，
+// Status 未声明或使用中文标签时归一为 db 层的规范值。
+func IterationsForDB(f *File) []*db.Iteration {
+	var out []*db.Iteration
+	for _, it := range f.Iterations {
+		id := strings.TrimSpace(it.ID)
+		if id == "" {
+			continue
+		}
+		status, ok := normalizeIterationStatus(it.Status)
+		if !ok {
+			status = db.IterationPlanning
+		}
+		target := strings.TrimSpace(it.TargetBranch)
+		if target == "" {
+			target = strings.TrimSpace(f.Meta.MainBranch)
+		}
+		extra := map[string]any{}
+		if len(it.Deps) > 0 {
+			extra["deps"] = it.Deps
+		}
+		out = append(out, &db.Iteration{
+			ID: id, Name: strings.TrimSpace(it.Name), Goal: strings.TrimSpace(it.Goal),
+			Status: status, TargetBranch: target, Extra: extra,
 		})
 	}
 	return out
