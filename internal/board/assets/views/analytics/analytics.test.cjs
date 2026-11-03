@@ -135,7 +135,9 @@ test("英文界面不残留中文；危险字符转义", async () => {
       by_source: [{ source_ns: "<script>x</script>", turn_count: 1, usage_unknown: false, turns_supported: true }],
     },
   }, { lang: "en" });
-  assert.ok(html.includes("Delivery &amp; usage statistics"));
+  // 页面标题由壳层 page-heading 提供，视图只负责卡片区。
+  assert.ok(html.includes("Deliveries"));
+  assert.ok(html.includes("Execution investment"));
   assert.doesNotMatch(html, /[\u4e00-\u9fa5]/);
   assert.ok(!html.includes("<script>"));
   assert.ok(html.includes("&lt;script&gt;"));
@@ -147,4 +149,18 @@ test("色阶函数：相对最大值分四档", async () => {
   assert.equal(mod.levelOf(50, 100), 2);
   assert.equal(mod.levelOf(100, 100), 4);
   assert.equal(mod.levelOf(50, 0), 0);
+});
+
+// E2E-102：没选工程 ≠ 没有统计。
+test("E2E-102 未选工程时指向工程下拉，而不是说没有统计结果", async () => {
+  const mod = await load();
+  const zh = mod.renderAnalytics({ status: "no_project" }, { lang: "zh" });
+  assert.ok(zh.includes('data-status="no_project"'));
+  assert.ok(zh.includes("还没有选择工程"));
+  assert.ok(zh.includes("顶部选择工程"), "文案要指向工程下拉");
+  assert.ok(!zh.includes("这个范围里还没有统计结果"), "未选工程不得渲染成空统计");
+
+  const en = mod.renderAnalytics({ status: "no_project" }, { lang: "en" });
+  assert.ok(en.includes("No project selected"));
+  assert.ok(!/[\u4e00-\u9fa5]/.test(en), "英文界面不应残留中文");
 });

@@ -162,3 +162,17 @@ test("英文界面不残留中文；危险字符转义", async () => {
   assert.ok(withCursor.includes("完整性"));
   assert.ok(withCursor.includes('data-status="unknown"'));
 });
+
+// E2E-102：没选工程 ≠ 没有会话。
+test("E2E-102 未选工程时指向工程下拉，而不是说没有会话", async () => {
+  const mod = await load();
+  const zh = mod.renderSessions({ status: "no_project" }, { lang: "zh" });
+  assert.ok(zh.includes('data-status="no_project"'));
+  assert.ok(zh.includes("还没有选择工程"));
+  assert.ok(zh.includes("顶部选择工程"), "文案要指向工程下拉");
+  assert.ok(!zh.includes("还没有可观测的来源会话"), "未选工程不得渲染成空会话");
+
+  const en = mod.renderSessions({ status: "no_project" }, { lang: "en" });
+  assert.ok(en.includes("No project selected"));
+  assert.ok(!/[\u4e00-\u9fa5]/.test(en), "英文界面不应残留中文");
+});

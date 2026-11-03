@@ -198,7 +198,7 @@ test("英文界面不残留中文；危险字符转义；非法日期不崩溃",
     project_id: "p2",
     projects: [{ id: "p1", label: "Project One" }, { id: "p2", label: "<b>inject</b>" }],
   }), { lang: "en", selectedHour: 0 });
-  assert.ok(html.includes("Day activity"));
+  // 页面标题由壳层 page-heading 提供，视图只负责热图与图例。
   assert.ok(html.includes("Execution coverage"));
   assert.ok(html.includes("turn·minutes"));
   assert.doesNotMatch(html, /[\u4e00-\u9fa5]/);
@@ -206,6 +206,24 @@ test("英文界面不残留中文；危险字符转义；非法日期不崩溃",
   assert.ok(html.includes("&lt;b&gt;inject&lt;/b&gt;"));
   // 非法日期退回今天，渲染仍安全（不抛 Invalid time value）。
   const bad = mod.renderActivity(renderState({ day: "<script>x</script>" }), { lang: "en" });
-  assert.ok(bad.includes("Day activity"));
+  assert.ok(bad.includes("Execution coverage"));
   assert.ok(!bad.includes("<script>"));
+});
+
+// E2E-102：没选工程 ≠ 这一天没有活动。
+test("E2E-102 未选工程时指向工程下拉，而不是说这一天没有活动", async () => {
+  const mod = await load();
+  const zh = mod.renderActivity({ status: "no_project" }, { lang: "zh" });
+  assert.ok(zh.includes('data-status="no_project"'));
+  assert.ok(zh.includes("还没有选择工程"));
+  assert.ok(zh.includes("顶部选择工程"), "文案要指向工程下拉");
+  assert.ok(!zh.includes("这一天没有观测到活动"), "未选工程不得渲染成空活动");
+
+  const en = mod.renderActivity({ status: "no_project" }, { lang: "en" });
+  assert.ok(en.includes("No project selected"));
+  assert.ok(!/[\u4e00-\u9fa5]/.test(en), "英文界面不应残留中文");
+
+  // partial 分支不回退：缺测仍按 missing 记，不因新增 no_project 而变成零。
+  const cells = mod.normalizeBuckets([{ hour: "01", count: 0, quality: "unknown" }], "2026-10-23", "UTC").cells;
+  assert.equal(mod.cellState(cells[0], "partial"), "missing");
 });

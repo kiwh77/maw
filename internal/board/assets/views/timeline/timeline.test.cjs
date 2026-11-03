@@ -194,7 +194,9 @@ test("英文界面不残留中文；危险字符转义", async () => {
     selectedId: '<img src=x onerror="alert(1)">',
     showDetail: true,
   });
-  assert.ok(html.includes("Execution timeline"));
+  // 页面标题由壳层 page-heading 提供，视图只负责工具栏与图例。
+  assert.ok(html.includes("Hour window"));
+  assert.ok(html.includes("CLI process"));
   assert.doesNotMatch(html, /[\u4e00-\u9fa5]/);
   assert.ok(!html.includes("<img"));
   assert.ok(!html.includes("<b>x</b>"));
@@ -209,4 +211,23 @@ test("并发 run 分轨，不把缺口涂成执行", async () => {
   const openBar = bars.find(b => b.interval_id === "iv_open");
   assert.ok(openBar);
   assert.ok(openBar.widthPct < 100, "未闭合条不得铺满整轨");
+});
+
+// E2E-102：没选工程 ≠ 这段时间没有区间。
+test("E2E-102 未选工程时指向工程下拉，而不是说这段时间没有数据", async () => {
+  const mod = await load();
+  const zh = mod.renderTimeline({ status: "no_project" }, { lang: "zh" });
+  assert.ok(zh.includes('data-status="no_project"'), "根节点应标 no_project");
+  assert.ok(zh.includes("还没有选择工程"));
+  assert.ok(zh.includes("顶部选择工程"), "文案要指向工程下拉");
+  assert.ok(!zh.includes("没有可显示的区间"), "未选工程不得渲染成空区间");
+
+  const en = mod.renderTimeline({ status: "no_project" }, { lang: "en" });
+  assert.ok(en.includes("No project selected"));
+  assert.ok(!/[\u4e00-\u9fa5]/.test(en), "英文界面不应残留中文");
+
+  // 有工程时 unknown 分支不回退：仍然解释「不完整」。
+  const unknown = mod.renderTimeline({ status: "unknown", intervals: [] }, { lang: "zh" });
+  assert.ok(unknown.includes("不完整"));
+  assert.ok(!unknown.includes("还没有选择工程"));
 });
