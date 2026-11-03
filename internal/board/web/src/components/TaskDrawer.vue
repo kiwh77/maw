@@ -168,6 +168,31 @@ function onKey(e: KeyboardEvent) {
 
 /** 打开前的焦点位置：关闭后要还给触发卡片，否则键盘用户会掉到页面顶部。 */
 let lastFocus: HTMLElement | null = null
+/** 触发抽屉的任务：卡片被刷新替换后，靠它找回新的卡片节点。 */
+let lastTrigger = { tid: '', pid: '' }
+
+/** 按任务 id 找当前还挂在页面上的卡片（快照刷新会替换节点）。 */
+function findTriggerCard(): HTMLElement | null {
+  if (!lastTrigger.tid) return null
+  const { tid, pid } = lastTrigger
+  const cards = Array.from(document.querySelectorAll<HTMLElement>('.card[data-tid]'))
+  return (
+    cards.find((el) => el.getAttribute('data-tid') === tid && el.getAttribute('data-pid') === pid) ||
+    cards.find((el) => el.getAttribute('data-tid') === tid) ||
+    null
+  )
+}
+
+/** 关闭后把焦点还给触发卡片；节点已被替换时按任务 id 找回新的那个。 */
+function restoreFocus() {
+  if (lastFocus && lastFocus.isConnected) {
+    lastFocus.focus()
+  } else {
+    findTriggerCard()?.focus()
+  }
+  lastFocus = null
+  lastTrigger = { tid: '', pid: '' }
+}
 
 watch(
   () => board.state.drawer,
@@ -176,6 +201,7 @@ watch(
     if (d) {
       const active = document.activeElement
       lastFocus = active instanceof HTMLElement ? active : null
+      lastTrigger = { tid: d.tid, pid: d.pid }
       void refreshDetail()
       // 等 inert 解除、遮罩挂上之后再接管焦点。
       void nextTick(() => {
@@ -183,8 +209,7 @@ watch(
         target?.focus()
       })
     } else {
-      lastFocus?.focus?.()
-      lastFocus = null
+      restoreFocus()
     }
   },
 )

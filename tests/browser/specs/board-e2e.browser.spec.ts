@@ -209,6 +209,39 @@ test.describe('B 组：看板真实渲染', () => {
     await expect(page.locator('#task-search')).toBeFocused();
   });
 
+  test('B-29 斜杠在输入态与修饰键下不劫持焦点', async ({ page }) => {
+    await openView(page, 'board');
+    const search = page.locator('#task-search');
+    await search.click();
+    await search.type('a/b');
+    await expect(search).toBeFocused();
+    await expect(search).toHaveValue('a/b');
+
+    // 修饰键组合不触发：Ctrl+/ 不该把焦点从输入框拽走。
+    await page.keyboard.press('Control+/');
+    await expect(search).toBeFocused();
+
+    // 只有在非输入态按斜杠才聚焦搜索框。
+    await page.locator('body').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('/');
+    await expect(search).toBeFocused();
+  });
+
+  test('B-30 抽屉关闭后焦点回到触发卡片', async ({ page }) => {
+    await openView(page, 'board');
+    const card = page.locator('.card').first();
+    const tid = await card.getAttribute('data-tid');
+    await card.click();
+    await expect(page.locator('#drawer')).toHaveAttribute('aria-hidden', 'false');
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#drawer')).toHaveAttribute('aria-hidden', 'true');
+
+    // 焦点回到触发卡片：键盘用户不用从头 Tab 回去。
+    const focused = await page.evaluate(() => document.activeElement?.getAttribute('data-tid') || null);
+    expect(focused, '抽屉关闭后焦点没有回到触发卡片').toBe(tid);
+  });
+
   test('B-11 搜索即时过滤看板卡片', async ({ page }) => {
     await openView(page, 'board');
     const total = await page.locator('.card').count();

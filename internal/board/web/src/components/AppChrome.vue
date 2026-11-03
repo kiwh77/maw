@@ -65,11 +65,16 @@ function onSearchInput() {
 /** 斜杠聚焦搜索：输入态不劫持，修饰键组合放行（避免和浏览器快捷键打架）。 */
 function onShortcut(event: KeyboardEvent) {
   if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return
+  // 输入法组合中的斜杠是候选字符：抢焦点会把中文输入打断。
+  if (event.isComposing) return
   // 模态抽屉打开时不抢焦点：那会把焦点从对话框里拽走。
   if (document.querySelector('#drawer.open')) return
   const el = event.target as HTMLElement | null
-  const tag = (el?.tagName || '').toLowerCase()
-  if (tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable) return
+  // 输入态判定用 closest：事件目标可能是输入框里的子节点。
+  const inField = Boolean(
+    el?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"]'),
+  )
+  if (inField) return
   const input = document.getElementById('task-search') as HTMLInputElement | null
   if (!input) return
   event.preventDefault()
