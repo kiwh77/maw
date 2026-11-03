@@ -9,7 +9,7 @@ import (
 	"github.com/kiwh77/maw/internal/localauth"
 )
 
-// API 汇总命令端点用到的写用例端口。任一端口为空时对应端点返回 500。
+// API 汇总命令端点用到的写用例端口。任一端口为空时对应端点返回 501（未在本中枢接线）。
 type API struct {
 	Dispatcher    Dispatcher
 	Claims        Claimer
@@ -39,6 +39,15 @@ func (a *API) Handler() http.Handler {
 		return a.Auth.Middleware(a.Auth.RequireScope(localauth.ScopeWrite, mux))
 	}
 	return mux
+}
+
+// writeNotWired 表示路径已挂载、但本中枢没有注入该用例端口。
+//
+// 501 而不是 500：请求本身没毛病，只是这台中枢没把这个入口接上引擎；
+// 受管执行仍以 CLI 为准，调用方据此改走 CLI，而不是把它当成服务端故障重试。
+func writeNotWired(w http.ResponseWriter, name string) {
+	writeErr(w, http.StatusNotImplemented, "unsupported",
+		name+" 写入口未在本中枢接线；受管执行请改用 CLI", map[string]any{"use": "cli"})
 }
 
 // ---- 请求体 ----
@@ -157,7 +166,7 @@ func (a *API) handleDispatch(w http.ResponseWriter, r *http.Request) {
 		predecessor = &id
 	}
 	if a.Dispatcher == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "派发端口未接线", nil)
+		writeNotWired(w, "派发")
 		return
 	}
 	rc, err := a.Dispatcher.Dispatch(r.Context(), DispatchCommand{
@@ -200,7 +209,7 @@ func (a *API) handleClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Claims == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "领取端口未接线", nil)
+		writeNotWired(w, "领取")
 		return
 	}
 	rc, err := a.Claims.Claim(r.Context(), ClaimCommand{
@@ -235,7 +244,7 @@ func (a *API) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Tasks == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "任务命令端口未接线", nil)
+		writeNotWired(w, "任务取消")
 		return
 	}
 	rc, err := a.Tasks.Cancel(r.Context(), CancelCommand{
@@ -267,7 +276,7 @@ func (a *API) handleRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Tasks == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "任务命令端口未接线", nil)
+		writeNotWired(w, "任务重试")
 		return
 	}
 	rc, err := a.Tasks.Retry(r.Context(), RetryCommand{
@@ -302,7 +311,7 @@ func (a *API) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Runs == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "运行命令端口未接线", nil)
+		writeNotWired(w, "运行停止")
 		return
 	}
 	cmd := CancelRunCommand{
@@ -350,7 +359,7 @@ func (a *API) handleDelivery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Deliveries == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "交付端口未接线", nil)
+		writeNotWired(w, "交付申报")
 		return
 	}
 	rc, err := a.Deliveries.Deliver(r.Context(), DeliveryCommand{
@@ -385,7 +394,7 @@ func (a *API) handleVerification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Verifications == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "验证端口未接线", nil)
+		writeNotWired(w, "验证申请")
 		return
 	}
 	rc, err := a.Verifications.Verify(r.Context(), VerificationCommand{
@@ -427,7 +436,7 @@ func (a *API) handleReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Reviews == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "评审端口未接线", nil)
+		writeNotWired(w, "人工评审")
 		return
 	}
 	rc, err := a.Reviews.Review(r.Context(), ReviewCommand{
@@ -470,7 +479,7 @@ func (a *API) handleMerge(w http.ResponseWriter, r *http.Request) {
 		strategy = "squash"
 	}
 	if a.Merges == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "合入端口未接线", nil)
+		writeNotWired(w, "合入")
 		return
 	}
 	rc, err := a.Merges.Merge(r.Context(), MergeCommand{

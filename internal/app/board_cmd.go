@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,7 +16,11 @@ import (
 	"github.com/kiwh77/maw/internal/board"
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/engine/claim"
+	"github.com/kiwh77/maw/internal/engine/model"
+	"github.com/kiwh77/maw/internal/engine/ports"
 	"github.com/kiwh77/maw/internal/home"
+	httpcommands "github.com/kiwh77/maw/internal/httpapi/commands"
 	httpevents "github.com/kiwh77/maw/internal/httpapi/events"
 	httpobservability "github.com/kiwh77/maw/internal/httpapi/observability"
 	httpread "github.com/kiwh77/maw/internal/httpapi/read"
@@ -147,6 +153,14 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 	}
 	resH := resAPI.Handler()
 
+	// 命令写入口（派发／领取／取消／交付／评审／合入）：派发接到统一领取用例，
+	// 其余端口未接线时回 501，让「路径已挂载」与「用例已接线」分得清。
+	cmdAPI := &httpcommands.API{
+		Dispatcher: hubCommandPorts{cwd: cwd, gdb: gdb, store: store},
+		Auth:       auth,
+	}
+	cmdH := cmdAPI.Handler()
+
 	sysAPI := &httpsystemjobs.API{
 		Store: store,
 		Auth:  auth,
@@ -162,11 +176,16 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 
 	v1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		kind := v1Route(r.URL.Path)
-		// 写方法落在没有专属写处理者的路径上时交给资源写树：
-		// 这样 /api/v1/projects/{id}/tasks、/api/v1/nodes/{id} 这类「中枢声明有写入口」
-		// 的路径，方法错与路径未知都回 JSON 错误码，而不是只读树的纯文本 405。
+		// 写方法落在没有专属写处理者的路径上时分给写树：
+		// 命令资源（dispatches／claims／cancellations…）归 commands，
+		// 其余（任务定义、节点登记、工程移除）归 resources。这样
+		// /api/v1/projects/{id}/dispatches 才有 202 + Location，而不是只读树的纯文本 405。
 		// 事件上报、系统作业、观测确认这些自带写处理者的路径仍按路径先分流。
 		if kind == v1Read && isV1WriteMethod(r.Method) {
+			if v1CommandPath(r.URL.Path) {
+				cmdH.ServeHTTP(w, r)
+				return
+			}
 			resH.ServeHTTP(w, r)
 			return
 		}
@@ -297,6 +316,175 @@ func loadEventFeedPage(gdb string, since int64, projectID, agent string, limit i
 		return e
 	})
 	return out, err
+}
+
+// hubDispatchNode 是中枢派发用的节点标识。
+//
+// 与人工领取的 manual-compat 同一思路：中枢受理派发时只借一个槽位载体，
+// 不冒充真实 Worker 节点；真实节点由 Worker 自己登记。
+const hubDispatchNode = "hub-dispatch"
+
+// hubCommandPorts 把 /api/v1 命令写入口接到既有用例。
+//
+// 只接线「派发」——它与 maw next 共用同一个领取用例（engine/claim），
+// 受理后留下 pending 的 dispatch 操作，由协调者（或 CLI 领取）继续推进；
+// 其余命令端点没有现成用例可复用，保持未接线（501），不在 Hub 里另造语义。
+type hubCommandPorts struct {
+	cwd   string
+	gdb   string
+	store *db.Store
+}
+
+// Dispatch 按指定任务／节点派发，返回待执行操作（202 + Location 由传输层补齐）。
+func (p hubCommandPorts) Dispatch(ctx context.Context, cmd httpcommands.DispatchCommand) (httpcommands.Receipt, error) {
+	pc, err := hubProjectContext(p.cwd, p.gdb, string(cmd.ProjectID))
+	if err != nil {
+		return httpcommands.Receipt{}, err
+	}
+	nodeID := cmd.NodeID
+	if nodeID == "" {
+		nodeID = model.NodeID(hubDispatchNode)
+		if err := ensureHubDispatchNode(p.store, pc.ID()); err != nil {
+			return httpcommands.Receipt{}, err
+		}
+	}
+	workspace, err := hubDispatchWorkspace(pc, cmd.IdempotencyKey)
+	if err != nil {
+		return httpcommands.Receipt{}, err
+	}
+	// actor 来自令牌／浏览器会话（如 session:…），不一定符合 {应用}-{工程}-{序号}：
+	// 与 CLI 自领一样保留原样，否则中枢派发会被命名规范挡在门外。
+	legacyActor := !model.AgentID(cmd.Actor).Valid()
+	out, err := claim.New(p.store, nil).Claim(ctx, claim.Request{
+		ClaimRequest: ports.ClaimRequest{
+			ProjectID:        model.ProjectID(pc.ID()),
+			AgentID:          model.AgentID(cmd.Actor),
+			RequestedTask:    cmd.RequestedTask,
+			ExpectedRevision: &cmd.ExpectedRevision,
+			Capacity:         cmd.Capacity,
+			IdempotencyKey:   cmd.IdempotencyKey,
+		},
+		NodeID:        nodeID,
+		Workspace:     workspace,
+		LegacyAgentID: legacyActor,
+	})
+	if err != nil {
+		return httpcommands.Receipt{}, err
+	}
+	rev := out.Revision
+	return httpcommands.Receipt{
+		OperationID: out.OperationID,
+		Status:      hubOperationStatus(p.store, out.OperationID, out.Replay),
+		Action:      "dispatch",
+		Resource:    "/api/v1/projects/" + pc.ID() + "/dispatches",
+		Revision:    &rev,
+		Replay:      out.Replay,
+	}, nil
+}
+
+// hubProjectContext 按 project_id 找到工程上下文；本仓工程优先走已解析上下文。
+func hubProjectContext(cwd, gdb, projectID string) (*projCtx, error) {
+	if pc, err := resolveProject(cwd); err == nil && pc.ID() == projectID {
+		return pc, nil
+	}
+	var proj *db.Project
+	if err := db.WithTx(gdb, func(tx *sql.Tx) error {
+		var e error
+		proj, e = db.GetProject(tx, projectID)
+		return e
+	}); err != nil {
+		return nil, err
+	}
+	if proj == nil {
+		return nil, httpcommands.ErrNotFound{Message: "工程 " + projectID + " 未登记"}
+	}
+	local, err := home.RequireHome(proj.Path)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := config.Load(home.ConfigPath(local))
+	if err != nil {
+		return nil, err
+	}
+	return &projCtx{Repo: proj.Path, LocalHome: local, GlobalDB: gdb, Project: proj, Config: cfg}, nil
+}
+
+// ensureHubDispatchNode 保证中枢派发节点已登记（同工程复用，不重复建）。
+func ensureHubDispatchNode(store *db.Store, projectID string) error {
+	return store.Write(func(tx *sql.Tx) error {
+		n, err := db.GetNode(tx, hubDispatchNode)
+		if err != nil {
+			return err
+		}
+		if n != nil && n.ProjectID == projectID {
+			return nil
+		}
+		return db.UpsertNode(tx, &db.Node{
+			ID: hubDispatchNode, ProjectID: projectID,
+			Label: hubDispatchNode, SlotLimit: 64,
+		})
+	})
+}
+
+// hubDispatchWorkspace 按幂等键派生稳定的独占目录：重放命中同一目录，避免双开。
+func hubDispatchWorkspace(pc *projCtx, idempotencyKey string) (string, error) {
+	rt, err := NewRuntime(pc, "")
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(idempotencyKey))
+	dir := filepath.Join(rt.StateDir(), "workspaces", "api-"+hex.EncodeToString(sum[:8]))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Abs(dir)
+}
+
+// hubOperationStatus 把操作结果映射成契约里的四值状态。
+//
+// 新受理一定是 pending → queued；只有幂等重放才按已落库结果回报终止态，
+// 这样 202 永远不宣称成功，重放也不会把一个已应用的操作说成还在排队。
+func hubOperationStatus(store *db.Store, id model.OperationID, replay bool) httpcommands.OperationStatus {
+	if !replay {
+		return httpcommands.StatusQueued
+	}
+	result := model.ResultPending
+	if err := store.Read(func(tx *sql.Tx) error {
+		op, err := db.GetOperation(tx, string(id))
+		if err != nil || op == nil {
+			return err
+		}
+		result = op.Result
+		return nil
+	}); err != nil {
+		return httpcommands.StatusQueued
+	}
+	switch result {
+	case model.ResultApplied, model.ResultAlreadyFinished:
+		return httpcommands.StatusSucceeded
+	case model.ResultRejected:
+		return httpcommands.StatusFailed
+	}
+	return httpcommands.StatusQueued
+}
+
+// commandSuffixes 是命令子树的资源名（按动作而非对象区分）。
+var commandSuffixes = []string{
+	"/dispatches", "/claims", "/cancellations", "/retries",
+	"/deliveries", "/verifications", "/reviews", "/merges",
+}
+
+// v1CommandPath 判断写方法是否落在命令子树上。
+//
+// 只看资源段后缀，且仅用于写方法分流：GET 的同名路径（如
+// /api/v1/projects/{id}/deliveries 列表）仍归只读树，不会被命令树抢走。
+func v1CommandPath(p string) bool {
+	for _, s := range commandSuffixes {
+		if strings.HasSuffix(p, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // changeBridge 把事件包的失效源转成观测包要的形状。

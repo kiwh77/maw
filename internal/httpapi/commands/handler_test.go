@@ -578,13 +578,13 @@ func TestCancelRunRequiresSomeCondition(t *testing.T) {
 	}
 }
 
-func TestNilPortReturns500(t *testing.T) {
+func TestNilPortReturns501(t *testing.T) {
 	rec := doReq(t, (&API{}).Handler(), http.MethodPost,
 		"/api/v1/projects/"+testProject+"/claims", testKey, `"rev-42"`, map[string]any{})
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("未接线端口应为 500，实际 %d", rec.Code)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("未接线端口应为 501，实际 %d", rec.Code)
 	}
-	if code := decode(t, rec)["error"].(map[string]any)["code"]; code != "internal_error" {
+	if code := decode(t, rec)["error"].(map[string]any)["code"]; code != "unsupported" {
 		t.Fatalf("错误码不正确: %v", code)
 	}
 }
