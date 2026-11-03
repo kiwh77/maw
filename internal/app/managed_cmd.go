@@ -337,7 +337,8 @@ func InternalRunner(opts RunnerOpts) (Result, error) {
 	return out, nil
 }
 
-// launchSpecFile 是 Coordinator/系统 Agent 写入的启动规格文件名。
+// launchSpecFile 是 Coordinator/系统 Agent 在 Launch 前写入的启动规格文件名。
+// 写入方见 Runtime.PrepareRunnerArtifacts：显式来源缺失时不写，Runner 保持驻留。
 const launchSpecFile = "launch_spec.json"
 
 // maybeRunSession 若存在 launch_spec.json 则用 session.Runner + passthrough Source 执行。
@@ -351,22 +352,14 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, error) {
 	if err := json.Unmarshal(b, &spec); err != nil {
 		return session.Report{}, true, err
 	}
-	metaPath := filepath.Join(opDir, "run_meta.json")
-	meta := struct {
-		RunID      string `json:"run_id"`
-		InstanceID string `json:"instance_id"`
-		Generation int    `json:"generation"`
-		ProjectID  string `json:"project_id"`
-		GlobalDB   string `json:"global_db"`
-	}{}
+	// 与 Launch 侧写出的形状共用同一个结构：读的一侧跟着写的一侧变，不会再漂移。
+	metaPath := filepath.Join(opDir, runMetaFile)
+	meta := RunMeta{}
 	if mb, err := os.ReadFile(metaPath); err == nil {
 		_ = json.Unmarshal(mb, &meta)
 	}
 	if meta.RunID == "" {
-		meta.RunID = "run_" + strings.TrimPrefix(opID, "op_")
-		if !strings.HasPrefix(meta.RunID, "run_") {
-			meta.RunID = "run_" + opID
-		}
+		meta.RunID = runIDForOperation(opID)
 	}
 	if meta.InstanceID == "" {
 		meta.InstanceID = "ti_systemagent"

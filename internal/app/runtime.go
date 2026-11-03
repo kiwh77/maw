@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kiwh77/maw/internal/engine/dispatch"
+	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/i18n"
@@ -21,6 +23,35 @@ const (
 	runnerTokenFile = "bootstrap.token"
 	runnerLockFile  = "runner.lock"
 )
+
+// runMetaFile 是 `__runner` 读取的运行元数据文件名；字段与 InternalRunner 的读取形状一致。
+const runMetaFile = "run_meta.json"
+
+// 受管路径的启动来源声明：都是显式注入，不设置就保持「只写 run_meta、不写 launch_spec」的现状。
+//
+//   - managedLaunchSpecEnv 传完整 model.LaunchSpec JSON（字段最全，生产/系统派发用）；
+//   - managedLaunchCmdEnv 传 JSON 数组 argv（第 0 个元素是可执行文件绝对路径），便于手工验证。
+const (
+	managedLaunchSpecEnv = "MAW_LAUNCH_SPEC"
+	managedLaunchCmdEnv  = "MAW_LAUNCH_CMD"
+)
+
+// managedLaunchEnvAllowlist 是默认透传的环境变量：来源进程要能正常起跑至少需要 PATH/HOME。
+var managedLaunchEnvAllowlist = []string{"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "USER", "SHELL"}
+
+// RunMeta 是 ops/<operation_id>/run_meta.json 的形状。
+//
+// 字段与 `__runner` 的读取保持一致：缺 run_id 时 Runner 会用操作号兜底，
+// 缺 global_db 时事实无处提交，所以这几项必须在 Launch 前落盘。
+type RunMeta struct {
+	OperationID string `json:"operation_id"`
+	RunID       string `json:"run_id"`
+	InstanceID  string `json:"instance_id"`
+	Generation  int    `json:"generation"`
+	ProjectID   string `json:"project_id"`
+	GlobalDB    string `json:"global_db"`
+	CreatedAt   string `json:"created_at"`
+}
 
 // Runtime 是受管执行的应用侧装配：中枢协调与独立 Runner 进程分离。
 //
@@ -101,6 +132,166 @@ type runnerLauncher struct {
 	rt *Runtime
 }
 
+// PrepareRunnerArtifacts 在起 Runner 之前把运行元数据与启动规格落到 op 目录。
+//
+// Runner 只读文件、不读中枢内存：
+//   - run_meta.json 每次都覆盖（它描述本次操作的身份：run_id / project_id / global_db）；
+//   - launch_spec.json 只在显式给了来源、且目录里还没有时写入（外部预置的规格优先级最高）。
+//
+// 没有来源时不写 launch_spec.json：`__runner` 保持「校验令牌后驻留等信号」的现状。
+func (rt *Runtime) PrepareRunnerArtifacts(opDir string, op dispatch.Operation) error {
+	if rt == nil {
+		return errx.New("runtime missing", "maw init")
+	}
+	if err := os.MkdirAll(opDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeJSONFileAtomic(filepath.Join(opDir, runMetaFile), rt.RunMetaFor(op)); err != nil {
+		return err
+	}
+	spec, ok, err := rt.managedLaunchSpec()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	specPath := filepath.Join(opDir, launchSpecFile)
+	if _, statErr := os.Stat(specPath); statErr == nil {
+		return nil
+	}
+	return writeJSONFileAtomic(specPath, spec)
+}
+
+// RunMetaFor 按操作身份与工程上下文生成 run_meta 内容（导出以便测试与运维核对）。
+//
+// 兜底与 `__runner` 一致：缺 run_id 用操作号推导，缺实例/代际按系统 Agent 的最小值，
+// 这样「文件里写的」与「Runner 自己猜的」永远是同一个值。
+func (rt *Runtime) RunMetaFor(op dispatch.Operation) RunMeta {
+	meta := RunMeta{
+		OperationID: string(op.OperationID),
+		RunID:       string(op.RunID),
+		InstanceID:  string(op.Instance),
+		Generation:  int(op.Generation),
+		ProjectID:   string(op.ProjectID),
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+	}
+	if rt != nil && rt.pc != nil {
+		meta.GlobalDB = rt.pc.GlobalDB
+		if meta.ProjectID == "" {
+			meta.ProjectID = rt.pc.ID()
+		}
+	}
+	if meta.RunID == "" {
+		meta.RunID = runIDForOperation(meta.OperationID)
+	}
+	if meta.InstanceID == "" {
+		meta.InstanceID = "ti_systemagent"
+	}
+	if meta.Generation < 1 {
+		meta.Generation = 1
+	}
+	return meta
+}
+
+// managedLaunchSpec 读显式来源并补默认值；第二个返回值表示「是否有来源」。
+func (rt *Runtime) managedLaunchSpec() (model.LaunchSpec, bool, error) {
+	var spec model.LaunchSpec
+	if raw := strings.TrimSpace(os.Getenv(managedLaunchSpecEnv)); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+			return model.LaunchSpec{}, true, errx.New(
+				managedLaunchSpecEnv+" 不是合法的 LaunchSpec JSON: "+err.Error(),
+				"按 model.LaunchSpec 的字段传 JSON，或改用 "+managedLaunchCmdEnv)
+		}
+	} else {
+		raw := strings.TrimSpace(os.Getenv(managedLaunchCmdEnv))
+		if raw == "" {
+			return model.LaunchSpec{}, false, nil
+		}
+		var argv []string
+		if err := json.Unmarshal([]byte(raw), &argv); err != nil {
+			return model.LaunchSpec{}, true, errx.New(
+				managedLaunchCmdEnv+" 必须是 JSON 数组: "+err.Error(),
+				`例如 ["/usr/bin/env","codebuddy","--headless"]`)
+		}
+		// 契约要求 argv 非空：只给可执行文件说明调用方少写了参数，宁可直接失败也别写坏文件。
+		if len(argv) < 2 {
+			return model.LaunchSpec{}, true, errx.New(
+				managedLaunchCmdEnv+" 至少要有可执行文件与一个参数",
+				`例如 ["/usr/bin/env","codebuddy","--headless"]`)
+		}
+		spec = model.LaunchSpec{Executable: argv[0], Argv: argv[1:]}
+	}
+	rt.fillLaunchDefaults(&spec)
+	if errs := spec.Validate(); len(errs) > 0 {
+		return model.LaunchSpec{}, true, errx.New(
+			"launch_spec 未通过契约校验: "+model.Err(errs).Error(),
+			"核对 executable 绝对路径、argv 非空、protocol 与 stdin_mode")
+	}
+	return spec, true, nil
+}
+
+// fillLaunchDefaults 只填「调用方没写」的字段，绝不覆盖显式值。
+func (rt *Runtime) fillLaunchDefaults(spec *model.LaunchSpec) {
+	if spec.Cwd == "" && rt != nil && rt.pc != nil && rt.pc.Repo != "" {
+		cwd := rt.pc.Repo
+		if abs, err := filepath.Abs(cwd); err == nil {
+			cwd = abs
+		}
+		spec.Cwd = cwd
+	}
+	if spec.StdinMode == "" {
+		spec.StdinMode = model.StdinNone
+	}
+	if len(spec.EnvAllowlist) == 0 {
+		spec.EnvAllowlist = append([]string{}, managedLaunchEnvAllowlist...)
+	}
+	if spec.ExpectedProtocol.Format == "" {
+		spec.ExpectedProtocol.Format = "passthrough"
+	}
+	if spec.ExpectedProtocol.Version == "" {
+		spec.ExpectedProtocol.Version = "1"
+	}
+}
+
+// runIDForOperation 与 `__runner` 的兜底推导保持一致：op_xxx → run_xxx。
+func runIDForOperation(opID string) string {
+	id := strings.TrimSpace(opID)
+	if strings.HasPrefix(id, "run_") {
+		return id
+	}
+	return "run_" + strings.TrimPrefix(id, "op_")
+}
+
+// writeJSONFileAtomic 先写同目录临时文件再 rename，避免 Runner 读到半截 JSON。
+func writeJSONFileAtomic(path string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".maw-launch-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
 func (l runnerLauncher) Launch(ctx context.Context, req dispatch.LaunchRequest) (dispatch.ProcessIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return dispatch.ProcessIdentity{}, err
@@ -122,6 +313,10 @@ func (l runnerLauncher) Launch(ctx context.Context, req dispatch.LaunchRequest) 
 	}
 	tokenPath := filepath.Join(opDir, runnerTokenFile)
 	if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0o600); err != nil {
+		return dispatch.ProcessIdentity{}, err
+	}
+	// Runner 只读文件：元数据与启动规格必须在起进程之前落盘，否则本次启动必然空转。
+	if err := l.rt.PrepareRunnerArtifacts(opDir, req.Operation); err != nil {
 		return dispatch.ProcessIdentity{}, err
 	}
 	repo := l.rt.pc.Repo
