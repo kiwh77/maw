@@ -69,6 +69,10 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 	for _, t := range planTasks {
 		t.ProjectID = pc.ID()
 	}
+	planIterations := blueprint.IterationsForDB(f)
+	for _, it := range planIterations {
+		it.ProjectID = pc.ID()
+	}
 	effectiveMain := pc.Config.Project.MainBranch
 	if mainBranch != "" {
 		effectiveMain = mainBranch
@@ -76,7 +80,7 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 	if dryRun {
 		return Result{
 			"ok": true, "dry_run": true, "reset": reset,
-			"tasks": planTasks, "project_id": pc.ID(),
+			"tasks": planTasks, "iterations": planIterations, "project_id": pc.ID(),
 			"main_branch": effectiveMain,
 			"note":        i18n.T("plan.note_incremental"),
 		}, nil
@@ -111,6 +115,8 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 		identityNotes                        []string
 		pinned                               int
 	)
+	iterationCounts := map[string]*planIterationCount{}
+	var iterationCreatedIDs, iterationUpdatedIDs []string
 	err = withGlobalWrite(pc.GlobalDB, func(tx *sql.Tx) error {
 		if mainBranch != "" {
 			pc.Project.MainBranch = mainBranch
@@ -118,6 +124,12 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 			if err := db.UpsertProject(tx, pc.Project); err != nil {
 				return err
 			}
+		}
+
+		var err error
+		iterationCreatedIDs, iterationUpdatedIDs, err = upsertPlanIterations(tx, pc.ID(), planIterations)
+		if err != nil {
+			return err
 		}
 
 		// 契约形态 DisplayID 时先跑身份规划，校验重建／冻结／退役与 pinned Run。
@@ -147,8 +159,9 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 					return err
 				}
 				created++
+				bumpIterationCount(iterationCounts, t.IterationID, "created")
 				_ = db.AppendEvent(tx, pc.ID(), agent, "task_created", t.ID, map[string]any{
-					"status": t.Status, "instance_id": t.InstanceID,
+					"status": t.Status, "instance_id": t.InstanceID, "iteration_id": t.IterationID,
 				})
 			}
 		} else {
@@ -173,21 +186,25 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 						return err
 					}
 					preserved++
+					bumpIterationCount(iterationCounts, old.IterationID, "preserved")
 					_ = db.AppendEvent(tx, pc.ID(), agent, "task_plan_updated", old.ID, map[string]any{
 						"status": old.Status, "kept": true, "instance_id": old.InstanceID,
+						"iteration_id": old.IterationID,
 					})
 					continue
 				}
 				if old == nil {
 					created++
+					bumpIterationCount(iterationCounts, nt.IterationID, "created")
 					if err := db.UpsertTask(tx, nt); err != nil {
 						return err
 					}
 					_ = db.AppendEvent(tx, pc.ID(), agent, "task_created", nt.ID, map[string]any{
-						"status": nt.Status, "instance_id": nt.InstanceID,
+						"status": nt.Status, "instance_id": nt.InstanceID, "iteration_id": nt.IterationID,
 					})
 				} else {
 					updated++
+					bumpIterationCount(iterationCounts, nt.IterationID, "updated")
 					nt.InstanceID = old.InstanceID
 					if err := db.UpsertTask(tx, nt); err != nil {
 						return err
@@ -195,9 +212,14 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 					if err := freezeIfDefinitionChanged(tx, nt); err != nil {
 						return err
 					}
-					_ = db.AppendEvent(tx, pc.ID(), agent, "task_updated", nt.ID, map[string]any{
-						"status": nt.Status, "from_status": old.Status, "instance_id": nt.InstanceID,
-					})
+					payload := map[string]any{
+						"status": nt.Status, "from_status": old.Status,
+						"instance_id": nt.InstanceID, "iteration_id": nt.IterationID,
+					}
+					if old.IterationID != nt.IterationID {
+						payload["previous_iteration_id"] = old.IterationID
+					}
+					_ = db.AppendEvent(tx, pc.ID(), agent, "task_updated", nt.ID, payload)
 				}
 			}
 			for _, old := range existing {
@@ -206,12 +228,14 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 				}
 				if machine.PreserveOnPlanApply(old.Status) {
 					preserved++
+					bumpIterationCount(iterationCounts, old.IterationID, "preserved")
 					continue
 				}
 				if err := retireIdleRemoved(tx, pc.ID(), old, agent); err != nil {
 					return err
 				}
 				removed++
+				bumpIterationCount(iterationCounts, old.IterationID, "removed")
 			}
 			if err := db.DeleteSharedFiles(tx, pc.ID()); err != nil {
 				return err
@@ -228,15 +252,23 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 		return db.AppendEvent(tx, pc.ID(), agent, "plan_applied", "", map[string]any{
 			"path": path, "reset": reset,
 			"created": created, "updated": updated, "preserved": preserved, "removed": removed,
-			"pinned_runs": pinned,
+			"pinned_runs":       pinned,
+			"iterations":        iterationCounts,
+			"iteration_created": iterationCreatedIDs,
+			"iteration_updated": iterationUpdatedIDs,
 		})
 	})
 	if err != nil {
 		return nil, err
 	}
 	var out []*db.Task
+	var outIterations []*db.Iteration
 	_ = withGlobalRead(pc.GlobalDB, func(tx *sql.Tx) error {
 		out, err = db.ListTasks(tx, pc.ID())
+		if err != nil {
+			return err
+		}
+		outIterations, err = db.ListIterations(tx, pc.ID())
 		return err
 	})
 	html, _ := refreshBoard(pc)
@@ -246,8 +278,10 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 		"main_branch": pc.Config.Project.MainBranch,
 		"created":     created, "updated": updated, "preserved": preserved, "removed": removed,
 		"pinned_runs": pinned,
-		"tasks":       out, "board": html,
-		"next":        i18n.T("next.after_apply"),
+		"iterations":  outIterations, "iteration_counts": iterationCounts,
+		"iteration_created": iterationCreatedIDs, "iteration_updated": iterationUpdatedIDs,
+		"tasks": out, "board": html,
+		"next": i18n.T("next.after_apply"),
 	}
 	if len(identityNotes) > 0 {
 		res["identity_notes"] = identityNotes
@@ -272,4 +306,71 @@ func mergePlanFields(dst, src *db.Task) {
 			dst.Extra[k] = v
 		}
 	}
+}
+
+// planIterationCount 是单个迭代在本波 apply 里新建/更新/保留/移除的任务计数。
+type planIterationCount struct {
+	Created   int `json:"created"`
+	Updated   int `json:"updated"`
+	Preserved int `json:"preserved"`
+	Removed   int `json:"removed"`
+}
+
+func bumpIterationCount(counts map[string]*planIterationCount, iterationID, field string) {
+	if iterationID == "" {
+		return
+	}
+	c := counts[iterationID]
+	if c == nil {
+		c = &planIterationCount{}
+		counts[iterationID] = c
+	}
+	switch field {
+	case "created":
+		c.Created++
+	case "updated":
+		c.Updated++
+	case "preserved":
+		c.Preserved++
+	case "removed":
+		c.Removed++
+	}
+}
+
+// upsertPlanIterations 确保蓝图声明的迭代存在。
+//
+// 新 id 直接建档；已存在的 id 只刷新计划字段（名称/目标/依赖），
+// 不覆盖生命周期状态与已记录的合并提交，避免重复 apply 把 running/merged 打回 planning。
+func upsertPlanIterations(tx *sql.Tx, projectID string, specs []*db.Iteration) (createdIDs, updatedIDs []string, err error) {
+	for _, spec := range specs {
+		spec.ProjectID = projectID
+		existing, err := db.GetIteration(tx, projectID, spec.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if existing == nil {
+			if err := db.UpsertIteration(tx, spec); err != nil {
+				return nil, nil, err
+			}
+			createdIDs = append(createdIDs, spec.ID)
+			continue
+		}
+		existing.Name = spec.Name
+		existing.Goal = spec.Goal
+		if existing.TargetBranch == "" && spec.TargetBranch != "" {
+			existing.TargetBranch = spec.TargetBranch
+		}
+		if existing.Extra == nil {
+			existing.Extra = map[string]any{}
+		}
+		for k, v := range spec.Extra {
+			existing.Extra[k] = v
+		}
+		existing.UpdatedAt = ""
+		if err := db.UpsertIteration(tx, existing); err != nil {
+			return nil, nil, err
+		}
+		updatedIDs = append(updatedIDs, spec.ID)
+	}
+	return createdIDs, updatedIDs, nil
 }
