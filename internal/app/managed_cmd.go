@@ -380,7 +380,13 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, error) {
 			store = &dbstore.Store{DB: dbStore, ProjectID: meta.ProjectID}
 		}
 	}
-	r, err := session.New(store, dbstore.PassthroughSource{}, jr)
+	// 来源协议实现按启动规格选：CodeBuddy 的实测协议用 adapter 解释，
+	// 其余协议回退 passthrough（只按退出码判定）。
+	source, err := session.SourceFor(spec)
+	if err != nil {
+		return session.Report{}, true, err
+	}
+	r, err := session.New(store, source, jr)
 	if err != nil {
 		return session.Report{}, true, err
 	}
