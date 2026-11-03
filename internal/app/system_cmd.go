@@ -11,6 +11,7 @@ import (
 
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/engine/dispatch"
 	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/runner/process"
@@ -48,13 +49,13 @@ func SystemStatus(cwd string) (Result, error) {
 		return nil
 	})
 	return Result{
-		"ok": true,
-		"enabled": cfg.Enabled,
-		"config_version": cfg.ConfigVersion,
+		"ok":                true,
+		"enabled":           cfg.Enabled,
+		"config_version":    cfg.ConfigVersion,
 		"poll_interval_sec": cfg.PollIntervalSec,
-		"auto_kinds": cfg.AutoKinds,
-		"llm_node": cfg.LLMNode,
-		"worker_node": cfg.WorkerNode,
+		"auto_kinds":        cfg.AutoKinds,
+		"llm_node":          cfg.LLMNode,
+		"worker_node":       cfg.WorkerNode,
 		"queue": map[string]any{
 			"queued": queued, "running": running, "done": done,
 			"failed": failed, "escalated": escalated, "recent": len(jobs),
@@ -294,39 +295,77 @@ func (e appSystemEffects) PlanApprovalAuto(projectPath string) bool {
 	return strings.EqualFold(pc.Config.Approvals.Plan, "auto")
 }
 
-// startSystemWatchIfEnabled 在 board serve 内后台拉起系统 Agent 监视循环。
-func startSystemWatchIfEnabled(cwd string) {
+// startServeLoops 在 board serve 内启动唯一 leader 循环。
+//
+// 一个状态目录只允许一个 leader：auto_enabled 时推进派发队列，
+// system_agent.enabled 时按 poll_interval 轮询系统 Agent，两者共用同一把
+// <state>/dispatch/coordinator.lock。抢不到锁的第二个 serve 会直接退出循环，
+// 不把正在工作的 leader 挤掉，也不消费任何排队操作。
+func startServeLoops(cwd string) {
 	pc, cfg, err := loadSystemAgentConfig(cwd)
-	if err != nil || !cfg.Enabled {
-		return
-	}
-	orch, err := buildOrchestrator(pc, cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "system agent: build orchestrator: %v\n", err)
 		return
 	}
 	rt, err := NewRuntime(pc, "")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "system agent: runtime: %v\n", err)
+		fmt.Fprintf(os.Stderr, "serve leader: runtime: %v\n", err)
 		return
 	}
-	w := &systemagent.Watcher{
-		Store:        orch.Store,
-		Config:       cfg,
-		Orchestrator: orch,
-		ProjectID:    pc.ID(),
-		LeaderLock: func() (func(), error) {
-			lockPath := filepath.Join(rt.StateDir(), "dispatch", "coordinator.lock")
-			_ = os.MkdirAll(filepath.Dir(lockPath), 0o755)
-			lock, err := process.AcquireLock(lockPath)
-			if err != nil {
-				return nil, err
-			}
-			return func() { _ = lock.Release() }, nil
+	store, err := db.OpenStore(pc.GlobalDB)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "serve leader: open store: %v\n", err)
+		return
+	}
+	coord, err := rt.BuildCoordinator(dispatch.NewDBQueue(store))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "serve leader: coordinator: %v\n", err)
+		return
+	}
+
+	view := rt.ManagedView()
+	auto, _ := view["auto_enabled"].(bool)
+	limit, _ := view["managed_execution_limit"].(int)
+	supported, _ := view["platform_supported"].(bool)
+	if auto && (limit < 1 || !supported) {
+		// 受管执行在当前平台/上限下不可用：不推进排队操作，等人工或 CLI 处理。
+		auto = false
+	}
+
+	leader := &dispatch.Leader{
+		Coord:    coord,
+		Dispatch: auto,
+		OnError: func(err error) {
+			fmt.Fprintf(os.Stderr, "serve leader: %v\n", err)
 		},
 	}
+	if cfg.Enabled {
+		orch, err := buildOrchestrator(pc, cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "serve leader: build orchestrator: %v\n", err)
+		} else {
+			w := &systemagent.Watcher{
+				Store:        orch.Store,
+				Config:       cfg,
+				Orchestrator: orch,
+				ProjectID:    pc.ID(),
+				// leader 已持同一把锁，轮询不再自己抢锁，两套循环不会互相饿死。
+				LeaderLock: nil,
+			}
+			leader.System = func(ctx context.Context) error {
+				_, _, err := w.PollOnce(ctx)
+				return err
+			}
+			leader.SystemInterval = time.Duration(cfg.PollIntervalSec) * time.Second
+		}
+	}
+	if !auto && leader.System == nil {
+		return
+	}
 	go func() {
-		fmt.Fprintf(os.Stderr, "system agent watch started (project=%s)\n", pc.ID())
-		_ = w.Run(context.Background())
+		fmt.Fprintf(os.Stderr, "serve leader started (project=%s auto=%v system=%v)\n",
+			pc.ID(), auto, leader.System != nil)
+		if err := leader.Run(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "serve leader 退出（已有 leader 或锁不可用）: %v\n", err)
+		}
 	}()
 }

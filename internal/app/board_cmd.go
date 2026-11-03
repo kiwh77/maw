@@ -107,8 +107,9 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 		fmt.Println(i18n.T("board.hub_started"), url)
 		fmt.Println(i18n.T("board.data_source"), gdb)
 		fmt.Println(i18n.T("board.ctrl_c"))
-		// 若工程开启 system_agent，与 serve 同进程启动监视（共用 dispatch 锁）。
-		startSystemWatchIfEnabled(cwd)
+		// 与 system watch 共用同一把 coordinator.lock：auto 派发与系统 Agent
+		// 只由一个 serve 进程推进；第二个 serve 抢不到锁就安分退出。
+		startServeLoops(cwd)
 		select {}
 	}
 	return res, nil
