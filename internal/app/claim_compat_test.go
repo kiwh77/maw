@@ -230,7 +230,7 @@ func TestManualNextAndManagedClaimCompete(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, manualErr = claimManual(f.pc, manualAgent, filepath.Join(".worktrees", manualAgent))
+			_, _, manualErr = claimManual(f.pc, manualAgent, filepath.Join(".worktrees", manualAgent))
 		}()
 		go func() {
 			defer wg.Done()
@@ -291,7 +291,7 @@ func TestManualClaimKeepsScheduleRules(t *testing.T) {
 	}
 	f.seedTask("VN-B2", "ready", "", []string{"internal/core/**"}) // 与在跑任务写盘重叠
 
-	if _, err := claimManual(f.pc, "cursor-late", ".worktrees/cursor-late"); err == nil {
+	if _, _, err := claimManual(f.pc, "cursor-late", ".worktrees/cursor-late"); err == nil {
 		t.Fatal("写盘重叠的任务不应被领取")
 	}
 
@@ -306,14 +306,15 @@ func TestManualClaimKeepsScheduleRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed dep: %v", err)
 	}
-	if _, err := claimManual(f.pc, "cursor-late", ".worktrees/cursor-late"); err == nil {
+	if _, _, err := claimManual(f.pc, "cursor-late", ".worktrees/cursor-late"); err == nil {
 		t.Fatal("依赖未完成的任务不应被领取")
 	}
 }
 
-// TestExpireStaleAgentsKeepsManagedOccupancy 是本卡第二条验收：
-// 心跳过期不能把仍计入占用的受管任务打回可重派；纯人工领取的任务照旧退回 ready。
-func TestExpireStaleAgentsKeepsManagedOccupancy(t *testing.T) {
+// TestExpireStaleAgentsKeepsRunOccupancy 覆盖「心跳过期不能把仍计入占用的任务打回可重派」：
+// GAP-004 之后 maw next 也建 Run，因此人工领取与受管领取同规则——Run 还占着目录，
+// 就不能退回 ready，否则下一个 Agent 会拿到同一份工作目录。
+func TestExpireStaleAgentsKeepsRunOccupancy(t *testing.T) {
 	f := newFixture(t)
 
 	managedTask := f.seedTask("VN-O1", "ready", "", []string{"mod_o1/**"})
@@ -323,8 +324,8 @@ func TestExpireStaleAgentsKeepsManagedOccupancy(t *testing.T) {
 	if err := f.managedClaim("cursor-managed", managedTask.ID, filepath.Join(f.repo, "ws-o1")); err != nil {
 		t.Fatalf("managed claim: %v", err)
 	}
-	// 手工领取：不建 Run。
-	if _, err := claimManual(f.pc, "cursor-manual", ".worktrees/cursor-manual"); err != nil {
+	// 手工领取：GAP-004 之后同样建 Run（占用语义与受管一致）。
+	if _, _, err := claimManual(f.pc, "cursor-manual", ".worktrees/cursor-manual"); err != nil {
 		t.Fatalf("manual claim: %v", err)
 	}
 
@@ -366,22 +367,22 @@ func TestExpireStaleAgentsKeepsManagedOccupancy(t *testing.T) {
 		t.Fatal("任务被退回 ready，下一个 Agent 会拿到同一份工作目录")
 	}
 
-	released := f.task(manualTask.ID)
-	if released.Status != string(model.TaskReady) || released.Owner != "" {
-		t.Fatalf("纯人工领取应照旧退回 ready：status=%s owner=%q", released.Status, released.Owner)
+	manualKept := f.task(manualTask.ID)
+	if manualKept.Status != string(model.TaskClaimed) || manualKept.Owner != "cursor-manual" {
+		t.Fatalf("有 Run 的人工领取同样不得被打回可重派：status=%s owner=%q", manualKept.Status, manualKept.Owner)
 	}
 
-	// 必须留下可追溯的证据：保留了哪条占用、为什么。
+	// 必须留下可追溯的证据：两条占用都要有「保留了哪条占用、为什么」。
 	var keptEvents int
 	err = db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
-		return tx.QueryRow(`SELECT COUNT(*) FROM events WHERE project_id = ? AND type = 'agent_expired_occupancy_kept' AND task_id = ?`,
-			f.pc.ID(), managedTask.ID).Scan(&keptEvents)
+		return tx.QueryRow(`SELECT COUNT(*) FROM events WHERE project_id = ? AND type = 'agent_expired_occupancy_kept' AND task_id IN (?, ?)`,
+			f.pc.ID(), managedTask.ID, manualTask.ID).Scan(&keptEvents)
 	})
 	if err != nil {
 		t.Fatalf("count events: %v", err)
 	}
-	if keptEvents != 1 {
-		t.Fatalf("应留下一条「保留占用」事件，实际 %d", keptEvents)
+	if keptEvents != 2 {
+		t.Fatalf("应留下两条「保留占用」事件，实际 %d", keptEvents)
 	}
 }
 
@@ -487,11 +488,11 @@ func TestMaxParallelIsReferenceOnly(t *testing.T) {
 	f.seedTask("VN-M1", "ready", "", []string{"mod_m1/**"})
 	f.seedTask("VN-M2", "ready", "", []string{"mod_m2/**"})
 
-	first, err := claimManual(f.pc, "cursor-m1", ".worktrees/cursor-m1")
+	first, _, err := claimManual(f.pc, "cursor-m1", ".worktrees/cursor-m1")
 	if err != nil {
 		t.Fatalf("第一道领取：%v", err)
 	}
-	second, err := claimManual(f.pc, "cursor-m2", ".worktrees/cursor-m2")
+	second, _, err := claimManual(f.pc, "cursor-m2", ".worktrees/cursor-m2")
 	if err != nil {
 		t.Fatalf("第二道领取：%v（max_parallel 不应成为硬上限）", err)
 	}
@@ -512,5 +513,119 @@ func TestMaxParallelIsReferenceOnly(t *testing.T) {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("领取事件缺少 %s：%s", want, raw)
 		}
+	}
+}
+
+// TestNextCreatesRunAndOperation 是本卡第一条验收：maw next 一次成功即产出 Run 与
+// Operation（Operation 落 applied，不留在待派发队列里等协调者起 Runner），
+// 同时老的 JSON 形状一个字段都不能少。
+func TestNextCreatesRunAndOperation(t *testing.T) {
+	f := newFixture(t)
+	const id = "VN-N1"
+	f.seedTask(id, "ready", "", []string{"mod_n1/**"})
+
+	t.Setenv("MAW_AGENT", "cursor-next")
+	res, err := Next(f.repo, "cursor-next", false, "")
+	if err != nil {
+		t.Fatalf("next: %v", err)
+	}
+
+	// 老脚本按 task/worktree/branch 取值，字段必须还在。
+	for _, k := range []string{
+		"ok", "task", "worktree", "branch", "agent", "project_id", "registered", "limits", "env", "next",
+	} {
+		if _, ok := res[k]; !ok {
+			t.Fatalf("兼容字段 %q 丢失：%v", k, res)
+		}
+	}
+
+	task := f.task(id)
+	if task.Status != string(model.TaskInProgress) || task.Owner != "cursor-next" {
+		t.Fatalf("next 后应落 in_progress：status=%s owner=%q", task.Status, task.Owner)
+	}
+	if task.InstanceID == "" {
+		t.Fatal("任务缺少 instance，Run 无从建立")
+	}
+
+	var run *db.Run
+	err = db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		var e error
+		run, e = db.ActiveRunForInstance(tx, task.InstanceID)
+		return e
+	})
+	if err != nil {
+		t.Fatalf("读 Run：%v", err)
+	}
+	if run == nil {
+		t.Fatal("maw next 成功后必须存在对应 Run")
+	}
+	if !run.Occupies() {
+		t.Fatalf("领取产生的 Run 必须计入占用，实际 phase=%s", run.Phase)
+	}
+	if got, _ := res["run_id"].(string); got != run.ID {
+		t.Fatalf("输出里的 run_id 与库内不一致：res=%q db=%q", got, run.ID)
+	}
+
+	// Operation 必须落 applied：CLI 自领不启动 Runner，也不该给协调者留一单待派发。
+	var kind, result string
+	err = db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		return tx.QueryRow(`
+SELECT kind, result FROM operations WHERE project_id = ? AND run_id = ?`,
+			f.pc.ID(), run.ID).Scan(&kind, &result)
+	})
+	if err != nil {
+		t.Fatalf("读 Operation：%v", err)
+	}
+	if kind != "dispatch" || result != "applied" {
+		t.Fatalf("Operation 应为 dispatch/applied，实际 %s/%s", kind, result)
+	}
+
+	// 节点槽与目录租约随 Run 一起落下，合入时才释放。
+	var leases int
+	err = db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM resource_leases WHERE run_id = ? AND released_at IS NULL`,
+			run.ID).Scan(&leases)
+	})
+	if err != nil {
+		t.Fatalf("读租约：%v", err)
+	}
+	if leases == 0 {
+		t.Fatal("领取没有落下任何租约")
+	}
+}
+
+// TestConcurrentNextOnlyOneWins 是本卡第二条验收：两个 Agent 同时 next 同一道题，
+// 只有一个拿到，另一个看到已失守（等价错误），不会出现双持有者。
+func TestConcurrentNextOnlyOneWins(t *testing.T) {
+	f := newFixture(t)
+	const id = "VN-R1"
+	f.seedTask(id, "ready", "", []string{"mod_r1/**"})
+
+	var wg sync.WaitGroup
+	var errA, errB error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, errA = Next(f.repo, "cursor-race-a", false, "")
+	}()
+	go func() {
+		defer wg.Done()
+		_, errB = Next(f.repo, "cursor-race-b", false, "")
+	}()
+	wg.Wait()
+
+	if (errA == nil) == (errB == nil) {
+		t.Fatalf("同一道题应恰好一人成功：a=%v b=%v", errA, errB)
+	}
+	winner := "cursor-race-a"
+	if errA != nil {
+		winner = "cursor-race-b"
+	}
+	task := f.task(id)
+	if task.Owner != winner {
+		t.Fatalf("唯一持有者应为 %s，实际 owner=%q", winner, task.Owner)
+	}
+	if task.Status != string(model.TaskInProgress) {
+		t.Fatalf("赢家应推进到 in_progress，实际 %s", task.Status)
 	}
 }

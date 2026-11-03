@@ -15,7 +15,9 @@ import (
 	"github.com/kiwh77/maw/internal/board"
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/delivery"
+	"github.com/kiwh77/maw/internal/engine/claim"
 	"github.com/kiwh77/maw/internal/engine/model"
+	"github.com/kiwh77/maw/internal/engine/ports"
 	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/gitops"
 	"github.com/kiwh77/maw/internal/home"
@@ -74,6 +76,7 @@ func Next(cwd, agentFlag string, dryRun bool, logPath string) (Result, error) {
 		if logPath != "" {
 			res["log_path"] = logPath
 		}
+		attachRunMeta(res, pc, task)
 		attachAgentNameMeta(res, who, allocated, nameWarn)
 		return res, nil
 	}
@@ -90,38 +93,33 @@ func Next(cwd, agentFlag string, dryRun bool, logPath string) (Result, error) {
 		return res, nil
 	}
 
-	// 唯一的领取决策点：ready→claimed 条件写入。
-	// 与受管 ClaimExecution 抢同一道题时，谁的条件先命中谁赢；输的一方看到 status
-	// 已变，重新选题（题本来就少，重试有界）或报冲突，不会出现两个持有者。
-	task, err = claimManual(pc, who, wtRel)
+	// 唯一的领取决策点：和受管 ClaimExecution 一样走 engine/claim。
+	// ready→claimed 的判定、Run/Operation 的建立、节点槽与工作目录的占用都在同一个
+	// 事务里完成，与受管派发抢同一道题时只会有一个赢家。
+	var outcome claim.Outcome
+	task, outcome, err = claimManual(pc, who, wtRel)
 	if err != nil {
 		return nil, err
 	}
 
 	wt, err := ensureClaimWorktree(pc, wtRel, task.Branch, true)
 	if err != nil {
-		_ = rollbackClaim(pc, who, task.ID)
 		return nil, err
 	}
-	// 目录准备好了才推进到 in_progress：claimed 表示「已归属、尚未开工」，
-	// 两步之间的空档由 rollbackClaim 负责退回 ready。
+	// 目录准备好了才推进到 in_progress：claimed 表示「已归属、尚未开工」。
 	if err := advanceClaim(pc, task.ID, who); err != nil {
-		_ = rollbackClaim(pc, who, task.ID)
 		return nil, err
 	}
 	task, err = getTask(pc, task.ID)
 	if err != nil {
-		_ = rollbackClaim(pc, who, task.ID)
 		return nil, err
 	}
 	allTasks, err := listTasks(pc)
 	if err != nil {
-		_ = rollbackClaim(pc, who, task.ID)
 		return nil, err
 	}
 	if err := writeTaskCardWithDeps(wt, task, who, allTasks); err != nil {
 		// Per-agent worktree is reused across tasks; do not wipe it on card write failure.
-		_ = rollbackClaim(pc, who, task.ID)
 		return nil, err
 	}
 	if logPath != "" {
@@ -139,8 +137,31 @@ func Next(cwd, agentFlag string, dryRun bool, logPath string) (Result, error) {
 	if logPath != "" {
 		res["log_path"] = logPath
 	}
+	// 领取同时产出了 Run 与 Operation：把身份一并报出，老字段一个不动。
+	res["run_id"] = string(outcome.RunID)
+	res["operation_id"] = string(outcome.OperationID)
+	res["task_instance"] = string(outcome.Instance)
+	res["generation"] = int(outcome.Generation)
 	attachAgentNameMeta(res, who, allocated, nameWarn)
 	return res, nil
+}
+
+// attachRunMeta 把续做任务对应的 Run 身份补进输出（老脚本不受影响）。
+func attachRunMeta(res Result, pc *projCtx, task *db.Task) {
+	if task == nil || task.InstanceID == "" {
+		return
+	}
+	var run *db.Run
+	_ = db.WithReadTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		var e error
+		run, e = db.ActiveRunForInstance(tx, task.InstanceID)
+		return e
+	})
+	if run != nil {
+		res["run_id"] = string(run.ID)
+		res["task_instance"] = task.InstanceID
+		res["generation"] = int(run.Generation)
+	}
 }
 
 // limitsOf 把两个容易混淆的上限分开放。
@@ -261,49 +282,56 @@ func resumeClaim(pc *projCtx, task *db.Task, who string) error {
 	if wtRel == "" {
 		wtRel = filepath.Join(".worktrees", who)
 	}
-	if _, err := ensureClaimWorktree(pc, wtRel, task.Branch, false); err != nil {
+	wt, err := ensureClaimWorktree(pc, wtRel, task.Branch, false)
+	if err != nil {
 		return err
+	}
+	// 旧版本领取可能没有 Run：补齐后再推进，保证「claimed 的任务有对应 Run」。
+	// 已有 Run 时这里只是复用，不会多建。
+	if task.InstanceID != "" {
+		if err := db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+			_, _, e := ensureManualCompatRun(tx, pc, task, who, wt)
+			return e
+		}); err != nil {
+			return err
+		}
 	}
 	return advanceClaim(pc, task.ID, who)
 }
 
-// claimManual 用一个有界循环把「选题 + 条件领取」做成原子动作。
+// claimManual 用一个有界循环把「选题 + 领取」做成原子动作。
 //
-// 竞争失败只发生在别的领取者恰好同时赢了同一道题：此时那道题已经不是 ready，
-// 下一轮选题自然不会重复挑到它。非竞争错误（依赖不满足、没有 ready）直接上抛。
-func claimManual(pc *projCtx, who, wtRel string) (*db.Task, error) {
+// 选题（只读）与领取（claim 事务）仍是两步：中间那段空档就是真实存在于
+// 「手工 next 与受管 ClaimExecution 之间」的竞争窗口，由 claim 的
+// ready+revision 校验兜住。竞争失败只发生在别的领取者恰好同时赢了同一道题：
+// 此时那道题已经不是 ready，下一轮选题自然不会重复挑到它。
+// 非竞争错误（依赖不满足、没有 ready）直接上抛。
+func claimManual(pc *projCtx, who, wtRel string) (*db.Task, claim.Outcome, error) {
 	var lost error
 	for attempt := 0; attempt < manualClaimAttempts; attempt++ {
-		t, err := claimOnce(pc, who, wtRel)
+		t, out, err := claimOnce(pc, who, wtRel, attempt)
 		if err == nil {
-			return t, nil
+			return t, out, nil
 		}
 		if !errors.Is(err, errClaimLost) {
-			return nil, err
+			return nil, out, err
 		}
 		lost = err
 	}
 	var detail *claimLostError
 	if errors.As(lost, &detail) {
-		return nil, i18n.E("err.owner_mismatch", "next.rerun_next", detail.TaskID, detail.Owner, who)
+		return nil, claim.Outcome{}, i18n.E("err.owner_mismatch", "next.rerun_next", detail.TaskID, detail.Owner, who)
 	}
-	return nil, lost
+	return nil, claim.Outcome{}, lost
 }
 
-// claimOnce 选题并以「ready + revision」为条件把任务写成 claimed。
-//
-// 为什么不是先读再 UpsertTask：UpsertTask 是整行覆盖，写入时不看旧状态，两个领取者
-// 都能成功；条件 UPDATE 把「还是我读到的那一行」交给 SQLite 判定，只会有一个命中。
-//
-// 选题与写入刻意分成两个短事务（pickClaimTarget 只读、commitClaim 只写）：
-// 中间那段空档就是真实存在于「手工 next 与 managed ClaimExecution 之间」的竞争窗口，
-// 由条件写入负责兜住；把它遮起来反而会让测试无法复现真正的竞争。
-func claimOnce(pc *projCtx, who, wtRel string) (*db.Task, error) {
+// claimOnce 选题，然后交给 engine/claim 建 Run、占节点槽与目录。
+func claimOnce(pc *projCtx, who, wtRel string, attempt int) (*db.Task, claim.Outcome, error) {
 	t, err := pickClaimTarget(pc, who)
 	if err != nil {
-		return nil, err
+		return nil, claim.Outcome{}, err
 	}
-	return commitClaim(pc, who, wtRel, t)
+	return commitClaimWithOutcome(pc, who, wtRel, t, attempt)
 }
 
 // pickClaimTarget 只读选题：依赖／写盘／亲和策略全部沿用同一套调度规则。
@@ -328,47 +356,111 @@ func pickClaimTarget(pc *projCtx, who string) (*db.Task, error) {
 	return out, err
 }
 
-// commitClaim 把选定任务以「仍是 ready 且 revision 未变」为条件写成 claimed。
-//
-// 条件不成立时返回 claimLostError（带当前持有者），调用方据此重新选题；
-// 绝不做「先读后整行覆盖」，那正是两个 Agent 同时持有同一道题的来源。
+// commitClaim 把选定任务交给统一的领取用例（测试与续做路径保留旧签名）。
 func commitClaim(pc *projCtx, who, wtRel string, t *db.Task) (*db.Task, error) {
+	claimed, _, err := commitClaimWithOutcome(pc, who, wtRel, t, 0)
+	return claimed, err
+}
+
+// commitClaimWithOutcome 走 engine/claim.Claim 领取选定任务。
+//
+// 条件写入（ready + revision）由 claim 在同一事务内复核，命中不了就返回
+// 「被别人抢先」；调用方据此重新选题，绝不整行覆盖别人已经领取的任务。
+// Run、Operation、节点槽与 workspace 租约都由 claim 建立：这与受管执行是同一套
+// 占用语义，区别只在于 Operation 在本事务内落 applied，不等协调者派发 Runner。
+func commitClaimWithOutcome(pc *projCtx, who, wtRel string, t *db.Task, attempt int) (*db.Task, claim.Outcome, error) {
 	if t == nil {
-		return nil, i18n.E("err.no_ready", "next.board_deps")
+		return nil, claim.Outcome{}, i18n.E("err.no_ready", "next.board_deps")
 	}
-	var claimed *db.Task
-	err := db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
-		branch := "agent/" + who + "/" + t.ID
-		res, err := tx.Exec(`
-UPDATE tasks SET status = 'claimed', owner = ?, branch = ?, worktree = ?, heartbeat = ?,
-  attempts = attempts + 1, revision = revision + 1, blocked_reason = ''
-WHERE project_id = ? AND id = ? AND status = 'ready' AND revision = ?`,
-			who, branch, wtRel, db.UTCNow(), pc.ID(), t.ID, t.Revision)
-		if err != nil {
-			return err
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			// 命不中就是有人先赢了：不覆盖、不重试同一道题，交给上层重新选题。
-			return &claimLostError{TaskID: t.ID, Owner: currentOwner(tx, pc.ID(), t.ID)}
-		}
-		_ = db.AppendEvent(tx, pc.ID(), who, "claimed", t.ID, map[string]any{
-			"from": "ready", "branch": branch, "worktree": wtRel,
+	instID := model.InstanceID(t.InstanceID)
+	if instID == "" || !instID.Valid() {
+		return nil, claim.Outcome{}, i18n.E("err.managed_no_instance", "next.plan_apply", t.ID)
+	}
+	absWT, err := filepath.Abs(filepath.Join(pc.Repo, wtRel))
+	if err != nil {
+		return nil, claim.Outcome{}, err
+	}
+	store, err := db.OpenStore(pc.GlobalDB)
+	if err != nil {
+		return nil, claim.Outcome{}, err
+	}
+	defer store.Close()
+	// 节点登记是领取的前置：manual-compat 节点与 submit 路径共用。
+	if err := store.Write(func(tx *sql.Tx) error { return ensureManualNode(tx, pc) }); err != nil {
+		return nil, claim.Outcome{}, err
+	}
+
+	branch := "agent/" + who + "/" + t.ID
+	expected := model.Revision(t.Revision)
+	out, err := claim.New(store, nil).Claim(context.Background(), claim.Request{
+		ClaimRequest: ports.ClaimRequest{
+			ProjectID:        model.ProjectID(pc.ID()),
+			AgentID:          model.AgentID(who),
+			RequestedTask:    &instID,
+			ExpectedRevision: &expected,
+			IdempotencyKey: fmt.Sprintf("manual-next:%s:%s:%s:%d:%d",
+				pc.ID(), who, t.ID, int(t.Revision), attempt),
+		},
+		NodeID:                  model.NodeID(manualCompatNode),
+		Workspace:               absWT,
+		Branch:                  branch,
+		Worktree:                wtRel,
+		LegacyAgentID:           true,
+		SettleDispatchOperation: true,
+		ClaimedEventData: map[string]any{
+			"branch": branch, "worktree": wtRel,
 			"guard": "status=ready+revision", "capacity": capacityPayload(pc),
-		})
-		_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", t.ID,
-			map[string]any{"from": "ready", "to": "claimed"})
-		// 领取同时登记 Agent 占用：心跳过期判定与看板都靠这一行。
-		if err := bindAgent(tx, pc.ID(), who, "worker", "working", t.ID, wtRel, branch, ""); err != nil {
-			return err
-		}
-		_ = db.AppendEvent(tx, pc.ID(), who, "agent_registered", t.ID, map[string]any{"status": "working"})
-		claimed, err = db.GetTask(tx, pc.ID(), t.ID)
-		return err
+		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, out, mapClaimSetupErr(pc, who, t.ID, err)
 	}
-	return claimed, nil
+
+	// 领取时同时登记 Agent 占用：心跳过期判定与看板都靠这一行。
+	var claimed *db.Task
+	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		if e := bindAgent(tx, pc.ID(), who, "worker", "working", t.ID, wtRel, branch, ""); e != nil {
+			return e
+		}
+		_ = db.AppendEvent(tx, pc.ID(), who, "agent_registered", t.ID, map[string]any{"status": "working"})
+		var e error
+		claimed, e = db.GetTask(tx, pc.ID(), t.ID)
+		return e
+	})
+	if err != nil {
+		return nil, out, err
+	}
+	return claimed, out, nil
+}
+
+// ensureManualNode 登记 CLI 自领节点；与 submit 的 manual_client_compat 共用同一行。
+func ensureManualNode(tx *sql.Tx, pc *projCtx) error {
+	return db.UpsertNode(tx, &db.Node{
+		ID: manualCompatNode, ProjectID: pc.ID(), Label: "manual CLI compat", SlotLimit: 64,
+		Meta: map[string]any{"strategy": manualCompatStrategy},
+	})
+}
+
+// mapClaimSetupErr 把「条件没命中且任务已被别人拿走」翻成 claimLostError，
+// 让 claimManual 重新选题；其余错误保留原文，避免把容量/租约问题误报成被抢。
+func mapClaimSetupErr(pc *projCtx, who, taskID string, err error) error {
+	var me *model.Error
+	if !errors.As(err, &me) {
+		return err
+	}
+	if !(me.Code == model.CodeDoubleOccupancy ||
+		me.Port == model.PortErrConflict || me.Port == model.PortErrRevisionMismatch) {
+		return err
+	}
+	owner := ""
+	_ = db.WithReadTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		owner = currentOwner(tx, pc.ID(), taskID)
+		return nil
+	})
+	if owner != "" && owner != who {
+		return &claimLostError{TaskID: taskID, Owner: owner}
+	}
+	return err
 }
 
 // capacityPayload 把两个上限一并记进领取事件，便于事后分辨「谁卡了谁」。
@@ -445,41 +537,6 @@ func listTasks(pc *projCtx) ([]*db.Task, error) {
 		return e
 	})
 	return out, err
-}
-
-// rollbackClaim 在目录／任务卡准备失败时把已领取的任务退回 ready。
-//
-// 两种中间状态都要认：claimed（已归属、目录还没建好）与 in_progress（目录已建、
-// 后续步骤失败）。只退自己名下的行，避免误放别人的任务。
-func rollbackClaim(pc *projCtx, who, taskID string) error {
-	return db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
-		t, err := db.GetTask(tx, pc.ID(), taskID)
-		if err != nil || t == nil {
-			return err
-		}
-		if t.Owner != who || (t.Status != "claimed" && t.Status != "in_progress") {
-			return nil
-		}
-		if err := machine.AssertTransition(t.Status, "ready"); err != nil {
-			return err
-		}
-		from := t.Status
-		t.Status = "ready"
-		t.Owner = ""
-		t.Branch = ""
-		t.Worktree = ""
-		t.BlockedReason = ""
-		t.Revision++
-		if err := db.UpsertTask(tx, t); err != nil {
-			return err
-		}
-		_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", taskID,
-			map[string]any{"from": from, "to": "ready", "reason": "claim_setup_failed"})
-		if err := db.ClearAgentTask(tx, pc.ID(), who); err != nil {
-			return err
-		}
-		return promoteReady(tx, pc.ID())
-	})
 }
 
 func Register(cwd, agentFlag, role string) (Result, error) {
@@ -1123,10 +1180,7 @@ func ensureManualCompatRun(tx *sql.Tx, pc *projCtx, task *db.Task, actor, wt str
 		}
 	}
 
-	if err := db.UpsertNode(tx, &db.Node{
-		ID: manualCompatNode, ProjectID: pc.ID(), Label: "manual CLI compat", SlotLimit: 64,
-		Meta: map[string]any{"strategy": manualCompatStrategy},
-	}); err != nil {
+	if err := ensureManualNode(tx, pc); err != nil {
 		return nil, 0, err
 	}
 	absWT := wt

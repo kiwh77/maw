@@ -53,11 +53,31 @@ type Request struct {
 	// Branch 与 Worktree 只写进任务行，真正的 git 操作在事务外。
 	Branch   string `json:"branch,omitempty"`
 	Worktree string `json:"worktree,omitempty"`
+	// SettleDispatchOperation 声明「这次领取由 CLI 自己承接」：Operation 照旧落库
+	// （幂等与审计需要），但在同一事务里直接标 applied，不留在待派发队列里
+	// 等协调者来启动 Runner。maw next 用这个开关，受管派发保持 pending。
+	SettleDispatchOperation bool `json:"settle_dispatch_operation,omitempty"`
+	// ClaimedEventData 是接线层补充到 claimed 事件的审计字段（容量参考、guard 等）。
+	// 只影响事件内容，不参与领取判定。
+	ClaimedEventData map[string]any `json:"-"`
+	// LegacyAgentID 保留 CLI 自领的旧命名（不强制 {应用}-{工程slug}-{序号}）。
+	// 老脚本用 MAW_AGENT=w1 这类名字领取仍然可用；受管派发继续走契约校验。
+	LegacyAgentID bool `json:"legacy_agent_id,omitempty"`
 }
 
 // Validate 拒绝不完整的领取：缺幂等键、缺目录、节点身份非法都直接报错。
 func (r Request) Validate() []*model.Error {
 	out := r.ClaimRequest.Validate()
+	if r.LegacyAgentID {
+		kept := out[:0]
+		for _, e := range out {
+			if e.Path == "claim.agent_id" {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		out = kept
+	}
 	if strings.TrimSpace(r.Workspace) == "" || !filepath.IsAbs(r.Workspace) {
 		out = append(out, model.Violation(model.CodePortFieldInvalid, "claim.workspace",
 			"领取必须给出绝对工作目录，否则无法保证同目录只有一个写入者"))
@@ -235,6 +255,13 @@ func (s *Service) claimManaged(tx *sql.Tx, req Request, cs *claimState, version 
 	}); err != nil {
 		return nil, err
 	}
+	// CLI 自领的 Operation 不再等协调者：本事务内落 applied，语义是「这次领取已登记」，
+	// 而不是「还有一个待启动的 Runner」。
+	if req.SettleDispatchOperation {
+		if err := db.CompleteOperation(tx, out.Operation.ID, "", model.ResultApplied); err != nil {
+			return nil, err
+		}
+	}
 	res.Revision = model.Revision(cs.task.Revision)
 	return res, nil
 }
@@ -368,7 +395,10 @@ func markClaimed(tx *sql.Tx, req Request, t *db.Task, data map[string]any) error
 	t.Attempts++
 	t.Revision++
 
-	payload := map[string]any{"agent": string(req.AgentID), "idempotency_key": req.IdempotencyKey}
+	payload := map[string]any{"agent": string(req.AgentID), "idempotency_key": req.IdempotencyKey, "from": from}
+	for k, v := range req.ClaimedEventData {
+		payload[k] = v
+	}
 	for k, v := range data {
 		payload[k] = v
 	}
