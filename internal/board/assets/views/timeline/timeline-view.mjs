@@ -281,11 +281,24 @@ export function focusModel(bars, selectedId = null) {
   };
 }
 
+/**
+ * 键盘语义。
+ *
+ * ← / →：**平移窗口**（等价工具栏的「上一窗」「下一窗」），与 E2E-107 同一条路径。
+ * ↑ / ↓：在区间之间移动选中（与会话视图一致），不改变窗口。
+ * Enter 打开详情，Esc 关闭详情。
+ *
+ * 窗口动作只给方向与语义，具体怎么取数由宿主决定；视图不自己发请求。
+ */
 export function handleTimelineKey(key, model) {
   switch (key) {
     case "ArrowLeft":
-      return { focus: model.move(-1), openDetail: false, closeDetail: false };
+      return { focus: model, window: "prev", openDetail: false, closeDetail: false };
     case "ArrowRight":
+      return { focus: model, window: "next", openDetail: false, closeDetail: false };
+    case "ArrowUp":
+      return { focus: model.move(-1), openDetail: false, closeDetail: false };
+    case "ArrowDown":
       return { focus: model.move(1), openDetail: false, closeDetail: false };
     case "Enter":
       return { focus: model, openDetail: true, closeDetail: false };
@@ -294,6 +307,35 @@ export function handleTimelineKey(key, model) {
     default:
       return { focus: model, openDetail: false, closeDetail: false };
   }
+}
+
+/**
+ * 键盘接线：← / → 直接点工具栏对应按钮。
+ *
+ * 为什么点按钮而不是自己改状态：按钮与键盘必须走**同一条**宿主路径，
+ * 才算「等价」——同一条路径才会带同一份取数参数（start / end）。
+ * 视图自己维护第二套窗口状态必然与宿主分叉。
+ */
+export function installTimelineKeyboard(doc = (typeof document !== "undefined" ? document : null)) {
+  if (!doc || typeof doc.addEventListener !== "function") return null;
+  const onKey = (event) => {
+    if (!event || event.defaultPrevented) return;
+    const key = event.key;
+    if (key !== "ArrowLeft" && key !== "ArrowRight") return;
+    const target = event.target;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" || target.isContentEditable)) return;
+    const host = doc.querySelector("#vnext-view");
+    const scope = host ? host.querySelector(".timeline") : null;
+    if (!scope) return;
+    const action = key === "ArrowLeft" ? "prev" : "next";
+    const button = scope.querySelector('[data-action="' + action + '"]');
+    if (!button) return;
+    event.preventDefault();
+    button.click();
+  };
+  doc.addEventListener("keydown", onKey, true);
+  return () => doc.removeEventListener("keydown", onKey, true);
 }
 
 function emptyState(lang, keys) {
@@ -320,10 +362,13 @@ function formatAxis(iso, timezone) {
 }
 
 /**
- * 窗口标签用的时间戳：带月日。
+ * 窗口标签用的时间戳：带月日与时刻。
  *
  * 24 小时窗口若只印时分，首尾会显示成同一个时刻（例如 16:18 – 16:18），
  * 读者会以为窗口是 0 长度；日期是区分跨天窗口的必要信息。
+ *
+ * 格式固定为「日/月 时:分」（en-GB）：渲染层回归（no-project.test.cjs）与
+ * 浏览器验收都按这个形状解析，改格式要同步改两处断言。
  */
 function formatStamp(iso, timezone) {
   try {
@@ -471,15 +516,33 @@ export function renderTimeline(state = {}, options = {}) {
     detail + cursors + "</div>";
 }
 
-/** 挂载辅助：把键盘事件映射到选中变化（宿主绑定）。 */
+/**
+ * 挂载辅助：把键盘事件映射到选中变化与窗口变化（宿主绑定）。
+ *
+ * 窗口动作返回**新的日期上下文**，宿主拿它去取数（start / end）；
+ * 视图不自己发请求，也不替宿主决定请求参数。
+ */
 export function applyKeyToState(state, options, key) {
   const dateCtx = options.dateContext || createDateContext(state.window || {});
   const bars = layoutBars(normalizeIntervals(state.intervals), dateCtx);
   const model = focusModel(bars, options.selectedId);
   const result = handleTimelineKey(key, model);
+  const nextContext = result.window === "prev"
+    ? shiftWindow(dateCtx, -1)
+    : (result.window === "next" ? shiftWindow(dateCtx, 1) : dateCtx);
   return {
     selectedId: result.focus.selectedId,
     showDetail: result.closeDetail ? false : (result.openDetail ? true : options.showDetail !== false),
     focus: result.focus,
+    window: result.window || null,
+    dateContext: nextContext,
   };
 }
+
+/**
+ * 键盘接线在模块加载时安装。
+ *
+ * 装在这里而不是宿主组件里，是因为「键盘与按钮等价」要求两者走同一条取数路径：
+ * 宿主只要认工具栏按钮，键盘就自动等价，不需要第二套窗口状态。
+ */
+installTimelineKeyboard();

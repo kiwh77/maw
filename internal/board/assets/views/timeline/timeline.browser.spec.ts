@@ -153,16 +153,18 @@ test.describe("VN-741 分层执行时间轴", () => {
     expect(state.toolbar).toBe("wrap");
   });
 
-  test("VN-741 键盘左右切换焦点并可打开详情", async ({ page }) => {
+  test("VN-741 上下键切换焦点并可打开详情，左右键平移窗口", async ({ page }) => {
     const view = await loadView();
     const ctx = view.createDateContext({ start: "2026-10-23T01:00:00Z", hours: 3, timezone: "UTC" });
     let selectedId = "iv_phase";
+    // 上下键：移动选中（不改变窗口）
     const next = view.applyKeyToState(
       { intervals: intervals() },
       { dateContext: ctx, selectedId, showDetail: false },
-      "ArrowRight"
+      "ArrowDown"
     );
     selectedId = next.selectedId;
+    expect(next.window, "上下键不应平移窗口").toBeNull();
     await mount(page, view.renderTimeline(
       { intervals: intervals() },
       { lang: "zh", dateContext: ctx, selectedId, showDetail: true }
@@ -170,6 +172,15 @@ test.describe("VN-741 分层执行时间轴", () => {
     await expect(page.locator(".timeline")).toHaveAttribute("data-selected", selectedId);
     await expect(page.locator(".timeline__detail")).toBeVisible();
     await expect(page.locator(`[data-interval-id="${selectedId}"]`)).toHaveAttribute("tabindex", "0");
+
+    // 左右键：平移窗口（等价工具栏「上一窗」「下一窗」）
+    const moved = view.applyKeyToState(
+      { intervals: intervals() },
+      { dateContext: ctx, selectedId, showDetail: false },
+      "ArrowRight"
+    );
+    expect(moved.window).toBe("next");
+    expect(moved.dateContext.startMs).toBe(ctx.startMs + ctx.hours * 3600_000);
   });
 
   test("VN-741 空与错误状态使用 empty-state 组件", async ({ page }) => {

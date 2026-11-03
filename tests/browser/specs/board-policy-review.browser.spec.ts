@@ -134,12 +134,11 @@ test.describe('E 组：回顾数据', () => {
   test('E-02 时间轴窗口标签能区分 24 小时跨度', async ({ page }) => {
     await openView(page, 'timeline', pid);
     const label = (await page.locator('.timeline__toolbar .field-hint').innerText()).replace(/\s+/g, ' ');
-    // "16:14 – 16:14 (24h)" 这种只印时分的写法会让人以为窗口是 0 长度。
-    const parts = label.match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);
-    expect(parts, `窗口标签无法解析: ${label}`).toBeTruthy();
-    if (parts && parts[1] === parts[2]) {
-      expect(label, '24h 窗口只显示时分且首尾相同，缺少日期').toMatch(/\d{4}-\d{2}-\d{2}|[A-Z][a-z]{2}\s+\d{1,2}/);
-    }
+    // 标签必须带日期与时刻："16:18 – 16:18 (24h)" 这种只印时分的写法
+    // 会让人以为窗口是 0 长度；跨天窗口的首尾日期因此必然不同。
+    const stamps = label.match(/\d{1,2}\/\d{1,2},? \d{2}:\d{2}/g) || [];
+    expect(stamps.length, `窗口标签没有日期时间戳: ${label}`).toBeGreaterThanOrEqual(2);
+    expect(stamps[0], `窗口两端显示成同一时刻: ${label}`).not.toBe(stamps[1]);
   });
 
   test('E-03 时间轴工具栏（上一段/下一段）可用', async ({ page }) => {
@@ -153,6 +152,52 @@ test.describe('E 组：回顾数据', () => {
     await page.waitForTimeout(1200);
     const after = (await page.locator('.timeline__toolbar .field-hint').innerText()).trim();
     expect(reqs.length + (before === after ? 0 : 1), '点「Previous」既没发请求也没改变窗口').toBeGreaterThan(0);
+  });
+
+  // E2E-107：四个按钮各自改变窗口，并各触发一次带 start / end 的请求。
+  test('E-07 四个窗口按钮都改变窗口并带 start/end 取数', async ({ page }) => {
+    await openView(page, 'timeline', pid);
+    const reqs: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/timeline') && r.url().includes('start=')) reqs.push(r.url());
+    });
+    const label = async () => (await page.locator('.timeline__toolbar .field-hint').innerText()).trim();
+    const seen = new Set<string>();
+    // 顺序有讲究：默认窗口已是最大跨度 24h，此时「放大跨度」无处可放；
+    // 先把跨度收窄（zoom-in），再放开（zoom-out），两个方向才都真的改变窗口。
+    for (const action of ['prev', 'next', 'zoom-in', 'zoom-out']) {
+      const before = await label();
+      await page.locator(`.timeline__toolbar [data-action="${action}"]`).click();
+      await page.waitForTimeout(900);
+      const after = await label();
+      expect(after, `点 ${action} 没有改变窗口`).not.toBe(before);
+      seen.add(after);
+    }
+    expect(reqs.length, '窗口变化没有触发带 start/end 的取数').toBeGreaterThanOrEqual(4);
+    for (const url of reqs) {
+      expect(url, '取数必须带 start 与 end').toMatch(/start=[^&]+&end=/);
+    }
+  });
+
+  // E2E-107：键盘左右键等价于「上一窗／下一窗」。
+  test('E-08 键盘左右键等价于工具栏按钮', async ({ page }) => {
+    await openView(page, 'timeline', pid);
+    const reqs: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/timeline') && r.url().includes('start=')) reqs.push(r.url());
+    });
+    const label = async () => (await page.locator('.timeline__toolbar .field-hint').innerText()).trim();
+    const before = await label();
+    await page.locator('.timeline__toolbar [data-action="prev"]').click();
+    await page.waitForTimeout(900);
+    const afterButton = await label();
+    expect(afterButton, '按钮本身没改变窗口').not.toBe(before);
+
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(900);
+    const afterKey = await label();
+    expect(afterKey, '键盘右方向键没有改变窗口').not.toBe(afterButton);
+    expect(reqs.length, '键盘切窗口没有触发带 start/end 的取数').toBeGreaterThanOrEqual(2);
   });
 
   test('E-04 热图把缺测小时标成 missing 而不是 0', async ({ page }) => {

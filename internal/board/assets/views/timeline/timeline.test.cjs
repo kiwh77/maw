@@ -122,17 +122,93 @@ test("缩放与平移保持时区上下文", async () => {
   assert.equal(next.startMs - ctx.startMs, ctx.hours * 3600_000);
 });
 
-test("键盘左右移动焦点，Enter 开详情，Esc 关", async () => {
+test("键盘左右平移窗口，上下移动选中，Enter 开详情，Esc 关", async () => {
   const mod = await load();
   const ctx = mod.createDateContext({ start: "2026-10-23T01:00:00Z", hours: 3, timezone: "UTC" });
   const state = { intervals: sample() };
-  let sel = mod.applyKeyToState(state, { dateContext: ctx, selectedId: "iv_phase" }, "ArrowRight");
-  assert.ok(sel.selectedId);
-  assert.notEqual(sel.selectedId, "iv_phase");
+
+  // ← / →：窗口平移（等价工具栏「上一窗」「下一窗」）
+  const prev = mod.applyKeyToState(state, { dateContext: ctx, selectedId: "iv_phase" }, "ArrowLeft");
+  assert.equal(prev.window, "prev");
+  assert.equal(prev.dateContext.startMs, ctx.startMs - ctx.hours * 3600_000);
+  const next = mod.applyKeyToState(state, { dateContext: ctx, selectedId: "iv_phase" }, "ArrowRight");
+  assert.equal(next.window, "next");
+  assert.equal(next.dateContext.startMs, ctx.startMs + ctx.hours * 3600_000);
+  // 窗口平移不改选中
+  assert.equal(next.selectedId, "iv_phase");
+
+  // ↑ / ↓：在区间之间移动选中，不动窗口
+  const down = mod.applyKeyToState(state, { dateContext: ctx, selectedId: "iv_phase" }, "ArrowDown");
+  assert.ok(down.selectedId);
+  assert.notEqual(down.selectedId, "iv_phase");
+  assert.equal(down.window, null);
+  assert.equal(down.dateContext.startMs, ctx.startMs);
+
+  let sel = down;
   sel = mod.applyKeyToState(state, { dateContext: ctx, selectedId: sel.selectedId, showDetail: false }, "Enter");
   assert.equal(sel.showDetail, true);
   sel = mod.applyKeyToState(state, { dateContext: ctx, selectedId: sel.selectedId, showDetail: true }, "Escape");
   assert.equal(sel.showDetail, false);
+});
+
+// E2E-107：键盘左右键与工具栏按钮走同一条路径（键盘=点按钮）。
+test("E2E-107 键盘左右键点对应按钮，与工具栏同一条取数路径", async () => {
+  const mod = await load();
+  const clicks = [];
+  const button = { click: () => clicks.push("prev") };
+  const scope = { querySelector: (sel) => (sel.includes('"prev"') ? button : null) };
+  const host = { querySelector: (sel) => (sel === ".timeline" ? scope : null) };
+  const handlers = [];
+  const fakeDoc = {
+    addEventListener: (type, fn) => handlers.push(fn),
+    removeEventListener: () => {},
+    querySelector: (sel) => (sel === "#vnext-view" ? host : null),
+  };
+  const dispose = mod.installTimelineKeyboard(fakeDoc);
+  assert.equal(handlers.length, 1, "键盘监听应注册一次");
+
+  const event = { key: "ArrowLeft", target: { tagName: "BODY" }, defaultPrevented: false, preventDefault() {} };
+  handlers[0](event);
+  assert.deepEqual(clicks, ["prev"], "左方向键应点「上一窗」按钮");
+
+  // 没有时间轴视图时不劫持按键
+  host.querySelector = () => null;
+  handlers[0]({ key: "ArrowLeft", target: { tagName: "BODY" }, defaultPrevented: false, preventDefault() {} });
+  assert.equal(clicks.length, 1, "非时间轴视图不该响应方向键");
+
+  // 输入框里打字不劫持
+  host.querySelector = (sel) => (sel === ".timeline" ? scope : null);
+  handlers[0]({ key: "ArrowLeft", target: { tagName: "INPUT" }, defaultPrevented: false, preventDefault() {} });
+  assert.equal(clicks.length, 1, "输入框内的方向键不该被劫持");
+
+  assert.equal(typeof dispose, "function");
+  dispose();
+});
+
+// E2E-107：窗口标签带日期与时间，跨天窗口首尾不再显示成同一时刻。
+test("E2E-107 窗口标签含日期，跨天首尾不同时刻", async () => {
+  const mod = await load();
+  const ctx = mod.createDateContext({ start: "2026-10-23T16:18:00Z", hours: 24, timezone: "UTC" });
+  const html = mod.renderTimeline({ intervals: sample() }, { lang: "zh", dateContext: ctx });
+  const label = (html.match(/timeline__toolbar[\s\S]*?<\/div>/) || [""])[0];
+  const stamps = label.match(/\d{1,2}\/\d{1,2},? \d{2}:\d{2}/g) || [];
+  assert.equal(stamps.length, 2, "窗口标签应含起止两个时间戳：" + label);
+  assert.notEqual(stamps[0], stamps[1], "24h 窗口首尾不得显示成同一时刻：" + label);
+});
+
+// E2E-107：改窗口后未知态与缺测说明保持，不用空列表冒充没有活动。
+test("E2E-107 改窗口后仍解释未知态，不退化成空列表", async () => {
+  const mod = await load();
+  const ctx = mod.createDateContext({ start: "2026-10-23T01:00:00Z", hours: 3, timezone: "UTC" });
+  const moved = mod.shiftWindow(ctx, 1);
+  const html = mod.renderTimeline(
+    { status: "unknown", intervals: [], cursors: { completeness: "partial" } },
+    { lang: "zh", dateContext: moved }
+  );
+  assert.ok(html.includes('data-status="unknown"'), "改窗口后未知态应保持");
+  assert.ok(html.includes("不完整"), "应继续解释数据不完整");
+  assert.ok(!html.includes("没有可显示的区间"), "未知态不得退化成空列表文案");
+  assert.ok(html.includes("状态水位"), "水位说明应保留");
 });
 
 test("图例与详情下钻渲染四类标签", async () => {
