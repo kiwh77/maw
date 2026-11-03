@@ -433,6 +433,9 @@ export function renderSettings(state = {}, options = {}) {
   const errors = state.errors || [];
   // 中枢没有策略写入口时按只读渲染：可编辑却存不下去，比明说只读更糟。
   const editable = state.editable === true;
+  // 保存必须带 revision：没有版本号就分不清「这是不是服务端当前那份」，
+  // 点了保存只能盲写，所以按钮先禁用并说明原因，而不是让它静默失败。
+  const revisionMissing = policy.revision === null || policy.revision === undefined;
 
   // 标题已由壳层 page-heading 提供；这里只保留保存态与只读标记。
   const saveStatus = '<p class="settings-save-status" data-save="' + esc(save) + '">' +
@@ -452,9 +455,12 @@ export function renderSettings(state = {}, options = {}) {
     '<p class="field-hint" data-no-secret="1">' + esc(t("notice.no_secret", lang)) + "</p>" +
     (editable ? "" : '<p class="field-hint" data-readonly-reason="1">' + esc(t("settings.readonly.hint", lang)) + "</p>") +
     errorsBlock(lang, errors) +
+    (revisionMissing
+      ? '<p class="field-hint" data-save-blocked="revision_missing">' + esc(t("err.revision_missing", lang)) + "</p>"
+      : "") +
     '<div class="settings-actions">' +
     '<button class="button button--primary" type="submit"' +
-    (editable && save !== SAVE_STATUS.saving ? "" : " disabled") + ">" +
+    (editable && !revisionMissing && save !== SAVE_STATUS.saving ? "" : " disabled") + ">" +
     esc(t("action.save", lang)) + "</button>" +
     (save === SAVE_STATUS.conflict
       ? '<button class="button" type="button" data-action="reload">' + esc(t("action.reload", lang)) + "</button>"

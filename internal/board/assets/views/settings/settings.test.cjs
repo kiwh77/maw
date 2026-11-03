@@ -174,9 +174,10 @@ test("VN-725 英文界面不残留中文文案", async () => {
   const view = await load();
   const policy = view.normalizePolicy(POLICY);
   const html = view.renderSettings(state({ policy }), { lang: "en" });
-  assert.ok(html.includes("Execution policy &amp; retention") || html.includes("Execution policy & retention"));
+  // 页面标题由壳层 page-heading 提供（浏览器用例 D-04 断言 #page-h1），视图只管字段区。
   assert.ok(html.includes("Auto mode"));
   assert.ok(html.includes("Advisory"));
+  assert.ok(html.includes("Execution limit"));
   assert.ok(!/[\u4e00-\u9fa5]/.test(html), "英文界面不应出现中文");
 });
 
@@ -227,4 +228,35 @@ test("E2E-101 显式可写时才恢复可编辑", async () => {
   assert.ok(html.includes('data-editable="1"'));
   assert.ok(!/type="submit"[^>]*disabled/.test(html), "可写时保存按钮应可用");
   assert.ok(!html.includes("中枢当前没有策略写入口"));
+});
+
+test("E2E-101 没有 revision 时保存按钮禁用并给出原因", async () => {
+  const view = await load();
+  // 服务端没回 config_version／revision：能编辑但不能保存，否则只能盲写。
+  const policy = view.normalizePolicy({ auto_enabled: false, managed_execution_limit: 1 });
+  assert.equal(policy.revision, null);
+
+  const html = view.renderSettings(state({ policy, editable: true }), { lang: "zh" });
+  assert.ok(html.includes('data-editable="1"'), "缺 revision 不影响编辑");
+  assert.ok(/type="submit"[^>]*disabled/.test(html), "没有 revision 时保存按钮必须禁用");
+  assert.ok(html.includes('data-save-blocked="revision_missing"'), "要显式说明被拦下的原因");
+  assert.ok(html.includes("缺少设置版本"), "原因文案要可读");
+
+  // 有 revision 才放开保存。
+  const ready = view.renderSettings(state({ policy: view.normalizePolicy(POLICY), editable: true }), { lang: "zh" });
+  assert.ok(!/type="submit"[^>]*disabled/.test(ready), "有 revision 时应可保存");
+  assert.ok(!ready.includes('data-save-blocked="revision_missing"'));
+});
+
+test("E2E-101 四个输入框回填服务端当前值", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const html = view.renderSettings(state({ policy }), { lang: "zh" });
+  // 上限=1（不是破折号）、容量=2、保留天数=30、保留运行数=50。
+  assert.match(html, /id="settings-limit"[^>]*value="1"/);
+  assert.match(html, /id="settings-capacity"[^>]*value="2"/);
+  assert.match(html, /id="settings-retentionDays"[^>]*value="30"/);
+  assert.match(html, /id="settings-retentionRuns"[^>]*value="50"/);
+  // 概念表里的上限来自 /api/runtime 的 managed_execution_limit。
+  assert.match(html, /data-concept="limit"[^]*?<td class="num">1<\/td>/);
 });

@@ -16,7 +16,7 @@ import { renderActivity } from '../../../assets/views/activity/activity-view.mjs
 import { renderSessions } from '../../../assets/views/sessions/sessions-view.mjs'
 import { renderAnalytics } from '../../../assets/views/analytics/analytics-view.mjs'
 import { renderProjectList } from '../../../assets/views/projects/projects-view.mjs'
-import { renderSettings } from '../../../assets/views/settings/settings-view.mjs'
+import { renderSettings, normalizePolicy } from '../../../assets/views/settings/settings-view.mjs'
 
 const props = defineProps<{ viewId: string }>()
 const board = useBoard()
@@ -50,12 +50,25 @@ const DETAIL: Record<string, (item: unknown, ctx: unknown) => string> = {
   deliveries: renderDeliveryDetail as never,
 }
 
+/**
+ * 策略状态归一化（只在渲染前做一次）。
+ * 缺失字段保持 null：视图据此写「—」，不替服务端宣布默认值。
+ */
+function normalizeSettingsState(viewState: unknown) {
+  const state = viewState as { status?: string; policy?: Record<string, unknown> } | null | undefined
+  if (!state || state.status !== 'ready' || !state.policy) return viewState
+  return { ...state, policy: normalizePolicy(state.policy) }
+}
+
 const listHtml = computed(() => {
   const kind = props.viewId
   const render = LIST[kind]
   if (!render) return ''
   let viewState = localStates.value[kind] ?? board.state.viewStates[kind]
   if (needsProject(kind) && !board.state.route.project) viewState = NO_PROJECT_STATE
+  // 策略页的策略字段是 /api/runtime 的原始形状（managed_execution_limit、retention.days）；
+  // 归一化只做一次：概念表与四个输入框读同一份值，回填的才是服务端当前值。
+  if (kind === 'settings') viewState = normalizeSettingsState(viewState)
   const ctx = {
     lang: board.state.lang,
     t: board.t,

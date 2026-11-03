@@ -73,8 +73,19 @@ test.describe('D 组：执行策略（自动化策略）', () => {
     expect(value, '计算上限输入框没有回填当前值').toBe(limit);
   });
 
-  test('D-04 点「保存设置」不跳走、不丢当前视图', async ({ page }) => {
+  test('D-04 保存入口不把用户带离策略页', async ({ page }) => {
     const before = page.url();
+    const form = page.locator('.settings-form');
+    // 有无写入口是服务端事实：没有写入口时表单只读并解释，点了也不会导航。
+    const editable = (await form.getAttribute('data-editable')) === '1';
+    if (!editable) {
+      await expect(page.locator('.settings-form button[type="submit"]')).toBeDisabled();
+      await expect(page.locator('[data-readonly-reason]')).toBeVisible();
+      await expect(page.locator('#settings-limit')).toHaveAttribute('readonly', /.*/);
+      expect(page.url(), '只读表单不得把用户带离策略页').toBe(before);
+      await expect(page.locator('#page-h1')).toHaveText(/Execution policy|执行策略/i);
+      return;
+    }
     await page.locator('#settings-limit').fill('2');
     await page.locator('.settings-form button[type="submit"]').click();
     await page.waitForTimeout(1200);
