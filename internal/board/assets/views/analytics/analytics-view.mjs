@@ -37,6 +37,8 @@ const I18N = {
     "analytics.unauthenticated.hint": "使用本机会话或令牌后重试。",
     "analytics.unknown": "统计不完整。",
     "analytics.unknown.hint": "投影水位落后或完整性未知；已观测部分仍可查看。",
+    "no.project": "还没有选择工程。",
+    "no.project.hint": "统计按工程物化：先在顶部选择工程，再看交付与投入。",
     "card.deliveries": "交付成果",
     "card.deliveries.basis": "口径：窗口内去重交付数（按交付身份）",
     "card.invest": "执行投入",
@@ -95,6 +97,8 @@ const I18N = {
     "analytics.unauthenticated.hint": "Use a local session or token, then retry.",
     "analytics.unknown": "Statistics are incomplete.",
     "analytics.unknown.hint": "Projection lags or completeness is unknown; observed parts remain visible.",
+    "no.project": "No project selected.",
+    "no.project.hint": "Statistics are materialised per project: pick one at the top first.",
     "card.deliveries": "Deliveries",
     "card.deliveries.basis": "Basis: distinct deliveries in window (by delivery id)",
     "card.invest": "Execution investment",
@@ -395,6 +399,11 @@ export function renderAnalytics(state = {}, options = {}) {
   if (status === "expired") {
     return '<div class="analytics" data-status="expired">' +
       emptyState(lang, ["analytics.expired", "analytics.expired.hint"]) + "</div>";
+  }
+  // 未选工程不是「这段时间没有交付」：统计按工程物化，要先选工程。
+  if (status === "no_project") {
+    return '<div class="analytics" data-status="no_project">' +
+      emptyState(lang, ["no.project", "no.project.hint"]) + "</div>";
   }
 
   const rep = normalizeReport(state.report || {});

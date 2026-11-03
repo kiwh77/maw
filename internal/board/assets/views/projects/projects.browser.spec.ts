@@ -69,7 +69,7 @@ async function mount(page, html, theme = "dark") {
 }
 
 test.describe("VN-725 工程列表与策略概览", () => {
-  test("VN-725 深色主题下四列分开且参考值弱化", async ({ page }) => {
+  test("VN-725 深色主题下四列分开且参考值只写在表头", async ({ page }) => {
     const view = await loadView();
     await mount(page, view.renderProjectList({ projects: [READY, NOT_READY] }, { lang: "zh" }));
 
@@ -77,12 +77,10 @@ test.describe("VN-725 工程列表与策略概览", () => {
     for (const label of ["自动模式", "计算上限", "节点容量", "max_parallel 参考值"]) {
       await expect(page.locator("th", { hasText: label })).toHaveCount(1);
     }
-    // 参考值列带「仅供参考」说明，且颜色比数字淡
-    const refNote = page.locator('td[data-field="ref"] .field-hint').first();
-    await expect(refNote).toContainText("仅供参考");
-    const noteColor = await refNote.evaluate(el => getComputedStyle(el).color);
-    const nameColor = await page.locator("td.name").first().evaluate(el => getComputedStyle(el).color);
-    expect(noteColor).not.toBe(nameColor);
+    // 参考值单元格只有数字：语义由表头承担，单元格不再塞提示文案。
+    const refCell = page.locator('tr[data-project="p1"] td[data-field="ref"]').first();
+    await expect(refCell).toHaveText("4");
+    await expect(refCell.locator(".field-hint")).toHaveCount(0);
 
     // 未就绪项目写明原因，非 Git 工作区如实标注
     await expect(page.locator('tr[data-project="p2"] .badge')).toHaveText("未就绪");
@@ -152,5 +150,60 @@ test.describe("VN-725 工程列表与策略概览", () => {
     });
     expect(focusable).toBe(true);
     await expect(page.locator("td.name")).toContainText("goal-agents");
+  });
+
+  test("工程移除按钮可聚焦、可见，且只读宿主没有它", async ({ page }) => {
+    const view = await loadView();
+
+    await mount(page, view.renderProjectList({ projects: [READY] }, { lang: "zh", canRemove: true }));
+    const button = page.locator('tr[data-project="p1"] [data-project-remove="p1"]');
+    await expect(button).toBeVisible();
+    await expect(button).toHaveText("移除");
+
+    // 先取静态颜色：聚焦／悬停会按设计变亮，那不是「和正文同色」的证据。
+    const btnColor = await button.evaluate(el => getComputedStyle(el).color);
+    const nameColor = await page.locator("td.name").first().evaluate(el => getComputedStyle(el).color);
+    expect(btnColor).not.toBe(nameColor);
+
+    await button.focus();
+    expect(await button.evaluate(el => document.activeElement === el)).toBe(true);
+
+    await mount(page, view.renderProjectList({ projects: [READY] }, { lang: "zh" }));
+    await expect(page.locator("[data-project-remove]")).toHaveCount(0);
+  });
+
+  test("工程移除确认态把删除入口收起来，只剩确认与取消", async ({ page }) => {
+    const view = await loadView();
+    await mount(
+      page,
+      view.renderProjectList(
+        { projects: [READY, NOT_READY] },
+        { lang: "zh", canRemove: true, pendingRemove: "p1" },
+      ),
+    );
+
+    await expect(page.locator('tr[data-project="p1"]')).toContainText("确认移除？");
+    await expect(page.locator('[data-project-remove="p1"]')).toHaveCount(0);
+    await expect(page.locator('[data-project-remove-confirm="p1"]')).toBeVisible();
+    await expect(page.locator('[data-project-remove-cancel="p1"]')).toBeVisible();
+    // 未进入确认态的行保持原样，不跟着变。
+    await expect(page.locator('[data-project-remove="p2"]')).toBeVisible();
+  });
+
+  test("工程移除失败提示在深浅主题下都可读", async ({ page }) => {
+    const view = await loadView();
+    const html = view.renderProjectList(
+      { projects: [READY] },
+      { lang: "zh", canRemove: true, removeNotice: { kind: "error", text: "工程还有未完成的任务或在线 Agent，先收尾再移除" } },
+    );
+
+    await mount(page, html, "dark");
+    const dark = await page.locator(".projects-notice--error").evaluate(el => getComputedStyle(el).color);
+
+    await mount(page, html, "light");
+    const light = await page.locator(".projects-notice--error").evaluate(el => getComputedStyle(el).color);
+
+    expect(dark).not.toBe(light);
+    await expect(page.locator(".projects-notice--error")).toContainText("先收尾再移除");
   });
 });

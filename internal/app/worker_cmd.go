@@ -22,8 +22,10 @@ import (
 	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/machine"
+	"github.com/kiwh77/maw/internal/notifications"
 	"github.com/kiwh77/maw/internal/schedule"
 	"github.com/kiwh77/maw/internal/scope"
+	"github.com/kiwh77/maw/internal/systemagent"
 	"github.com/kiwh77/maw/internal/verification"
 	"github.com/kiwh77/maw/internal/workspace"
 )
@@ -914,6 +916,24 @@ type frozenDelivery struct {
 	Delivery model.Delivery
 }
 
+// deliverableFiles 只保留在候选提交里还能取到内容的路径。
+//
+// 交付的 file 产物必须能从提交里取回：被本候选删除的文件取不到内容，收集器会核成
+// exists=false 并报 E320，整次交付都被拒。删除本身由 commit 产物承载，所以这里跳过。
+func deliverableFiles(repo, rev string, files []string) []string {
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		if strings.TrimSpace(f) == "" {
+			continue
+		}
+		if _, err := home.Git(repo, "cat-file", "-e", rev+":"+f); err != nil {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 func freezeManualCompatDelivery(pc *projCtx, task *db.Task, actor, wt string, files []string) (frozenDelivery, verification.Outcome, error) {
 	var out verification.Outcome
 	if strings.TrimSpace(task.InstanceID) == "" {
@@ -946,7 +966,7 @@ func freezeManualCompatDelivery(pc *projCtx, task *db.Task, actor, wt string, fi
 	arts := []model.ArtifactCandidate{{
 		Kind: model.ArtifactCommit, Ref: head, DeclaredBy: model.DeclaredByCLI,
 	}}
-	for _, f := range files {
+	for _, f := range deliverableFiles(wt, head, files) {
 		arts = append(arts, model.ArtifactCandidate{
 			Kind: model.ArtifactFile, Ref: f, DeclaredBy: model.DeclaredByCLI,
 		})
@@ -1291,7 +1311,44 @@ func deliveryBlock(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, error
 			"from": from, "to": "blocked", "reason": in.Message,
 			"delivery_id": deliveryID, "strategy": manualCompatStrategy,
 		})
-		return db.UpsertTask(tx, t)
+		if err := db.UpsertTask(tx, t); err != nil {
+			return err
+		}
+		// 站内/桌面提醒（事务内登记，投递在中枢侧）。
+		subject := t.InstanceID
+		if subject == "" {
+			subject = "task_" + t.ID
+		}
+		eid := string(compatEventID(t.ID, "blocked|"+fmt.Sprintf("%d", t.Revision)))
+		notifySvc := notifications.New()
+		if _, err := notifySvc.Raise(tx, notifications.BusinessEvent{
+			EventID:    eid,
+			ProjectID:  pc.ID(),
+			Kind:       notifications.EventTaskStatus,
+			Subject:    subject,
+			TaskStatus: model.TaskBlocked,
+			Reason:     in.Message,
+			Title:      "任务阻塞",
+			Body:       t.ID + ": " + in.Message,
+		}); err != nil {
+			// 提醒失败不阻断 block 主路径，但写入事件便于排查。
+			_ = db.AppendEvent(tx, pc.ID(), "system", "notification_raise_failed", in.TaskID, map[string]any{
+				"error": err.Error(),
+			})
+		}
+		// system_agent 启用时同事务入队（outbox）；游标 watcher 仍会扫 events，靠 UNIQUE 幂等。
+		if pc.Config != nil && pc.Config.SystemAgent.Enabled {
+			enqueue, escalate := systemagent.ClassifyBlocked(in.Message, pc.Config.SystemAgent)
+			if enqueue && systemagent.KindAllowed(systemagent.SystemKindUnblock, pc.Config.SystemAgent, false) {
+				decision := map[string]any{}
+				if escalate {
+					decision["action"] = string(systemagent.ActionEscalateHuman)
+				}
+				_, _ = systemagent.Enqueue(tx, pc.Config.SystemAgent, pc.ID(), systemagent.SystemKindUnblock,
+					t.ID, t.InstanceID, in.Message, decision, false)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return deliveryCaseResult{}, err

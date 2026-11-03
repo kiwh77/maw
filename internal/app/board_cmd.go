@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"github.com/kiwh77/maw/internal/board"
+	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/home"
 	httpevents "github.com/kiwh77/maw/internal/httpapi/events"
 	httpobservability "github.com/kiwh77/maw/internal/httpapi/observability"
 	httpread "github.com/kiwh77/maw/internal/httpapi/read"
+	httpresources "github.com/kiwh77/maw/internal/httpapi/resources"
+	httpsystemjobs "github.com/kiwh77/maw/internal/httpapi/systemjobs"
 	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/localauth"
 	"github.com/kiwh77/maw/internal/projection"
@@ -98,6 +101,8 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 		fmt.Println(i18n.T("board.hub_started"), url)
 		fmt.Println(i18n.T("board.data_source"), gdb)
 		fmt.Println(i18n.T("board.ctrl_c"))
+		// 若工程开启 system_agent，与 serve 同进程启动监视（共用 dispatch 锁）。
+		startSystemWatchIfEnabled(cwd)
 		select {}
 	}
 	return res, nil
@@ -135,12 +140,36 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 	obsAPI := newObservabilityAPI(store, auth)
 	obsH := obsAPI.Handler()
 
+	// 工程登记写资源：看板「工程」页的移除走这一条，与 CLI 同一套用例。
+	resAPI := &httpresources.API{
+		Projects: projectRemovalPort{cwd: cwd},
+		Auth:     auth,
+	}
+	resH := resAPI.Handler()
+
+	sysAPI := &httpsystemjobs.API{
+		Store: store,
+		Auth:  auth,
+		Config: func(projectID string) (config.SystemAgent, error) {
+			_ = projectID
+			if pc, err := resolveProject(cwd); err == nil && pc.Config != nil {
+				return pc.Config.SystemAgent, nil
+			}
+			return config.SystemAgent{}, nil
+		},
+	}
+	sysH := sysAPI.Handler()
+
 	v1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch v1Route(r.URL.Path) {
 		case v1Events:
 			eventsH.ServeHTTP(w, r)
 		case v1Observability:
 			obsH.ServeHTTP(w, r)
+		case v1Resources:
+			resH.ServeHTTP(w, r)
+		case v1System:
+			sysH.ServeHTTP(w, r)
 		default:
 			readH.ServeHTTP(w, r)
 		}
@@ -338,6 +367,10 @@ const (
 	v1Events
 	// v1Observability 是时间轴、活动、会话、统计、提醒与观测能力。
 	v1Observability
+	// v1Resources 是写资源（工程登记移除等）；只有末段是 {project_id} 的路径走这里。
+	v1Resources
+	// v1System 是系统 Agent 作业队列。
+	v1System
 )
 
 // observabilitySuffixes 是观测子树的资源名。
@@ -356,8 +389,19 @@ func v1Route(path string) v1HandlerKind {
 	switch path {
 	case "/api/v1/events", "/api/v1/events/stream", "/api/v1/status-reports":
 		return v1Events
+	case "/api/v1/system-jobs":
+		return v1System
 	}
 	if strings.HasPrefix(path, "/api/v1/projects/") {
+		rest := strings.TrimPrefix(path, "/api/v1/projects/")
+		// 「工程本身」只有一段：{project_id}。子资源（tasks／nodes／timeline…）
+		// 都带第二段，继续按原规则分流。
+		if rest != "" && !strings.Contains(rest, "/") {
+			return v1Resources
+		}
+		if strings.Contains(path, "/system-jobs") {
+			return v1System
+		}
 		for _, suffix := range observabilitySuffixes {
 			if strings.Contains(path, suffix) {
 				return v1Observability

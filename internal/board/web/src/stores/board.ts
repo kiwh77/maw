@@ -91,6 +91,10 @@ const state = reactive({
   readOnly: typeof window !== 'undefined' ? isStaticExport(window) : false,
   /** 看板任务详情抽屉（与 vnext route.detail 分开，避免互相抢路由）。 */
   drawer: null as TaskDrawerSel | null,
+  /** 正在等第二次确认的工程 id（两段式移除，避免一次误点就删）。 */
+  removePending: '',
+  /** 移除结果提示；kind=error 时界面必须显式红着说，不能静默。 */
+  removeNotice: null as { kind: 'ok' | 'error'; text: string } | null,
 })
 
 const sources = createDefaultSources(typeof window !== 'undefined' ? window : null)
@@ -123,10 +127,11 @@ export const boardStore = {
 
   setProject(projectId: string) {
     const id = String(projectId || '').trim()
-    const def = resolveView(registry, state.route.view)
     const patch: Partial<BoardRoute> = { project: id, detail: '' }
     if (id && !state.route.project) patch.view = 'board'
-    if (!id && def.legacy) patch.view = 'nodes'
+    // 选「全部工程」保持当前视图：契约要求多工程时回到看板并禁用拓扑，
+    // 而不是把用户悄悄带去另一个视图。
+    if (!id && state.route.view === 'topo') patch.view = 'board'
     const next = withRoute(state.route, patch) as BoardRoute
     writeRoute(next, { history: window.history, location: window.location, replace: true })
     Object.assign(state.route, next)
@@ -168,6 +173,43 @@ export const boardStore = {
     )
     if (idx < 0) return
     tasks[idx] = { ...tasks[idx], ...patch }
+  },
+
+  /** 第一段：把某一行切到「确认移除？」；同时清掉上一条结果提示。 */
+  requestRemoveProject(projectId: string) {
+    state.removePending = String(projectId || '').trim()
+    state.removeNotice = null
+  },
+
+  cancelRemoveProject() {
+    state.removePending = ''
+  },
+
+  /**
+   * 第二段：真正发删除请求。
+   *
+   * 成功前不改任何本地列表：本地先删、服务端拒绝，会让人以为已经删掉了。
+   * 只有 2xx 之后才刷新快照与工程视图。
+   */
+  async removeProject(projectId: string) {
+    const target = String(projectId || '').trim()
+    if (!target) return
+    const outcome = await sources.removeProject(target)
+    state.removePending = ''
+    if (!outcome.ok) {
+      state.removeNotice = { kind: 'error', text: removalErrorText(outcome, state.lang) }
+      return
+    }
+    state.removeNotice = {
+      kind: 'ok',
+      text: state.lang === 'zh' ? '已移除工程登记' : 'Project registration removed',
+    }
+    // 被删的正是当前筛选工程：把筛选清掉，否则后续视图会一直空着。
+    if (String(state.route.project || '') === target) {
+      state.route.project = ''
+    }
+    await boardStore.fetchSnapshot()
+    await boardStore.loadView('projects')
   },
 
   syncFromLocation() {
@@ -216,11 +258,13 @@ export const boardStore = {
         state.snapshot = snap
         boardStore.applyProjectTaskCounts(snap, Boolean(state.route.project))
         state.syncOk = true
+        // updated_at 是数据水位（最近事件时间）。没有事件时说「尚无事件」，
+        // 而不是拿请求时刻冒充「刚刚更新」。
         state.subtitle = snap.updated_at
           ? `Updated ${snap.updated_at}`
           : state.lang === 'zh'
-            ? '已同步'
-            : 'Synced'
+            ? '尚无事件'
+            : 'No events yet'
         return snap
       } catch {
         /* try next */
@@ -284,4 +328,38 @@ export const boardStore = {
 
 export function useBoard() {
   return boardStore
+}
+
+/**
+ * 把移除失败翻成人话。
+ *
+ * 按 code 而不是服务端 message 映射：message 是中文的，英文界面照搬会出现中文；
+ * 未知 code 才回落到状态码，绝不把失败说成成功。
+ */
+export function removalErrorText(
+  outcome: { code?: string; status: number },
+  lang: string,
+): string {
+  const zh = lang !== 'en'
+  switch (outcome.code) {
+    case 'project_busy':
+      return zh
+        ? '工程还有未完成的任务或在线 Agent，先收尾再移除'
+        : 'Tasks or Agents are still live; finish them before removing'
+    case 'not_found':
+      return zh ? '工程已不在中枢里（可能刚被移除）' : 'Project is no longer registered'
+    case 'unauthenticated':
+    case 'csrf_failed':
+      return zh ? '会话已过期，刷新页面后重试' : 'Session expired; refresh the page and retry'
+    case 'insufficient_scope':
+      return zh ? '当前凭据没有写权限' : 'This credential has no write scope'
+    case 'invalid_project_id':
+      return zh ? '工程 id 形态不对' : 'Malformed project id'
+    case 'network_error':
+      return zh ? '连不上本机中枢' : 'Cannot reach the local hub'
+    default:
+      return zh
+        ? `移除失败（HTTP ${outcome.status}）`
+        : `Removal failed (HTTP ${outcome.status})`
+  }
 }

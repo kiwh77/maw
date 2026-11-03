@@ -28,6 +28,11 @@ const (
 	RetireReset = "reset"
 	// RetireAmbiguousLegacy 是「重复创建且证据不足」的归档原因（E161）。
 	RetireAmbiguousLegacy = "ambiguous_legacy"
+	// RetireProjectRemoved 是「工程从本机中枢移除」的退役原因。
+	//
+	// 移除工程不清版本台账（库上有禁删触发器），只把活跃实例退役并写明原因，
+	// 这样之后同一编号重建不会撞上「至多一个活跃实例」的部分唯一索引。
+	RetireProjectRemoved = "project_removed"
 )
 
 const instanceCols = `instance_id, project_id, display_id, state, created_at,

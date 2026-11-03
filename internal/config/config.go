@@ -23,6 +23,8 @@ type Config struct {
 	Identity  Identity  `toml:"identity"`
 	// Managed 是受管执行开关与硬上限（契约 auto_execution）。
 	Managed Managed `toml:"managed"`
+	// SystemAgent 是阻塞自愈 / 拆题编排的系统 Agent 层。
+	SystemAgent SystemAgent `toml:"system_agent"`
 }
 
 // Managed 控制受管 CLI 执行。默认关闭自动模式，上限为 1。
@@ -33,6 +35,22 @@ type Managed struct {
 	AutoEnabled bool `toml:"auto_enabled"`
 	// Limit 是受管执行的全局硬上限；auto_enabled=true 时必须 ≥1。
 	Limit int `toml:"limit"`
+}
+
+// SystemAgent 控制系统 Agent 反应总线。默认关闭。
+type SystemAgent struct {
+	ConfigVersion     int      `toml:"config_version"`
+	Enabled           bool     `toml:"enabled"`
+	PollIntervalSec   int      `toml:"poll_interval_sec"`
+	MaxConcurrent     int      `toml:"max_concurrent"`
+	LLMNode           string   `toml:"llm_node"`
+	WorkerNode        string   `toml:"worker_node"`
+	LLMCommand        []string `toml:"llm_command"`
+	AutoKinds         []string `toml:"auto_kinds"`
+	EscalatePatterns  []string `toml:"escalate_patterns"`
+	CooldownoutSec        int      `toml:"cooldown_sec"`
+	MaxAttempts       int      `toml:"max_attempts"`
+	OpsAllowlist      []string `toml:"ops_allowlist"`
 }
 
 type Project struct {
@@ -107,6 +125,30 @@ func Load(path string) (*Config, error) {
 	if c.Managed.AutoEnabled && c.Managed.Limit < 1 {
 		return nil, i18n.E("err.managed_limit_required", "next.fix_toml")
 	}
+	if c.SystemAgent.ConfigVersion == 0 {
+		c.SystemAgent.ConfigVersion = 1
+	}
+	if c.SystemAgent.PollIntervalSec <= 0 {
+		c.SystemAgent.PollIntervalSec = 5
+	}
+	if c.SystemAgent.MaxConcurrent <= 0 {
+		c.SystemAgent.MaxConcurrent = 1
+	}
+	if c.SystemAgent.CooldownoutSec <= 0 {
+		c.SystemAgent.CooldownoutSec = 300
+	}
+	if c.SystemAgent.MaxAttempts <= 0 {
+		c.SystemAgent.MaxAttempts = 3
+	}
+	if len(c.SystemAgent.AutoKinds) == 0 {
+		c.SystemAgent.AutoKinds = []string{"unblock_assist"}
+	}
+	if len(c.SystemAgent.EscalatePatterns) == 0 {
+		c.SystemAgent.EscalatePatterns = []string{"needs_human", "auth_required"}
+	}
+	if len(c.SystemAgent.OpsAllowlist) == 0 {
+		c.SystemAgent.OpsAllowlist = []string{"maw next", "maw merge --yes", "maw prune", "maw task unblock"}
+	}
 	return &c, nil
 }
 
@@ -126,6 +168,23 @@ auto_enabled = false
 limit = 1
 `
 
+const systemAgentSectionTOML = `
+[system_agent]
+# 系统 Agent：默认关闭；打开后可对 blocked 自动入队并编排拆题/运维
+config_version = 1
+enabled = false
+poll_interval_sec = 5
+max_concurrent = 1
+llm_node = ""
+worker_node = ""
+llm_command = []
+auto_kinds = ["unblock_assist"]
+escalate_patterns = ["needs_human", "auth_required"]
+cooldown_sec = 300
+max_attempts = 3
+ops_allowlist = ["maw next", "maw merge --yes", "maw prune", "maw task unblock"]
+`
+
 // EnsureManagedSection 为旧配置补写 [managed] 段；已存在则不动。
 // 返回 true 表示写入了迁移内容。
 func EnsureManagedSection(path string) (bool, error) {
@@ -138,6 +197,23 @@ func EnsureManagedSection(path string) (bool, error) {
 		return false, nil
 	}
 	trimmed := strings.TrimRight(text, "\n") + "\n" + managedSectionTOML
+	if err := os.WriteFile(path, []byte(trimmed), 0o644); err != nil {
+		return false, i18n.EW("err.write_config", "next.check_perms", err)
+	}
+	return true, nil
+}
+
+// EnsureSystemAgentSection 为旧配置补写 [system_agent] 段；已存在则不动。
+func EnsureSystemAgentSection(path string) (bool, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false, i18n.E("err.config_missing", "next.run_init", path)
+	}
+	text := string(b)
+	if regexp.MustCompile(`(?m)^\s*\[system_agent\]\s*$`).MatchString(text) {
+		return false, nil
+	}
+	trimmed := strings.TrimRight(text, "\n") + "\n" + systemAgentSectionTOML
 	if err := os.WriteFile(path, []byte(trimmed), 0o644); err != nil {
 		return false, i18n.EW("err.write_config", "next.check_perms", err)
 	}
@@ -265,6 +341,21 @@ mode = "manual"
 config_version = 1
 auto_enabled = false
 limit = 1
+
+[system_agent]
+# 系统 Agent：默认关闭；打开后可对 blocked 自动入队并编排拆题/运维
+config_version = 1
+enabled = false
+poll_interval_sec = 5
+max_concurrent = 1
+llm_node = ""
+worker_node = ""
+llm_command = []
+auto_kinds = ["unblock_assist"]
+escalate_patterns = ["needs_human", "auth_required"]
+cooldown_sec = 300
+max_attempts = 3
+ops_allowlist = ["maw next", "maw merge --yes", "maw prune", "maw task unblock"]
 
 [identity]
 # Worker 名推荐动态注册：{应用}-{工程}-{序号}，如 cursor-demo-1

@@ -49,6 +49,27 @@ func TestBuildSnapshotNilAgentsAndDone(t *testing.T) {
 	}
 }
 
+// 空集合必须编码成 []，不能是 null：客户端不用到处兜底，
+// 「查过没有」与「没查」在契约层也能分辨。
+func TestBuildSnapshotEmptyCollectionsEncodeAsArrays(t *testing.T) {
+	raw, err := json.Marshal(BuildSnapshot(nil, nil, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"tasks", "projects", "risks", "agents"} {
+		if got := string(fields[key]); got != "[]" {
+			t.Fatalf("%s 应编码为 []，实际 %s", key, got)
+		}
+	}
+	if _, ok := fields["generated_at"]; !ok {
+		t.Fatal("缺 generated_at：渲染时刻要与数据水位分开")
+	}
+}
+
 func TestWriteSnapshotFile(t *testing.T) {
 	dir := t.TempDir()
 	s := BuildSnapshot([]*db.Task{{ID: "T-1", Status: "ready"}}, nil, 2)

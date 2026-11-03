@@ -98,6 +98,8 @@ const I18N = {
     "action.save": "保存设置",
     "action.reload": "重新载入",
     "notice.no_secret": "本页不含令牌／密钥字段：凭据只在 CLI 与本机凭据库管理。",
+    "settings.readonly": "只读",
+    "settings.readonly.hint": "中枢当前没有策略写入口：这里展示服务端回显的当前值，修改请走 CLI。",
     "col.item": "项",
     "col.value": "当前值",
     "col.note": "说明",
@@ -150,6 +152,8 @@ const I18N = {
     "action.save": "Save settings",
     "action.reload": "Reload",
     "notice.no_secret": "This page has no token or secret fields: credentials live in the CLI and the local credential store.",
+    "settings.readonly": "Read-only",
+    "settings.readonly.hint": "The hub exposes no policy write endpoint yet; these are the values the server reports. Change them through the CLI.",
     "col.item": "Item",
     "col.value": "Current",
     "col.note": "Note",
@@ -202,7 +206,9 @@ export function toInt(value) {
  * 因为「能不能开」都还没成立，把它显示成「关闭」会让人以为手动开一下就行。
  */
 export function autoModeOf(policy, options = {}) {
-  const platformOK = options.platformSupported !== false;
+  // 只有服务端**明确**说支持时才认为可开：缺失＝未知，不是「支持」。
+  // 把未知显示成「关闭」会让用户以为手动开一下就行，而真实情况是能不能开都还没成立。
+  const platformOK = options.platformSupported === true;
   const configOn = options.configEnabled === true || policy?.autoEnabled === true;
   if (!platformOK || options.configApplied === false) return AUTO_MODE.not_ready;
   return configOn ? AUTO_MODE.on : AUTO_MODE.off;
@@ -210,7 +216,9 @@ export function autoModeOf(policy, options = {}) {
 
 /** 自动模式未就绪的具体原因码（只有 not_ready 才有）。 */
 export function autoReasonOf(options = {}) {
-  if (options.platformSupported === false) return "auto.reason.platform";
+  // 只有明确 true 才算「平台支持」；缺失与 false 都归到平台原因，
+  // 否则未就绪会不给理由，用户看不出是平台没验证还是配置没生效。
+  if (options.platformSupported !== true) return "auto.reason.platform";
   if (options.configApplied === false) return "auto.reason.config";
   return null;
 }
@@ -353,12 +361,14 @@ function emptyState(lang, keys) {
 
 function fieldRow(lang, id, labelKey, hintKey, value, { readonly = false, unit = "" } = {}) {
   const inputId = "settings-" + id;
-  const ro = readonly ? " readonly" : "";
+  const ro = readonly ? " readonly disabled" : "";
+  // 服务端没给值时不编默认值：留空并保持可读，比填一个看起来像配置的 0 更诚实。
+  const shown = value === null || value === undefined ? "" : value;
   // 复用共享表单组件（.field / .field-label / .input / .field-hint），页面不再自建表单层。
   return '<div class="field">' +
     '<label class="field-label" for="' + inputId + '">' + esc(t(labelKey, lang)) + "</label>" +
     '<input class="input" id="' + inputId + '" name="' + id + '" type="number" inputmode="numeric"' +
-    ' value="' + esc(value ?? "") + '"' + ro + (unit ? ' data-unit="' + esc(unit) + '"' : "") + ">" +
+    ' value="' + esc(shown) + '"' + ro + (unit ? ' data-unit="' + esc(unit) + '"' : "") + ">" +
     '<p class="field-hint" id="' + inputId + '-hint">' + esc(t(hintKey, lang)) + "</p>" +
     "</div>";
 }
@@ -421,24 +431,30 @@ export function renderSettings(state = {}, options = {}) {
     : null;
   const save = state.save || SAVE_STATUS.idle;
   const errors = state.errors || [];
+  // 中枢没有策略写入口时按只读渲染：可编辑却存不下去，比明说只读更糟。
+  const editable = state.editable === true;
 
-  // 标题已由壳层 page-heading 提供；这里只保留保存态。
+  // 标题已由壳层 page-heading 提供；这里只保留保存态与只读标记。
   const saveStatus = '<p class="settings-save-status" data-save="' + esc(save) + '">' +
-    badge(t("save." + save, lang), STATUS_BADGE[save] || "badge--self_check") + "</p>";
+    badge(t("save." + save, lang), STATUS_BADGE[save] || "badge--self_check") +
+    (editable ? "" : " " + badge(t("settings.readonly", lang), "badge--self_check")) + "</p>";
 
-  const form = '<form class="settings-form" data-revision="' + esc(policy.revision ?? "") + '" novalidate>' +
+  const form = '<form class="settings-form" data-revision="' + esc(policy.revision ?? "") +
+    '" data-editable="' + (editable ? "1" : "0") + '" onsubmit="return false" novalidate>' +
     '<fieldset class="settings-fieldset"><legend class="field-label">' + esc(t("field.auto", lang)) + "</legend>" +
     '<p class="field-hint">' + esc(t("field.auto.hint", lang)) + "</p>" +
     (reasonKey ? '<p class="field-hint" data-auto-reason="1">' + esc(t(reasonKey, lang)) + "</p>" : "") +
     "</fieldset>" +
-    fieldRow(lang, "limit", "field.limit", "field.limit.hint", state.draft?.limit ?? policy.limit) +
-    fieldRow(lang, "capacity", "field.capacity", "field.capacity.hint", state.draft?.capacity ?? policy.capacity) +
-    fieldRow(lang, "retentionDays", "field.retention", "field.retention.hint", state.draft?.retentionDays ?? policy.retentionDays) +
-    fieldRow(lang, "retentionRuns", "field.retention_runs", "field.retention_runs.hint", state.draft?.retentionRuns ?? policy.retentionRuns) +
+    fieldRow(lang, "limit", "field.limit", "field.limit.hint", state.draft?.limit ?? policy.limit, { readonly: !editable }) +
+    fieldRow(lang, "capacity", "field.capacity", "field.capacity.hint", state.draft?.capacity ?? policy.capacity, { readonly: !editable }) +
+    fieldRow(lang, "retentionDays", "field.retention", "field.retention.hint", state.draft?.retentionDays ?? policy.retentionDays, { readonly: !editable }) +
+    fieldRow(lang, "retentionRuns", "field.retention_runs", "field.retention_runs.hint", state.draft?.retentionRuns ?? policy.retentionRuns, { readonly: !editable }) +
     '<p class="field-hint" data-no-secret="1">' + esc(t("notice.no_secret", lang)) + "</p>" +
+    (editable ? "" : '<p class="field-hint" data-readonly-reason="1">' + esc(t("settings.readonly.hint", lang)) + "</p>") +
     errorsBlock(lang, errors) +
     '<div class="settings-actions">' +
-    '<button class="button button--primary" type="submit"' + (save === SAVE_STATUS.saving ? " disabled" : "") + ">" +
+    '<button class="button button--primary" type="submit"' +
+    (editable && save !== SAVE_STATUS.saving ? "" : " disabled") + ">" +
     esc(t("action.save", lang)) + "</button>" +
     (save === SAVE_STATUS.conflict
       ? '<button class="button" type="button" data-action="reload">' + esc(t("action.reload", lang)) + "</button>"

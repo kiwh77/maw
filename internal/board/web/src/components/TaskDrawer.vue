@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useBoard } from '../stores/board'
 import { buildTaskPrompt, copyText } from '../lib/prompts'
 
@@ -128,18 +128,64 @@ function close() {
   board.closeTaskDrawer()
 }
 
+/** 抽屉内可聚焦元素（跳过禁用与不可见）。 */
+function focusables(): HTMLElement[] {
+  const el = document.getElementById('drawer')
+  if (!el) return []
+  return Array.from(
+    el.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((node) => node.offsetParent !== null || node === document.activeElement)
+}
+
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape' && open.value) {
+  if (!open.value) return
+  if (e.key === 'Escape') {
     e.preventDefault()
     close()
+    return
+  }
+  // 焦点陷阱：模态抽屉打开时 Tab 不应把焦点送回背后页面。
+  if (e.key === 'Tab') {
+    const list = focusables()
+    if (!list.length) {
+      e.preventDefault()
+      return
+    }
+    const first = list[0]
+    const last = list[list.length - 1]
+    const active = document.activeElement as HTMLElement | null
+    if (e.shiftKey && (active === first || !active || !document.getElementById('drawer')?.contains(active))) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && (active === last || !active || !document.getElementById('drawer')?.contains(active))) {
+      e.preventDefault()
+      first.focus()
+    }
   }
 }
+
+/** 打开前的焦点位置：关闭后要还给触发卡片，否则键盘用户会掉到页面顶部。 */
+let lastFocus: HTMLElement | null = null
 
 watch(
   () => board.state.drawer,
   (d) => {
     events.value = []
-    if (d) void refreshDetail()
+    if (d) {
+      const active = document.activeElement
+      lastFocus = active instanceof HTMLElement ? active : null
+      void refreshDetail()
+      // 等 inert 解除、遮罩挂上之后再接管焦点。
+      void nextTick(() => {
+        const target = document.getElementById('d-close') as HTMLElement | null
+        target?.focus()
+      })
+    } else {
+      lastFocus?.focus?.()
+      lastFocus = null
+    }
   },
 )
 

@@ -186,10 +186,12 @@ test.describe("VN-704 统一布局内接入受管闭环视图", () => {
 
     const nav = page.locator("#vnext-nav");
     await expect(nav).toBeVisible();
-    // 侧栏不展示流程组（看板／工坊／拓朴改由 toolbar）。
-    await expect(nav.locator("[data-view]")).toHaveCount(10);
+    // 侧栏只有置顶工作台 + 三个分组视图；工坊／拓朴仍改由 toolbar 进入。
+    await expect(nav.locator("[data-view]")).toHaveCount(11);
+    await expect(nav.locator("[data-view]").first()).toHaveAttribute("data-view", "board");
     await expect(nav.locator(".section-label").first()).toHaveText("控制");
-    await expect(nav.locator('[data-view="board"]')).toHaveCount(0);
+    await expect(nav.locator('[data-view="factory"]')).toHaveCount(0);
+    await expect(nav.locator('[data-view="topo"]')).toHaveCount(0);
 
     // 无工程默认落到节点；legacy 容器隐藏，vnext 可见。
     await expect(page.locator("#vnext-view")).toBeVisible();
@@ -471,11 +473,12 @@ test.describe("VN-705 挂载回顾统计与设置入口", () => {
     });
 
     const nav = page.locator("#vnext-nav");
-    await expect(nav.locator("[data-view]")).toHaveCount(10);
-    await expect(nav.locator(".section-label").nth(0)).toHaveText("控制");
+    await expect(nav.locator("[data-view]")).toHaveCount(11);
+    await expect(nav.locator('.section-label').nth(0)).toHaveText("控制");
     await expect(nav.locator(".section-label").nth(1)).toHaveText("回顾");
     await expect(nav.locator(".section-label").nth(2)).toHaveText("设置");
-    await expect(nav.locator('[data-view="board"]')).toHaveCount(0);
+    // 置顶工作台（看板）在分组之外，因此不占 .section-label 的位置。
+    await expect(nav.locator('[data-view="board"]')).toHaveCount(1);
 
     // 直达链接恢复上下文：分组进面包屑，工程进标题位。
     await expect(page.locator("#crumb-scope")).toHaveText("回顾");

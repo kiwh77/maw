@@ -286,6 +286,16 @@ export function settingsStateFrom(payload, options = {}) {
   if (aligned.revision === undefined && aligned.config_version !== undefined) {
     aligned.revision = aligned.config_version;
   }
+  // 服务端字段名与视图字段名对齐：少了这几行，概念表会把 1 显示成破折号。
+  if (aligned.limit === undefined && aligned.managed_execution_limit !== undefined) {
+    aligned.limit = aligned.managed_execution_limit;
+  }
+  if (aligned.capacity === undefined && aligned.node_capacity !== undefined) {
+    aligned.capacity = aligned.node_capacity;
+  }
+  if (aligned.ref === undefined && aligned.max_parallel_reference !== undefined) {
+    aligned.ref = aligned.max_parallel_reference;
+  }
   const normalize = typeof options.normalizePolicy === "function"
     ? options.normalizePolicy
     : value => value;

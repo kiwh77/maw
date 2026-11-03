@@ -8,7 +8,9 @@
 
 ### Added
 
+- 系统 Agent 层：`[system_agent]` 配置、`maw system status|trigger|run|watch`、阻塞时 Raise 通知并入队 `unblock_assist`；同总线支持 `task_split` / `ops_run`；HTTP `GET/POST …/system-jobs`；`__runner` 可按 `launch_spec.json` 接入 `session.Runner`。说明见 `docs/operations/vnext/system-agent.zh-CN.md`。
 - 中英双语：文档镜像、看板语言切换、CLI / 终端看板 / 协议 / skills（`MAW_LANG`，默认 en）
+- 工程可从本机中枢移除：看板「工程」页两段式移除按钮，`maw project list` / `maw project rm <id|名称>`，以及 `DELETE /api/v1/projects/{project_id}`。有未完成任务或在线 Agent 时默认拒绝（`--force` / `?force=1` 才连现场一起清）；事件流水、冻结版本与用量台账保留。
 
 
 ## [0.4.0] - 2026-10-22

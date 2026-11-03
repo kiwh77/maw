@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/signal"
@@ -21,7 +22,10 @@ import (
 	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
+	"github.com/kiwh77/maw/internal/runner/dbstore"
+	"github.com/kiwh77/maw/internal/runner/journal"
 	"github.com/kiwh77/maw/internal/runner/process"
+	"github.com/kiwh77/maw/internal/runner/session"
 )
 
 // ManagedStart 显式按任务／节点进入受管派发：ClaimExecution → Operation → 独立 Runner。
@@ -302,6 +306,27 @@ func InternalRunner(opts RunnerOpts) (Result, error) {
 	}
 	if opts.Once || os.Getenv("MAW_RUNNER_ONCE") == "1" {
 		out["once"] = true
+		// 测试 once 路径仍尝试接线 session（有 launch_spec 时）。
+		if rep, wired, err := maybeRunSession(opDir, opID); wired {
+			out["session_wired"] = true
+			if err != nil {
+				out["session_error"] = err.Error()
+			} else {
+				out["session_outcome"] = string(rep.Outcome)
+			}
+		}
+		return out, nil
+	}
+	// RUNNER-WIRE：若 ops 目录有 launch_spec.json，接入 session.Runner 起真子进程。
+	if rep, wired, err := maybeRunSession(opDir, opID); wired {
+		out["session_wired"] = true
+		if err != nil {
+			out["session_error"] = err.Error()
+			out["ok"] = false
+			return out, err
+		}
+		out["session_outcome"] = string(rep.Outcome)
+		out["stopped"] = true
 		return out, nil
 	}
 	// 无 GUI 驻留：只响应终止信号；中枢退出不会到这里（我们是独立进程组）。
@@ -309,6 +334,85 @@ func InternalRunner(opts RunnerOpts) (Result, error) {
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
 	<-ch
 	out["stopped"] = true
+	return out, nil
+}
+
+// launchSpecFile 是 Coordinator/系统 Agent 写入的启动规格文件名。
+const launchSpecFile = "launch_spec.json"
+
+// maybeRunSession 若存在 launch_spec.json 则用 session.Runner + passthrough Source 执行。
+func maybeRunSession(opDir, opID string) (session.Report, bool, error) {
+	specPath := filepath.Join(opDir, launchSpecFile)
+	b, err := os.ReadFile(specPath)
+	if err != nil {
+		return session.Report{}, false, nil
+	}
+	var spec model.LaunchSpec
+	if err := json.Unmarshal(b, &spec); err != nil {
+		return session.Report{}, true, err
+	}
+	metaPath := filepath.Join(opDir, "run_meta.json")
+	meta := struct {
+		RunID      string `json:"run_id"`
+		InstanceID string `json:"instance_id"`
+		Generation int    `json:"generation"`
+		ProjectID  string `json:"project_id"`
+		GlobalDB   string `json:"global_db"`
+	}{}
+	if mb, err := os.ReadFile(metaPath); err == nil {
+		_ = json.Unmarshal(mb, &meta)
+	}
+	if meta.RunID == "" {
+		meta.RunID = "run_" + strings.TrimPrefix(opID, "op_")
+		if !strings.HasPrefix(meta.RunID, "run_") {
+			meta.RunID = "run_" + opID
+		}
+	}
+	if meta.InstanceID == "" {
+		meta.InstanceID = "ti_systemagent"
+	}
+	if meta.Generation < 1 {
+		meta.Generation = 1
+	}
+	jr, err := journal.Open(filepath.Join(opDir, "journal"), journal.Options{RunID: meta.RunID, Sync: true})
+	if err != nil {
+		return session.Report{}, true, err
+	}
+	defer jr.Close()
+
+	var store session.Store = recordingNopStore{}
+	if meta.GlobalDB != "" {
+		dbStore, err := db.OpenStore(meta.GlobalDB)
+		if err == nil {
+			store = &dbstore.Store{DB: dbStore, ProjectID: meta.ProjectID}
+		}
+	}
+	r, err := session.New(store, dbstore.PassthroughSource{}, jr)
+	if err != nil {
+		return session.Report{}, true, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rep, err := r.Run(ctx, session.Config{
+		Instance:   model.InstanceID(meta.InstanceID),
+		RunID:      model.RunID(meta.RunID),
+		Generation: model.Generation(meta.Generation),
+		Spec:       spec,
+		Protocol:   spec.ExpectedProtocol,
+		Heartbeat:  2 * time.Second,
+	})
+	return rep, true, err
+}
+
+// recordingNopStore 在无全局库时吞掉 Apply（仍允许进程跑完）。
+type recordingNopStore struct{}
+
+func (recordingNopStore) Apply(ctx context.Context, req ports.StoreRequest) (ports.StoreResult, error) {
+	_ = ctx
+	out := ports.StoreResult{}
+	for _, op := range req.Ops {
+		out.Applied = append(out.Applied, op.Kind)
+	}
 	return out, nil
 }
 

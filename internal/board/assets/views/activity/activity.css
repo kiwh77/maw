@@ -5,7 +5,8 @@
   font-size: var(--font-body);
   line-height: var(--line-body);
   color: var(--text);
-  padding: 0 var(--space-page) var(--space-block);
+  /* 左右／底部留白由外层 .vnext + .content 提供，视图内不再叠加一层。 */
+  padding: 0;
 }
 
 .activity__head h1 {
@@ -152,10 +153,7 @@
 }
 
 @media (max-width: 700px) {
-  .activity {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
+  /* 窄屏也不在视图内补内边距：外层 .content 已经按断点收窄（28px → 16px）。 */
   .activity__toolbar {
     flex-direction: column;
     align-items: stretch;

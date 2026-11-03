@@ -59,6 +59,10 @@ maw next
 
 # 旁路（未 next）：注册后及时注入中枢，见 maw-status-attach
 maw status report -m "实现中" --phase code --pct 40 --status working
+
+# 中枢维护：工程登记清单 / 移除（有未完成任务或在线 Agent 时默认拒绝）
+maw project list
+maw project rm <id|名称>        # --force 连现场一起清
 ```
 
 **铁律**
@@ -76,6 +80,7 @@ maw status report -m "实现中" --phase code --pct 40 --status working
 - 人工领取保留 **实例／版本／来源**（`manual_next`）；令牌不得进入提示词、仓库或事件
 - 旁路（`maw status report`）只上报**自己的**观察，**不得夺取 managed Run**
 - 受管路径：`maw managed start --task … --node …`（默认关闭自动派发）；协议落后 → `maw init --upgrade`
+- 系统 Agent（默认关）：`[system_agent] enabled=true` 后，`maw block` 会入队自愈作业；`maw system watch|trigger|run|status`；拆题 `trigger --kind task_split`；运维白名单 `ops_run`
 
 ## 相关文件
 

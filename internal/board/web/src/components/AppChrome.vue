@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useBoard } from '../stores/board'
 import ViewToggle from './ViewToggle.vue'
 
@@ -61,6 +61,24 @@ function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => board.patchFilters({ search: search.value }), 180)
 }
+
+/** 斜杠聚焦搜索：输入态不劫持，修饰键组合放行（避免和浏览器快捷键打架）。 */
+function onShortcut(event: KeyboardEvent) {
+  if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return
+  // 模态抽屉打开时不抢焦点：那会把焦点从对话框里拽走。
+  if (document.querySelector('#drawer.open')) return
+  const el = event.target as HTMLElement | null
+  const tag = (el?.tagName || '').toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable) return
+  const input = document.getElementById('task-search') as HTMLInputElement | null
+  if (!input) return
+  event.preventDefault()
+  input.focus()
+  input.select()
+}
+
+onMounted(() => window.addEventListener('keydown', onShortcut))
+onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
 </script>
 
 <template>

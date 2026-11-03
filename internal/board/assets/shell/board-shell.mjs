@@ -23,6 +23,8 @@ import {
   createRegistry,
   resolveView,
   groupLabelKey,
+  navLabelKey,
+  SIDEBAR_PINNED_IDS,
   DEFAULT_VIEW,
   LEGACY_CONTAINERS,
   LEGACY_TOGGLES,
@@ -471,6 +473,18 @@ export function createShell(options = {}) {
     return panel;
   }
 
+  /** 单个导航按钮；置顶项多一个类名，仍复用同一套点击协议（data-view）。 */
+  function navButton(def) {
+    const active = def.id === state.route.view;
+    const pinned = SIDEBAR_PINNED_IDS.indexOf(def.id) >= 0;
+    return '<button type="button" class="nav-item' + (pinned ? " nav-item--pinned" : "") +
+      (active ? " active" : "") + '"' +
+      ' data-view="' + esc(def.id) + '"' +
+      (active ? ' aria-current="page"' : "") + ">" +
+      '<span class="symbol" aria-hidden="true">' + esc(def.symbol) + "</span>" +
+      "<span>" + esc(t(navLabelKey(def))) + "</span></button>";
+  }
+
   function renderNav() {
     const nav = ensureNav();
     if (!nav) return;
@@ -478,17 +492,12 @@ export function createShell(options = {}) {
     if (label) label.textContent = t("nav.workbench");
     nav.classList.add("vnext-nav");
     nav.setAttribute("aria-label", t("aria.workbench"));
-    nav.innerHTML = registry.sidebarNavModel().map(group =>
-      '<div class="section-label">' + esc(t(group.labelKey)) + "</div>" +
-      group.items.map(def => {
-        const active = def.id === state.route.view;
-        return '<button type="button" class="nav-item' + (active ? " active" : "") + '"' +
-          ' data-view="' + esc(def.id) + '"' +
-          (active ? ' aria-current="page"' : "") + ">" +
-          '<span class="symbol" aria-hidden="true">' + esc(def.symbol) + "</span>" +
-          "<span>" + esc(t(def.titleKey)) + "</span></button>";
-      }).join("")
-    ).join("");
+    // 置顶项先渲染、不带分组标题：工作台=无 view 参数的默认页，任何时候都能一键回去。
+    nav.innerHTML = registry.sidebarPinned().map(navButton).join("") +
+      registry.sidebarNavModel().map(group =>
+        '<div class="section-label">' + esc(t(group.labelKey)) + "</div>" +
+        group.items.map(navButton).join("")
+      ).join("");
   }
 
   function updateChrome(def) {

@@ -331,6 +331,16 @@ test('VN-704 注册表同时登记 legacy 与 vnext 视图且分组稳定', asyn
   const groups = views.navModel();
   assert.deepEqual(groups.map(group => group.id), ['flow', 'control', 'review', 'settings']);
   assert.deepEqual(groups[1].items.map(def => def.id), ['nodes', 'tasks', 'runs', 'deliveries']);
+
+  // 置顶工作台：唯一进侧栏的 flow 项，菜单名单独给（nav.workbench），不占用视图标题。
+  assert.deepEqual(views.sidebarPinned().map(def => def.id), ['board']);
+  assert.equal(views.sidebarPinned()[0].navKey, 'nav.workbench');
+  assert.equal(registry.navLabelKey(views.sidebarPinned()[0]), 'nav.workbench');
+  assert.equal(registry.navLabelKey(views.get('nodes')), 'view.nodes');
+  const sidebarIds = views.sidebarNavModel().flatMap(group => group.items.map(def => def.id));
+  assert.equal(sidebarIds.includes('board'), false, '置顶项不再重复出现在分组里');
+  assert.equal(sidebarIds.includes('factory'), false);
+  assert.equal(sidebarIds.length, 10);
 });
 
 test('VN-704 路由保留旧工程锚点并让 vnext 视图可往返', async () => {
@@ -472,7 +482,9 @@ test('VN-705 回顾／统计／设置登记为独立分组，与执行视图共�
 
   // 每个视图的四组语言键都必须存在，且中英都有；缺一版等于没做完。
   views.all.forEach(def => {
-    [def.titleKey, def.headingKey, def.descKey, def.eyebrowKey].forEach(key => {
+    const keys = [def.titleKey, def.headingKey, def.descKey, def.eyebrowKey];
+    if (def.navKey) keys.push(def.navKey);
+    keys.forEach(key => {
       assert.notEqual(i18n.translate(key, 'zh'), key, 'missing zh: ' + key);
       assert.notEqual(i18n.translate(key, 'en'), key, 'missing en: ' + key);
     });

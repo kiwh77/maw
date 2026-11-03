@@ -12,6 +12,11 @@
   margin-top: 14px;
 }
 
+/* 置顶项：工作台＝无 view 参数的默认页，排在所有分组之前且不带分组标题。 */
+.vnext-nav .nav-item--pinned {
+  margin-bottom: 6px;
+}
+
 .vnext-nav .nav-item {
   font: 12px/1.4 var(--sans);
 }
@@ -35,7 +40,8 @@
 /* ---------- 视图容器 ---------- */
 
 .vnext {
-  padding: 4px 2px 32px;
+  /* 内容留白由外层 .content 统一给；视图容器再加一层会让每页左右各多缩进一次。 */
+  padding: 0;
   min-width: 0;
   animation: surface-enter var(--dur-enter, 180ms) var(--ease, ease-out) both;
 }
@@ -202,17 +208,7 @@
 
 /* ---------- 窄屏：导航保持可用，不产生横向溢出 ---------- */
 
-@media (max-width: 1100px) {
-  .vnext {
-    padding-bottom: 24px;
-  }
-}
-
 @media (max-width: 700px) {
-  .vnext {
-    padding-bottom: 18px;
-  }
-
   .vnext h1 {
     font-size: 18px;
   }

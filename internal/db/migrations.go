@@ -351,7 +351,42 @@ var migrations = []Migration{
 	{Version: 6, Name: "run_and_operations", SQL: runtimeDDL},
 	{Version: 7, Name: "delivery_manifests", SQL: deliveryDDL},
 	{Version: 8, Name: "source_usage_projection", SQL: observabilityDDL},
+	{Version: 9, Name: "system_agent_jobs", SQL: systemAgentDDL},
 }
+
+// systemAgentDDL 是 v9：系统 Agent 任务队列（阻塞自愈 / 拆题 / 运维）。
+//
+// 事件游标复用 projection_state（projection="system_agent.events"），不另建游标表。
+const systemAgentDDL = `
+CREATE TABLE IF NOT EXISTS system_jobs (
+    job_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    trigger_event_id INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    decision_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    locked_by TEXT NOT NULL DEFAULT '',
+    locked_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    CHECK (kind IN ('unblock_assist', 'task_split', 'ops_run')),
+    CHECK (status IN ('queued', 'running', 'done', 'failed', 'escalated', 'cancelled')),
+    CHECK (attempts >= 0),
+    CHECK (max_attempts >= 1)
+);
+CREATE INDEX IF NOT EXISTS system_jobs_status ON system_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS system_jobs_project ON system_jobs(project_id, status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS system_jobs_dedupe
+    ON system_jobs(project_id, kind, task_id, trigger_event_id)
+    WHERE trigger_event_id > 0;
+`
 
 // observabilityDDL 是 v8：来源会话／轮次、用量、投影水位与通知去重身份。
 //

@@ -50,6 +50,29 @@ type RouteLike = { project?: string; agent?: string; status?: string }
 
 type JsonFail = { unavailable: true; status: number; unauthenticated?: boolean }
 
+/** 写操作结果：成功也只认 HTTP 2xx + ok:true，不做乐观更新。 */
+export type RemovalOutcome = {
+  ok: boolean
+  status: number
+  code?: string
+  message?: string
+  unauthenticated?: boolean
+}
+
+/** 会话写请求的双提交 Cookie（契约 §7.1）。 */
+const CSRF_COOKIE = 'maw_csrf'
+
+function readCookie(win: Window | null, name: string): string {
+  const raw = win?.document?.cookie || ''
+  if (!raw) return ''
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=')
+    if (i < 0) continue
+    if (part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim())
+  }
+  return ''
+}
+
 function isControlResource(kind: string): kind is ControlResource {
   return (CONTROL_RESOURCES as readonly string[]).includes(kind)
 }
@@ -204,6 +227,53 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
       const p = payload as { auto_execution?: unknown }
       return { ...p, policy: p.auto_execution || null }
     },
+    /**
+     * 移除工程登记（DELETE /api/v1/projects/{id}）。
+     *
+     * 返回结构而不是抛异常：界面要按 code 分辨「现场还在」与「会话过期」，
+     * 这两种都不能被渲染成同一句「删除了」。
+     */
+    async removeProject(projectId: string, opts: { force?: boolean } = {}): Promise<RemovalOutcome> {
+      const id = String(projectId || '').trim()
+      if (!id) return { ok: false, status: 0, code: 'invalid_project_id' }
+      if (!doFetch) return { ok: false, status: 0, code: 'network_error' }
+
+      const authed = await ensureSession()
+      if (!authed) return { ok: false, status: 401, code: 'unauthenticated', unauthenticated: true }
+      const csrf = readCookie(win, CSRF_COOKIE)
+      if (!csrf) return { ok: false, status: 403, code: 'csrf_failed' }
+
+      const url = '/api/v1/projects/' + encodeURIComponent(id) + (opts.force ? '?force=1' : '')
+      let res: Response
+      try {
+        res = await doFetch(url, {
+          method: 'DELETE',
+          headers: { Accept: 'application/json', 'X-CSRF-Token': csrf },
+          credentials: 'same-origin',
+        })
+      } catch {
+        return { ok: false, status: 0, code: 'network_error' }
+      }
+
+      let body: Record<string, unknown> = {}
+      try {
+        body = (await res.json()) as Record<string, unknown>
+      } catch {
+        body = {}
+      }
+      if (!res.ok) {
+        const detail = (body?.error || null) as { code?: string; message?: string } | null
+        return {
+          ok: false,
+          status: res.status,
+          code: detail?.code,
+          message: detail?.message,
+          unauthenticated: res.status === 401,
+        }
+      }
+      return { ok: true, status: res.status }
+    },
+
     async capabilities(projectId: string) {
       const url = capabilitiesPath(projectId)
       if (!url) return null

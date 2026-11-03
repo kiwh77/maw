@@ -17,7 +17,8 @@
   font-family: var(--sans, sans-serif);
   color: var(--muted);
   text-align: left;
-  padding: 0 var(--space-block) 8px 0;
+  /* 表头与单元格共用同一水平内边距：只给 th 加会让表头文字和列内容错位。 */
+  padding: 8px var(--space-block, 16px);
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -27,7 +28,7 @@
   line-height: var(--line-body);
   color: var(--text);
   height: var(--row-height);
-  padding: 0 var(--space-block) 0 0;
+  padding: 0 var(--space-block, 16px);
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }

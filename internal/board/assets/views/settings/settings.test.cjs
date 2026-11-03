@@ -40,7 +40,7 @@ test("VN-725 自动模式默认关闭，且不与上限／容量／参考值混�
   assert.equal(policy.autoEnabled, false);
   assert.equal(view.autoModeOf(policy, { platformSupported: true, configEnabled: false }), "off");
 
-  const html = view.renderSettings(state({ policy }), { lang: "zh" });
+  const html = view.renderSettings(state({ policy, platformSupported: true }), { lang: "zh" });
   // 四个标签各自出现且文案不同
   for (const label of ["自动模式", "计算上限", "节点容量", "max_parallel 参考值"]) {
     assert.ok(html.includes(label), "缺少标签：" + label);
@@ -186,4 +186,45 @@ test("VN-725 输入值经过转义，不把字段当成 HTML", async () => {
   const html = view.renderSettings(state({ policy, draft: { limit: '"><script>x</script>' } }), { lang: "zh" });
   assert.ok(!html.includes("<script>x</script>"));
   assert.ok(html.includes("&quot;&gt;&lt;script&gt;"));
+});
+
+// ---------------------------------------------------------------------------
+// E2E-101：平台支持缺失、只读表单、服务端值回填。
+// 这三条原先都会失败：缺失被当成支持、表单可编辑但存不下去、上限显示破折号。
+// ---------------------------------------------------------------------------
+
+test("E2E-101 平台支持未声明时是未就绪，不是关闭", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  // undefined 表示服务端没说，不能猜成「支持」。
+  assert.equal(view.autoModeOf(policy, {}), "not_ready");
+  assert.equal(view.autoModeOf(policy, { platformSupported: undefined }), "not_ready");
+  assert.equal(view.autoModeOf({ ...policy, autoEnabled: true }, {}), "not_ready");
+
+  const html = view.renderSettings(state({ policy }), { lang: "zh" });
+  assert.ok(html.includes("未就绪"), "缺失平台支持时应显示未就绪");
+  assert.ok(html.includes("受管执行只在 macOS 上实测过"), "未就绪要给原因");
+});
+
+test("E2E-101 没有写入口时表单只读并说明原因", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const html = view.renderSettings(state({ policy }), { lang: "zh" });
+
+  assert.ok(html.includes('data-editable="0"'), "默认应为只读");
+  assert.ok(/type="submit"[^>]*disabled/.test(html), "只读时保存按钮必须禁用");
+  assert.ok(html.includes("只读"), "要有只读标记");
+  assert.ok(html.includes("中枢当前没有策略写入口"), "要说明为什么不能保存");
+  assert.ok(html.includes('onsubmit="return false"'), "表单不得触发原生提交（否则会整页跳走）");
+  // 只读不等于不可读：值仍要出现在输入框里。
+  assert.match(html, /id="settings-limit"[^>]*value="1"/);
+});
+
+test("E2E-101 显式可写时才恢复可编辑", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const html = view.renderSettings(state({ policy, editable: true }), { lang: "zh" });
+  assert.ok(html.includes('data-editable="1"'));
+  assert.ok(!/type="submit"[^>]*disabled/.test(html), "可写时保存按钮应可用");
+  assert.ok(!html.includes("中枢当前没有策略写入口"));
 });

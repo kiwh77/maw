@@ -95,6 +95,31 @@ type Probes interface {
 	Accept(ctx context.Context, req ProbeRequest) (ProbeResult, error)
 }
 
+// ProjectRemovalRequest 是从本机中枢移除一个工程登记。
+//
+// Force 是显式的「连现场一起清掉」：默认实现必须在有未完成任务或在线 Agent
+// 时返回 ErrConflict，而不是静默清空。
+type ProjectRemovalRequest struct {
+	ProjectID string
+	Force     bool
+	Actor     string
+}
+
+// ProjectRemovalResult 是移除结果：删了什么、留了什么都要能被界面读到。
+type ProjectRemovalResult struct {
+	ProjectID   string
+	ProjectName string
+	ProjectPath string
+	Summary     string
+	Removed     map[string]int64
+	Retained    map[string]int64
+}
+
+// Projects 是工程登记管理用例。
+type Projects interface {
+	Remove(ctx context.Context, req ProjectRemovalRequest) (ProjectRemovalResult, error)
+}
+
 // 用例错误：HTTP 层按契约映射状态码。
 type (
 	ErrConflict struct {

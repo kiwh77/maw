@@ -18,8 +18,12 @@ import (
 // Snapshot 看板数据（供 HTML 轮询 / API）
 type Snapshot struct {
 	// EventID also invalidates open task logs when only an event was appended.
-	EventID       int64          `json:"-"`
-	UpdatedAt     string         `json:"updated_at"`
+	EventID int64 `json:"-"`
+	// UpdatedAt 是**数据水位**（最近事件发生时间），不是渲染时刻。
+	// 渲染时刻另见 GeneratedAt，两者混用会让「数据停更」看起来一直在更新。
+	UpdatedAt string `json:"updated_at"`
+	// GeneratedAt 是本次快照生成时间；只用于诊断与缓存，不当作数据新鲜度。
+	GeneratedAt   string         `json:"generated_at"`
 	MaxParallel   int            `json:"max_parallel"`
 	Total         int            `json:"total"`
 	Done          int            `json:"done"`
@@ -98,8 +102,20 @@ func BuildSnapshot(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapsh
 	if agents == nil {
 		agents = []*db.Agent{}
 	}
+	// 空集合一律编码成 []：null 会让客户端每处都要兜底，也会让「查过没有」与「没查」
+	// 在契约层分辨不出来。
+	if tasks == nil {
+		tasks = []*db.Task{}
+	}
+	if risks == nil {
+		risks = []string{}
+	}
+	now := time.Now()
 	return Snapshot{
-		UpdatedAt:   time.Now().Local().Format("2006-01-02 15:04:05"),
+		// 数据水位由调用方差回（见 loadBoardSnapshot）；这里先给渲染时刻，保证只拿
+		// BuildSnapshot 的调用方（终端渲染、测试夹具）仍有一个可读值。
+		UpdatedAt:   now.Local().Format("2006-01-02 15:04:05"),
+		GeneratedAt: now.Local().Format("2006-01-02 15:04:05"),
 		MaxParallel: maxParallel,
 		Total:       total,
 		Done:        done,

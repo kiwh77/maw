@@ -3,7 +3,11 @@ import { computed } from 'vue'
 import { useBoard } from '../stores/board'
 
 const board = useBoard()
+/** 置顶入口：工作台＝无 view 参数的默认页（看板），切走后从这里一键回来。 */
+const pinnedNav = computed(() => board.registry.sidebarPinned())
 const navGroups = computed(() => board.registry.sidebarNavModel())
+const label = (item: Record<string, unknown>) =>
+  board.t(String(item.navKey || item.titleKey || ''))
 const agents = computed(() => {
   const list = board.state.snapshot?.agents || []
   return list.filter((a) => {
@@ -28,6 +32,19 @@ function selectView(id: string) {
       </div>
     </div>
     <nav class="project-nav vnext-nav" id="vnext-nav" aria-label="工作台视图">
+      <button
+        v-for="item in pinnedNav"
+        :key="item.id"
+        type="button"
+        class="nav-item nav-item--pinned"
+        :class="{ active: viewId === item.id }"
+        :data-view="item.id"
+        :aria-current="viewId === item.id ? 'page' : undefined"
+        @click="selectView(item.id)"
+      >
+        <span class="symbol" aria-hidden="true">{{ item.symbol }}</span>
+        <span>{{ label(item) }}</span>
+      </button>
       <template v-for="group in navGroups" :key="group.id">
         <div class="section-label">{{ board.t(group.labelKey) }}</div>
         <button
@@ -41,7 +58,7 @@ function selectView(id: string) {
           @click="selectView(item.id)"
         >
           <span class="symbol" aria-hidden="true">{{ item.symbol }}</span>
-          <span>{{ board.t(item.titleKey) }}</span>
+          <span>{{ label(item) }}</span>
         </button>
       </template>
     </nav>

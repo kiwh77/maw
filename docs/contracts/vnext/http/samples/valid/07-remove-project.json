@@ -1,0 +1,111 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "移除工程登记：成功回删除与保留计数",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/projects/716c30878ba1b95f",
+        "headers": {
+          "Authorization": "Bearer maw_pat_5f7c2a9e1b",
+          "Host": "127.0.0.1:7777"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "ok": true,
+          "project_id": "716c30878ba1b95f",
+          "project_name": "maw-i18n-repo",
+          "project_path": "/private/tmp/maw-i18n-repo",
+          "summary": "移除 maw-i18n-repo：没有关联数据；保留事件 0 条、冻结版本 0 个",
+          "removed": {
+            "tasks": 0,
+            "agents": 0,
+            "projects": 1
+          },
+          "retained": {
+            "events": 0,
+            "task_versions": 0
+          }
+        }
+      },
+      "expect": {
+        "valid": true,
+        "codes": [],
+        "expect_error": []
+      }
+    },
+    {
+      "name": "现场仍有活态占位时拒绝移除",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/projects/716c30878ba1b95f",
+        "headers": {
+          "Authorization": "Bearer maw_pat_5f7c2a9e1b",
+          "Host": "127.0.0.1:7777"
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "ok": false,
+          "error": {
+            "code": "project_busy",
+            "message": "工程仍有未完成的任务或在线 Agent，移除被拒绝",
+            "retryable": false,
+            "details": {
+              "tasks": [
+                { "id": "VN-002", "status": "in_progress", "owner": "cursor-demo-1" }
+              ],
+              "agents": [
+                { "id": "cursor-demo-1", "status": "working", "last_seen": "2026-11-02T07:58:00Z" }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "valid": true,
+        "codes": [],
+        "expect_error": []
+      }
+    },
+    {
+      "name": "工程 id 形态不对时不进用例",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v1/projects/not-a-project-id",
+        "headers": {
+          "Authorization": "Bearer maw_pat_5f7c2a9e1b",
+          "Host": "127.0.0.1:7777"
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "ok": false,
+          "error": {
+            "code": "invalid_project_id",
+            "message": "project_id 必须是 16 位十六进制",
+            "retryable": false
+          }
+        }
+      },
+      "expect": {
+        "valid": true,
+        "codes": [],
+        "expect_error": []
+      }
+    }
+  ]
+}

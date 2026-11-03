@@ -19,6 +19,7 @@
  * @property {string} group    导航分组（见 VIEW_GROUPS）
  * @property {boolean} legacy  是否由 legacy 应用渲染
  * @property {string} titleKey 全局语言簿中的标题键
+ * @property {string} [navKey] 侧栏菜单名键；缺省回退 titleKey
  * @property {string} headingKey 页面主标题键（vnext 用）
  * @property {string} descKey  页面说明键（vnext 用）
  * @property {string} eyebrowKey 页面眉标键（vnext 用）
@@ -33,8 +34,19 @@ export const DEFAULT_VIEW = "board";
 /** 无工程时的默认视图（左栏无 flow，落到 control）。 */
 export const DEFAULT_VIEW_NO_PROJECT = "nodes";
 
-/** 侧栏不展示的分组（看板/工坊/拓扑改由选中工程后的 toolbar 进入）。 */
+/** 侧栏不展示的分组：flow 只留置顶的工作台，工坊/拓扑改由选中工程后的 toolbar 进入。 */
 export const SIDEBAR_HIDDEN_GROUPS = Object.freeze(["flow"]);
+
+/**
+ * 侧栏置顶项：不归属任何分组，直接排在导航最前，不带分组标题。
+ *
+ * 看板既是「无 `view` 参数」时的默认页，又因为整个 flow 组被隐藏而没有入口——
+ * 一旦从侧栏切到别的视图就回不去（`view-toggle` 在 vnext 视图下也是隐藏的）。
+ * 这里把它单独提成置顶菜单，菜单名用 `nav.workbench`（工作台），指向的仍是
+ * board 视图本身：`DEFAULT_VIEW` 不参与查询串序列化，所以点它得到的地址就是
+ * 无 `view` 参数的默认页，而不是 `?view=board`。
+ */
+export const SIDEBAR_PINNED_IDS = Object.freeze(["board"]);
 
 /**
  * 导航分组。
@@ -52,7 +64,7 @@ export const VIEW_GROUPS = Object.freeze([
 
 /** @type {ReadonlyArray<ViewDef>} */
 export const VIEW_DEFS = Object.freeze([
-  Object.freeze({ id: "board", group: "flow", legacy: true, titleKey: "view.board", headingKey: "heading.board", descKey: "desc.board", eyebrowKey: "eyebrow.board", symbol: "▦", dataKind: "", requiresProject: false }),
+  Object.freeze({ id: "board", group: "flow", legacy: true, titleKey: "view.board", navKey: "nav.workbench", headingKey: "heading.board", descKey: "desc.board", eyebrowKey: "eyebrow.board", symbol: "▦", dataKind: "", requiresProject: false }),
   Object.freeze({ id: "factory", group: "flow", legacy: true, titleKey: "view.factory", headingKey: "heading.factory", descKey: "desc.factory", eyebrowKey: "eyebrow.factory", symbol: "⚒", dataKind: "", requiresProject: false }),
   Object.freeze({ id: "topo", group: "flow", legacy: true, titleKey: "view.topo", headingKey: "heading.topo", descKey: "desc.topo", eyebrowKey: "eyebrow.topo", symbol: "⤳", dataKind: "", requiresProject: true }),
   Object.freeze({ id: "nodes", group: "control", legacy: false, titleKey: "view.nodes", headingKey: "heading.nodes", descKey: "desc.nodes", eyebrowKey: "eyebrow.nodes", symbol: "▤", dataKind: "nodes", requiresProject: false }),
@@ -80,6 +92,15 @@ export const LEGACY_TOGGLES = Object.freeze({ board: "view-board", topo: "view-t
 export function groupLabelKey(groupId) {
   const found = VIEW_GROUPS.find(group => group.id === groupId);
   return found ? found.labelKey : "";
+}
+
+/**
+ * 导航标签键：置顶项可以另起一个菜单名（如「工作台」），否则用视图标题。
+ * 导航、语言切换与 `navItems` 都走这里，避免三处各写一遍 `navKey || titleKey`。
+ */
+export function navLabelKey(def) {
+  if (!def) return "";
+  return def.navKey || def.titleKey;
 }
 
 /** 构造注册表；允许测试传入裁剪后的定义集。 */
@@ -116,9 +137,19 @@ export function createRegistry(defs = VIEW_DEFS) {
       });
       return groups;
     },
-    /** 侧栏导航：去掉 flow（board/factory/topo）。 */
+    /** 侧栏置顶项：按定义顺序，渲染时不套分组标题。 */
+    sidebarPinned() {
+      return list.filter(def => SIDEBAR_PINNED_IDS.indexOf(def.id) >= 0);
+    },
+    /** 侧栏导航：只留可见分组，且把置顶项从分组里摘掉，避免同一个入口出现两次。 */
     sidebarNavModel() {
-      return this.navModel().filter(group => SIDEBAR_HIDDEN_GROUPS.indexOf(group.id) < 0);
+      return this.navModel()
+        .filter(group => SIDEBAR_HIDDEN_GROUPS.indexOf(group.id) < 0)
+        .map(group => ({
+          ...group,
+          items: group.items.filter(def => SIDEBAR_PINNED_IDS.indexOf(def.id) < 0),
+        }))
+        .filter(group => group.items.length > 0);
     },
   };
 }
@@ -143,7 +174,7 @@ export function navItems(registry, lang) {
     group: def.group,
     legacy: def.legacy,
     symbol: def.symbol,
-    label: def.titleKey,
+    label: navLabelKey(def),
     lang,
   }));
 }

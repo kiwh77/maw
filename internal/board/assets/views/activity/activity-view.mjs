@@ -49,6 +49,8 @@ const I18N = {
     "activity.unauthenticated.hint": "使用本机会话或令牌后重试。",
     "activity.unknown": "部分小时缺测。",
     "activity.unknown.hint": "投影水位落后或完整性未知；斜线格是缺测，不是零活动。",
+    "no.project": "还没有选择工程。",
+    "no.project.hint": "全天活动按工程物化：先在顶部选择工程，再看这一天的热图。",
     "metric.coverage": "执行覆盖",
     "metric.activity": "事件活跃度",
     "unit.min": "分钟",
@@ -88,6 +90,8 @@ const I18N = {
     "activity.unauthenticated.hint": "Use a local session or token, then retry.",
     "activity.unknown": "Some hours are unmeasured.",
     "activity.unknown.hint": "Projection lags or completeness is unknown; hatched cells are missing, not zero.",
+    "no.project": "No project selected.",
+    "no.project.hint": "Day activity is materialised per project: pick one at the top first.",
     "metric.coverage": "Execution coverage",
     "metric.activity": "Event activity",
     "unit.min": "minutes",
@@ -408,6 +412,11 @@ export function renderActivity(state = {}, options = {}) {
   if (status === "expired") {
     return '<div class="activity" data-status="expired">' +
       emptyState(lang, ["activity.expired", "activity.expired.hint"]) + "</div>";
+  }
+  // 未选工程不是「这一天没活动」：热图按工程物化，必须先选工程。
+  if (status === "no_project") {
+    return '<div class="activity" data-status="no_project">' +
+      emptyState(lang, ["no.project", "no.project.hint"]) + "</div>";
   }
 
   const day = state.day || new Date().toISOString().slice(0, 10);

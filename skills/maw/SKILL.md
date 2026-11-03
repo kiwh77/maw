@@ -48,6 +48,10 @@ maw progress -m "milestone"
 maw submit
 maw merge --yes
 maw next
+
+# hub bookkeeping: list / remove project registrations (refuses while tasks or Agents are live)
+maw project list
+maw project rm <id|name>        # --force clears the live work too
 ```
 
 **Hard rules**
@@ -60,3 +64,4 @@ maw next
 - Manual claim keeps **instance / version / source** (`manual_next`); tokens never enter prompts, the repo, or events
 - Bypass (`maw status report`) reports **own** observations only — never seize a **managed Run**
 - Managed path: `maw managed start --task … --node …` (auto off by default); stale protocol → `maw init --upgrade`
+- System agent (off by default): `[system_agent] enabled=true`, then `maw system watch|trigger|run|status`; `task_split` / `ops_run` on the same bus

@@ -5,11 +5,13 @@ import { useBoard } from '../stores/board'
 const board = useBoard()
 
 const LANES = [
-  { id: 'ready', label: 'Ready', statuses: ['ready'], symbol: '▷', empty: '—' },
+  // 泳道必须覆盖全部状态：backlog 在 Queued、cancelled 在 Done，
+  // 否则这些题在「全部工程」视图里会凭空消失（总数对不上卡片数）。
+  { id: 'queued', label: 'Queued', statuses: ['backlog', 'ready'], symbol: '▷', empty: '—' },
   { id: 'active', label: 'Active', statuses: ['claimed', 'in_progress', 'self_check'], symbol: '◉', empty: '—' },
   { id: 'review', label: 'Review', statuses: ['in_review', 'merging'], symbol: '◎', empty: '—' },
   { id: 'attention', label: 'Attention', statuses: ['blocked', 'conflict'], symbol: '!', empty: '—' },
-  { id: 'done', label: 'Done', statuses: ['done'], symbol: '✓', empty: '—' },
+  { id: 'done', label: 'Done', statuses: ['done', 'cancelled'], symbol: '✓', empty: '—' },
 ]
 
 const tasks = computed(() => {
@@ -23,12 +25,29 @@ const tasks = computed(() => {
   )
 })
 
-const lanes = computed(() =>
-  LANES.map((lane) => ({
+/** 契约外的状态不丢：给它们单独一列，而不是静默从看板上消失。 */
+const extraLane = computed(() => {
+  const known = new Set(LANES.flatMap((lane) => lane.statuses))
+  const unknown = [...new Set(tasks.value.map((t) => String(t.status || '')).filter((s) => s && !known.has(s)))].sort()
+  if (!unknown.length) return null
+  return {
+    id: 'other',
+    label: 'Other',
+    statuses: unknown,
+    symbol: '?',
+    empty: '—',
+    items: tasks.value.filter((t) => unknown.includes(String(t.status || ''))),
+  }
+})
+
+const lanes = computed(() => {
+  const base = LANES.map((lane) => ({
     ...lane,
     items: tasks.value.filter((t) => lane.statuses.includes(String(t.status))),
-  })).filter((lane) => lane.id !== 'attention' || lane.items.length > 0),
-)
+  }))
+  if (extraLane.value) base.push(extraLane.value)
+  return base.filter((lane) => lane.id !== 'attention' || lane.items.length > 0)
+})
 
 const drawer = computed(() => board.state.drawer)
 

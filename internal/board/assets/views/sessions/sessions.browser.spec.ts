@@ -161,4 +161,15 @@ test.describe("VN-743 会话轮次与来源明细", () => {
     await mount(page, view.renderSessions(state({ completeness: "partial" }), { lang: "zh" }));
     await expect(page.locator(".sessions")).toHaveAttribute("data-status", "unknown");
   });
+  // 内容留白由外层 .vnext / .content 统一给：视图根元素自己再加一层，
+  // 页面左右就会缩进两次、底部也会多一段空白。
+  test("VN-743 视图根元素不再自带内边距", async ({ page }) => {
+    const view = await loadView();
+    await mount(page, view.renderSessions(state(), { lang: "zh", selectedId: "sess-1" }));
+    const padding = await page.locator(".sessions").evaluate(el => {
+      const cs = getComputedStyle(el);
+      return [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft];
+    });
+    expect(padding).toEqual(["0px", "0px", "0px", "0px"]);
+  });
 });

@@ -165,6 +165,10 @@ func TestV1RouteDispatchesObservability(t *testing.T) {
 		"/api/v1/board":             v1Read,
 		"/api/v1/projects/p1/tasks": v1Read,
 		"/api/v1/runs/run_1":        v1Read,
+		"/api/v1/projects":          v1Read,
+
+		// 工程本身（末段就是 {project_id}）走写资源；子资源仍按原规则分流。
+		"/api/v1/projects/p1": v1Resources,
 
 		"/api/v1/projects/p1/timeline":                   v1Observability,
 		"/api/v1/projects/p1/activity":                   v1Observability,
@@ -174,6 +178,9 @@ func TestV1RouteDispatchesObservability(t *testing.T) {
 		"/api/v1/projects/p1/notifications/n1/acks":      v1Observability,
 		"/api/v1/projects/p1/observability/capabilities": v1Observability,
 		"/api/v1/projects/p1/observability/stream":       v1Observability,
+
+		"/api/v1/system-jobs":                v1System,
+		"/api/v1/projects/p1/system-jobs":    v1System,
 	}
 	for path, want := range cases {
 		if got := v1Route(path); got != want {

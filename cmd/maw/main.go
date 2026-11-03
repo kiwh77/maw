@@ -77,10 +77,19 @@ func main() {
 		if ok, _ := r["ok"].(bool); ok {
 			fmt.Println(i18n.T("out.ok"))
 		}
-		for _, k := range []string{"home", "global_db", "project_id", "project_name", "worktree", "branch", "task_id", "status", "board", "html", "agent", "registered", "role", "url", "log_path", "protocol_fallback", "worktrees", "branches", "removed_worktrees", "removed_branches"} {
+		for _, k := range []string{"home", "global_db", "project_id", "project_name", "project_path", "worktree", "branch", "task_id", "status", "board", "html", "agent", "registered", "role", "url", "log_path", "protocol_fallback", "worktrees", "branches", "removed_worktrees", "removed_branches"} {
 			if v, ok := r[k]; ok {
 				fmt.Printf("%s: %v\n", k, v)
 			}
+		}
+		// 工程清单：id／名称／路径三列比 JSON 一行好读，也便于复制作参。
+		if items, ok := r["projects"].([]app.Result); ok && len(items) > 0 {
+			for _, item := range items {
+				fmt.Printf("  %v\t%v\t%v\n", item["project_id"], item["project_name"], item["project_path"])
+			}
+		}
+		if s, ok := r["summary"].(string); ok && s != "" {
+			fmt.Println(s)
 		}
 		if det, ok := r["protocol_detected"].(map[string]string); ok && len(det) > 0 {
 			fmt.Println("protocol_detected:")
@@ -346,6 +355,35 @@ func main() {
 	blockCmd.Flags().String("task", "", i18n.T("flag.task"))
 	root.AddCommand(blockCmd)
 
+	// 工程登记管理：看板「工程」页与 CLI 共用同一套移除语义。
+	projectCmd := &cobra.Command{
+		Use:   "project",
+		Short: i18n.T("cmd.project.short"),
+	}
+	projectCmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: i18n.T("cmd.project.list.short"),
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.ProjectList(cwd)) },
+	})
+	projectRmCmd := &cobra.Command{
+		Use:   "rm [id|名称]",
+		Short: i18n.T("cmd.project.rm.short"),
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			force, _ := cmd.Flags().GetBool("force")
+			agent, _ := cmd.Flags().GetString("agent")
+			printRes(app.RemoveProject(cwd, args[0], app.ProjectRemovalOptions{
+				Force:  force,
+				DryRun: dryRun,
+				Actor:  agent,
+			}))
+		},
+	}
+	projectRmCmd.Flags().Bool("force", false, i18n.T("flag.force_remove"))
+	projectRmCmd.Flags().String("agent", "", i18n.T("flag.agent"))
+	projectCmd.AddCommand(projectRmCmd)
+	root.AddCommand(projectCmd)
+
 	taskCmd := &cobra.Command{Use: "task"}
 	taskCmd.AddCommand(&cobra.Command{Use: "list", Run: func(cmd *cobra.Command, args []string) { printRes(app.TaskList(cwd)) }})
 	taskCmd.AddCommand(&cobra.Command{
@@ -392,6 +430,48 @@ func main() {
 		Run:   func(cmd *cobra.Command, args []string) { printRes(app.ManagedStatus(cwd)) },
 	})
 	root.AddCommand(managedCmd)
+
+	systemCmd := &cobra.Command{Use: "system", Short: i18n.T("cmd.system.short")}
+	systemCmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: i18n.T("cmd.system.status.short"),
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.SystemStatus(cwd)) },
+	})
+	systemTriggerCmd := &cobra.Command{
+		Use:   "trigger",
+		Short: i18n.T("cmd.system.trigger.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			kind, _ := cmd.Flags().GetString("kind")
+			task, _ := cmd.Flags().GetString("task")
+			msg, _ := cmd.Flags().GetString("message")
+			printRes(app.SystemTrigger(cwd, kind, task, msg))
+		},
+	}
+	systemTriggerCmd.Flags().String("kind", "unblock_assist", i18n.T("flag.system_kind"))
+	systemTriggerCmd.Flags().String("task", "", i18n.T("flag.task"))
+	systemTriggerCmd.Flags().StringP("message", "m", "", i18n.T("flag.message"))
+	systemCmd.AddCommand(systemTriggerCmd)
+	systemRunCmd := &cobra.Command{
+		Use:   "run",
+		Short: i18n.T("cmd.system.run.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			job, _ := cmd.Flags().GetString("job")
+			printRes(app.SystemRun(cwd, job))
+		},
+	}
+	systemRunCmd.Flags().String("job", "", i18n.T("flag.system_job"))
+	systemCmd.AddCommand(systemRunCmd)
+	systemWatchCmd := &cobra.Command{
+		Use:   "watch",
+		Short: i18n.T("cmd.system.watch.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			once, _ := cmd.Flags().GetBool("once")
+			printRes(app.SystemWatch(cwd, once))
+		},
+	}
+	systemWatchCmd.Flags().Bool("once", false, i18n.T("flag.system_once"))
+	systemCmd.AddCommand(systemWatchCmd)
+	root.AddCommand(systemCmd)
 
 	// 同一二进制的内部 Runner：参数白名单，隐藏于帮助。
 	runnerCmd := &cobra.Command{

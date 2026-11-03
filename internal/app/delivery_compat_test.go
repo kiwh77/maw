@@ -332,6 +332,43 @@ func TestManualCompatStrategyCompletesWithoutGates(t *testing.T) {
 	}
 }
 
+// TestDeliverableFilesSkipsDeleted 覆盖「候选提交删了文件」：被删的路径取不到内容，
+// 不能声明成 file 产物（否则收集器核成 exists=false 报 E320，整次交付被拒）。
+func TestDeliverableFilesSkipsDeleted(t *testing.T) {
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-b", "main")
+	git("config", "user.email", "t@t")
+	git("config", "user.name", "t")
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("add", ".")
+	git("commit", "-m", "init")
+	if err := os.Remove(filepath.Join(repo, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-m", "删除 a.txt")
+	head := git("rev-parse", "HEAD")
+
+	got := deliverableFiles(repo, head, []string{"a.txt", "b.txt", "  ", ""})
+	if len(got) != 1 || got[0] != "b.txt" {
+		t.Fatalf("只应保留仍能从提交里取回的文件，实际 %v", got)
+	}
+}
+
 func writeAndCommit(t *testing.T, wt, rel, content, msg string) {
 	t.Helper()
 	path := filepath.Join(wt, rel)

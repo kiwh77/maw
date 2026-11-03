@@ -7,6 +7,8 @@ import { disposeTopology, renderTopology, type TopologyHandle, type TopoTask } f
 const board = useBoard()
 const root = ref<HTMLElement | null>(null)
 let handle: TopologyHandle | null = null
+/** 换工程／语言时才自动适应画布；同工程 snapshot 刷新不得冲掉用户缩放。 */
+let fitKey = ''
 
 const STATUS_LABELS: Record<string, Record<string, string>> = {
   zh: {
@@ -52,10 +54,11 @@ function asTasks(raw: Array<Record<string, unknown>>): TopoTask[] {
 
 function paint() {
   if (!root.value) return
-  disposeTopology(root.value)
-  handle = null
   const zh = board.state.lang === 'zh'
   if (!board.state.route.project) {
+    disposeTopology(root.value)
+    handle = null
+    fitKey = ''
     root.value.innerHTML = zh
       ? '<p class="empty">依赖拓扑需要先选择工程</p>'
       : '<p class="empty">Select a project to view topology</p>'
@@ -63,6 +66,9 @@ function paint() {
   }
   const tasks = asTasks((board.state.snapshot?.tasks || []) as Array<Record<string, unknown>>)
   if (!tasks.length) {
+    disposeTopology(root.value)
+    handle = null
+    fitKey = ''
     root.value.innerHTML = zh
       ? '<p class="empty">暂无任务，应用蓝图后可查看依赖拓扑</p>'
       : '<p class="empty">No tasks yet; apply a blueprint to see topology</p>'
@@ -75,6 +81,7 @@ function paint() {
     for (const band of bands) {
       band.countText = band.tasks.length + taskWord + band.edgeCount + edgeWord
     }
+    // 勿先 dispose：renderTopology 按 signature 复用实例，避免 SSE 刷新冲掉缩放。
     handle = renderTopology({
       container: root.value,
       bands,
@@ -98,8 +105,15 @@ function paint() {
           },
       onOpen: (tid, pid) => board.openTaskDrawer(String(tid || ''), String(pid || '')),
     })
+    const nextFitKey = String(board.state.route.project || '') + '|' + board.state.lang
+    // 首屏交给 renderTopology 内部 fit；仅换工程／语言时再适应，避免二次 fit 冲掉缩放。
+    if (fitKey && nextFitKey !== fitKey) handle.fitView()
+    fitKey = nextFitKey
   } catch (err) {
     console.error('topology render failed', err)
+    disposeTopology(root.value)
+    handle = null
+    fitKey = ''
     root.value.innerHTML = zh
       ? '<p class="empty">拓扑画布加载失败</p>'
       : '<p class="empty">Topology failed to load</p>'
@@ -111,6 +125,7 @@ watch(() => [board.state.snapshot, board.state.route.project, board.state.lang],
 onBeforeUnmount(() => {
   if (root.value) disposeTopology(root.value)
   handle = null
+  fitKey = ''
 })
 </script>
 

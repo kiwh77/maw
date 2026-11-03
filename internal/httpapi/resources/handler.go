@@ -13,10 +13,11 @@ import (
 
 // API 是任务／节点配置写资源。依赖必须注入；本包不打开数据库。
 type API struct {
-	Tasks  Tasks
-	Nodes  Nodes
-	Probes Probes
-	Auth   *localauth.Authenticator
+	Tasks    Tasks
+	Nodes    Nodes
+	Probes   Probes
+	Projects Projects
+	Auth     *localauth.Authenticator
 }
 
 // Handler 返回可挂载的 /api/v1 写树（不含根路由装配）。
@@ -27,12 +28,53 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/nodes", a.handleRegisterNode)
 	mux.HandleFunc("PATCH /api/v1/nodes/{node_id}", a.handleUpdateNode)
 	mux.HandleFunc("POST /api/v1/nodes/{node_id}/probes", a.handleProbeNode)
+	mux.HandleFunc("DELETE /api/v1/projects/{project_id}", a.handleRemoveProject)
 
 	var h http.Handler = mux
 	if a.Auth != nil {
 		h = a.Auth.Middleware(a.Auth.RequireScope(localauth.ScopeWrite, mux))
 	}
 	return h
+}
+
+// handleRemoveProject 移除工程登记。
+//
+// DELETE 本身幂等，所以不要求 Idempotency-Key；但删除范围必须由用例回报，
+// 界面不能自行推断「删成功了」——只有 200 且带 removed 计数才算。
+func (a *API) handleRemoveProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project_id")
+	if !model.ProjectID(projectID).Valid() {
+		writeErr(w, http.StatusUnprocessableEntity, "invalid_project_id", "project_id 必须是 16 位十六进制", nil)
+		return
+	}
+	if a.Projects == nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", "Projects 用例未注入", nil)
+		return
+	}
+	force := false
+	switch r.URL.Query().Get("force") {
+	case "1", "true":
+		force = true
+	}
+	actor := ""
+	if id, ok := localauth.IdentityFrom(r.Context()); ok {
+		actor = id.Actor
+	}
+	out, err := a.Projects.Remove(r.Context(), ProjectRemovalRequest{
+		ProjectID: projectID, Force: force, Actor: actor,
+	})
+	if err != nil {
+		mapUseCaseErr(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, map[string]any{
+		"project_id":   out.ProjectID,
+		"project_name": out.ProjectName,
+		"project_path": out.ProjectPath,
+		"summary":      out.Summary,
+		"removed":      out.Removed,
+		"retained":     out.Retained,
+	})
 }
 
 func (a *API) handleCreateTask(w http.ResponseWriter, r *http.Request) {

@@ -77,12 +77,17 @@ export function parseRoute(search = "", hash = "", isKnownView = null) {
   };
 }
 
-/** 序列化筛选条件为查询串；board 视图省略全部参数，保持旧链接形态。 */
+/**
+ * 序列化筛选条件为查询串。
+ *
+ * board 是默认视图，不带 `view` 参数以保持旧链接形态；但**筛选与搜索必须写出去**：
+ * 以前这里对 board 直接返回空串，结果刷新一次筛选就没了、链接也没法分享。
+ * 只看「有没有非默认内容」，而不是「是不是默认视图」。
+ */
 export function serializeQuery(route = {}) {
   const params = new URLSearchParams();
   const view = route.view || DEFAULT_VIEW;
-  if (view === DEFAULT_VIEW) return "";
-  params.set(PARAM_VIEW, view);
+  if (view !== DEFAULT_VIEW) params.set(PARAM_VIEW, view);
   FILTER_KEYS.forEach(([param, field]) => {
     const value = route[field] || "";
     if (value) params.set(param, value);

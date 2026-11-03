@@ -34,6 +34,7 @@
 | `POST /api/v1/tasks/{instance_id}/status-transitions` | 状态迁移（block／cancel 等） | async |
 | `POST /api/v1/tasks/{instance_id}/submissions` | 提交交付 | async |
 | `POST /api/v1/tasks/{instance_id}/merges` | 合入 | async |
+| `DELETE /api/v1/projects/{project_id}` | 移除工程登记与活态数据（`?force=1` 连现场一起清） | write |
 | `POST /api/v1/status-reports` | 来源状态上报（不写任务状态） | write |
 | `GET /api/v1/operations/{operation_id}` | 查询异步操作 | read |
 
@@ -131,8 +132,8 @@ revision 与运行代际（`generation`）是两套条件：revision 管「这�
 | `403` | 凭据有效但无权：CSRF／Origin／scope／loopback | `csrf_failed`、`origin_mismatch`、`insufficient_scope`、`loopback_required` |
 | `404` | 资源或操作不存在 | `not_found` |
 | `405` | 方法不允许；必须带 `Allow` | `method_not_allowed` |
-| `409` | 版本、归属、幂等键、歧义编号、写盘冲突 | `revision_mismatch`、`idempotency_key_reuse`、`ambiguous_display_id`、`not_owner`、`write_conflict` |
-| `422` | 语法正确但语义不合法 | `invalid_pagination`、`invalid_idempotency_key`、`revision_required`、`unknown_enum`、`invalid_transition`、`dependency_retired`、`unknown_actor` |
+| `409` | 版本、归属、幂等键、歧义编号、写盘冲突、现场仍有活态占位 | `revision_mismatch`、`idempotency_key_reuse`、`ambiguous_display_id`、`not_owner`、`write_conflict`、`project_busy`、`ambiguous_project` |
+| `422` | 语法正确但语义不合法 | `invalid_pagination`、`invalid_idempotency_key`、`revision_required`、`unknown_enum`、`invalid_transition`、`dependency_retired`、`unknown_actor`、`invalid_project_id` |
 | `503` | 数据库忙或依赖暂不可用；带 `Retry-After` | `busy` |
 
 错误体固定形状：
@@ -240,6 +241,7 @@ revision 与运行代际（`generation`）是两套条件：revision 管「这�
 | `04-session-csrf-write.json` | 同源会话 + CSRF 双提交成功 |
 | `05-legacy-status-report.json` | loopback 旧上报，归属正确且不改任务状态 |
 | `06-revision-conflict.json` | 合法地返回 409 `revision_mismatch` 与当前 revision |
+| `07-remove-project.json` | 移除工程登记：成功回删除／保留计数，现场仍在时 409 `project_busy`，id 形态错 422 |
 
 反例（`samples/invalid/`，用 `expect_error` 声明应触发的码）：无凭据 200、会话写缺 CSRF、令牌放 query、有凭据却 401、`limit=500` 仍 200、异步动作 200、操作查询缺 `retry_after_ms`、POST 缺幂等键、同键异请求 202、写缺 revision、错误码与状态不符、旧写改任务状态、actor 与 owner 不一致。
 

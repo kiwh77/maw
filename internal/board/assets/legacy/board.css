@@ -98,7 +98,9 @@ h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.7px; }
 .join-button { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); border-radius: var(--radius); padding: 7px 10px; font-size: 11px; font-weight: 600; white-space: nowrap; transition: background .15s; }
 .join-button:hover { background: var(--accent-hover); }
 .join-button .symbol { margin-right: 6px; font: 12px var(--mono); }
-.stats { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0; margin-bottom: 10px; flex-shrink: 0; }
+/* 五项统计固定一行摆放：列数与项数不一致时，最后一项会单独折到第二行。
+   row-gap 是给窄屏折行用的，宽屏一行时它不起作用。 */
+.stats { display: grid; grid-template-columns: 1.5fr repeat(4, minmax(0, 1fr)); row-gap: 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0; margin-bottom: 10px; flex-shrink: 0; }
 .stat { padding: 0 14px; border-left: 1px solid var(--line); min-width: 0; }
 .stat:first-child { border-left: 0; padding-left: 0; }
 .stat-label { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
@@ -245,7 +247,10 @@ code, .kv dd, .list-plain { font-family: var(--mono); }
   .breadcrumb .dim, .breadcrumb .slash { display: none; }
   .page-heading { margin-bottom: 10px; align-items: flex-start; } h1 { font-size: 20px; }
   .page-description { max-width: 190px; font-size: 10px; } .join-button { padding: 7px; font-size: 10px; } .join-button .symbol { display: none; }
-  .stat { padding: 0 8px; } .stat-value { font-size: 15px; } .stat-value small { font-size: 9px; margin-left: 4px; }
+  /* 窄屏放不下五列：改三列两行，每行首项不画左侧分隔线，行间靠 row-gap。 */
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stat { padding: 0 8px; } .stat:nth-child(3n+1) { border-left: 0; padding-left: 0; }
+  .stat-value { font-size: 15px; } .stat-value small { font-size: 9px; margin-left: 4px; }
   .toolbar { align-items: stretch; } .filters { width: 100%; } .filters select { flex: 1; min-width: 0; max-width: none; width: 70px; }
   .toolbar-right { width: 100%; margin-left: 0; } .search-box { width: 100%; flex: 1; }
   .col { flex-basis: 255px; }

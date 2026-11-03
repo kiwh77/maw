@@ -1,7 +1,7 @@
 /* 工程列表的视图局部样式（VN-725）。
  *
- * 列表本身复用共享 .table；这里只处理「参考值」那列的弱化提示，
- * 让建议值与硬约束在视觉上也能分开。
+ * 列表本身复用共享 .table，列名已经把语义写在表头（「max_parallel 参考值」），
+ * 单元格里不再重复一遍说明文字；本文件只补移除操作这类危险动作的样式。
  */
 
 .projects-head h1 {
@@ -16,15 +16,65 @@
   color: var(--muted);
 }
 
-/* 参考值列：数字照常，说明用弱化色，不与上限混为一谈。 */
-.table td[data-field="ref"] .field-hint {
-  margin: 2px 0 0;
+/* ---------- 移除操作（危险动作：视觉上必须与普通文字区分） ---------- */
+
+.projects-remove {
+  padding: 2px 8px;
+  font-size: var(--font-meta, 12px);
+  font-family: var(--sans, sans-serif);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  cursor: pointer;
+}
+
+.projects-remove:hover,
+.projects-remove:focus-visible {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+.projects-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.projects-confirm__ask {
   font-size: var(--font-meta, 12px);
   color: var(--muted);
 }
 
-@media (max-width: 720px) {
-  .table td[data-field="ref"] .field-hint {
-    max-width: 14ch;
-  }
+.projects-confirm__yes,
+.projects-confirm__no {
+  padding: 2px 8px;
+  font-size: var(--font-meta, 12px);
+  font-family: var(--sans, sans-serif);
+  border-radius: var(--radius, 6px);
+  cursor: pointer;
+}
+
+/* 确认按钮用 status 色而不是新造的红：token 里没有 danger 变体。 */
+.projects-confirm__yes {
+  color: var(--danger, var(--text));
+  background: transparent;
+  border: 1px solid var(--danger, var(--line));
+}
+
+.projects-confirm__no {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+.projects-notice {
+  margin: 0 0 var(--space-block, 16px);
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+}
+
+.projects-notice--error {
+  color: var(--danger, var(--text));
 }

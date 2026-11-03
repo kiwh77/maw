@@ -163,6 +163,8 @@ interface Instance {
   shell: HTMLElement
   canvas: HTMLElement
   observer?: MutationObserver
+  /** 递增以作废进行中的 fitView rAF，避免晚到的 zoomToFit 冲掉用户缩放。 */
+  fitGen: number
 }
 
 const instances = new WeakMap<HTMLElement, Instance>()
@@ -399,8 +401,10 @@ function pickFocusCell(instance: Instance): ReturnType<Graph['getCellById']> | n
 
 function fitView(instance: Instance): void {
   // 视图切换时容器可能仍是 display:none（0×0），等到有实际尺寸再定位。
+  const gen = ++instance.fitGen
   let tries = 0
   const attempt = (): void => {
+    if (instance.fitGen !== gen) return
     const { canvas, graph } = instance
     if (!canvas.isConnected) return
     if (canvas.clientWidth < 40 || canvas.clientHeight < 40) {
@@ -427,9 +431,20 @@ function handleFor(instance: Instance): TopologyHandle {
   }
 }
 
+function captureViewport(graph: Graph): { zoom: number; tx: number; ty: number } {
+  const { tx, ty } = graph.translate()
+  return { zoom: graph.zoom(), tx, ty }
+}
+
+function restoreViewport(graph: Graph, viewport: { zoom: number; tx: number; ty: number }): void {
+  graph.zoomTo(viewport.zoom)
+  graph.translate(viewport.tx, viewport.ty)
+}
+
 function destroyTopology(container: HTMLElement): void {
   const instance = instances.get(container)
   if (!instance) return
+  instance.fitGen++
   instance.observer?.disconnect()
   instance.graph.dispose()
   instances.delete(container)
@@ -445,6 +460,8 @@ export function renderTopology(options: TopologyOptions): TopologyHandle {
     existing.options = { ...options, strings }
     return handleFor(existing)
   }
+  // 重建前记下缩放／平移：任务状态刷新、主题切换都不应把用户视图弹回默认。
+  const viewport = existing ? captureViewport(existing.graph) : null
   if (existing) destroyTopology(options.container)
 
   const { shell, canvas, bar } = buildShell(options.container, strings)
@@ -454,6 +471,7 @@ export function renderTopology(options: TopologyOptions): TopologyHandle {
     options: { ...options, strings },
     shell,
     canvas,
+    fitGen: 0,
   }
   instances.set(options.container, instance)
 
@@ -473,7 +491,8 @@ export function renderTopology(options: TopologyOptions): TopologyHandle {
   addNodes(instance, strings)
   addEdges(instance)
   wireInteractions(instance)
-  fitView(instance)
+  if (viewport) restoreViewport(instance.graph, viewport)
+  else fitView(instance)
 
   if (typeof MutationObserver === 'function') {
     const observer = new MutationObserver(() => {

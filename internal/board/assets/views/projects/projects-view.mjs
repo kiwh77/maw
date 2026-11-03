@@ -37,12 +37,19 @@ const I18N = {
     "projects.col.capacity": "节点容量",
     "projects.col.ref": "max_parallel 参考值",
     "projects.col.workspace": "工作区",
+    "projects.col.actions": "操作",
     "projects.workspace.git": "Git",
     "projects.workspace.nongit": "非 Git",
     "projects.workspace.unknown": "未识别",
-    "projects.ref.note": "仅供参考，不是硬约束",
     "projects.count": "个工程",
     "projects.not_ready_hint": "自动模式未就绪的原因：",
+    "projects.remove": "移除",
+    "projects.remove.hint": "只从本机中枢注销登记，不动工程目录",
+    "projects.remove.confirm": "确认移除？",
+    "projects.remove.confirm_yes": "确认移除",
+    "projects.remove.cancel": "取消",
+    "projects.remove.busy": "还有未完成任务或在线 Agent",
+    "projects.remove.done": "已移除",
   },
   en: {
     "projects.title": "Projects",
@@ -64,12 +71,19 @@ const I18N = {
     "projects.col.capacity": "Node capacity",
     "projects.col.ref": "max_parallel reference",
     "projects.col.workspace": "Workspace",
+    "projects.col.actions": "Actions",
     "projects.workspace.git": "Git",
     "projects.workspace.nongit": "Non-Git",
     "projects.workspace.unknown": "Unknown",
-    "projects.ref.note": "Advisory only, not a hard constraint",
     "projects.count": "projects",
     "projects.not_ready_hint": "Auto mode not ready because:",
+    "projects.remove": "Remove",
+    "projects.remove.hint": "Unregisters from the local hub only; the project directory stays untouched",
+    "projects.remove.confirm": "Remove this project?",
+    "projects.remove.confirm_yes": "Confirm removal",
+    "projects.remove.cancel": "Cancel",
+    "projects.remove.busy": "Tasks or Agents are still live",
+    "projects.remove.done": "Removed",
   },
 };
 
@@ -120,6 +134,40 @@ export function projectPolicy(project = {}, options = {}) {
   };
 }
 
+/**
+ * 操作列：移除是危险动作，所以走两段式（先问再确认），
+ * 而且只有可写页面才渲染——静态导出页不该出现一条永远点不动的按钮。
+ */
+function removalCell(view, lang, options) {
+  const pending = String(options.pendingRemove || "") === view.id;
+  if (pending) {
+    return '<td class="actions" data-field="actions">' +
+      '<span class="projects-confirm">' +
+      '<span class="projects-confirm__ask">' + esc(t("projects.remove.confirm", lang)) + "</span>" +
+      '<button type="button" class="projects-confirm__yes" data-project-remove-confirm="' +
+      esc(view.id) + '">' + esc(t("projects.remove.confirm_yes", lang)) + "</button>" +
+      '<button type="button" class="projects-confirm__no" data-project-remove-cancel="' +
+      esc(view.id) + '">' + esc(t("projects.remove.cancel", lang)) + "</button>" +
+      "</span></td>";
+  }
+  return '<td class="actions" data-field="actions">' +
+    '<button type="button" class="projects-remove" data-project-remove="' + esc(view.id) +
+    '" title="' + esc(t("projects.remove.hint", lang)) + '">' +
+    esc(t("projects.remove", lang)) + "</button></td>";
+}
+
+/** 结果提示：成功与失败都要说清楚，失败不能静默回落到「看起来还在」。 */
+function noticeRow(options, lang) {
+  const notice = options.removeNotice;
+  if (!notice || !notice.kind) return "";
+  const cls = notice.kind === "error" ? "projects-notice projects-notice--error" : "projects-notice";
+  const fallback = notice.kind === "error"
+    ? t("projects.error", lang)
+    : t("projects.remove.done", lang);
+  return '<p class="' + cls + '" data-notice-kind="' + esc(notice.kind) + '">' +
+    esc(notice.text || fallback) + "</p>";
+}
+
 /** 列表页：加载／空／错误／过期／未认证／unknown 各走一条明确分支。 */
 export function renderProjectList(state = {}, options = {}) {
   const lang = options.lang === "en" ? "en" : "zh";
@@ -137,6 +185,8 @@ export function renderProjectList(state = {}, options = {}) {
 
   if (!projects.length) return count + emptyState(lang, ["projects.empty", "projects.empty.hint"]);
 
+  // 只有明确声明「能写」的宿主才渲染移除按钮：视图不该猜自己有没有写通道。
+  const removable = options.canRemove === true;
   const rows = projects.map(project => {
     const view = projectPolicy(project, options);
     const p = view.policy;
@@ -148,15 +198,17 @@ export function renderProjectList(state = {}, options = {}) {
       "</td>" +
       '<td class="num" data-field="limit">' + esc(p.limit ?? dash) + "</td>" +
       '<td class="num" data-field="capacity">' + esc(p.capacity ?? dash) + "</td>" +
-      '<td class="num" data-field="ref">' + esc(p.ref ?? dash) +
-      '<p class="field-hint">' + esc(t("projects.ref.note", lang)) + "</p></td>" +
+      '<td class="num" data-field="ref">' + esc(p.ref ?? dash) + "</td>" +
       '<td data-field="workspace">' + esc(t("projects.workspace." + view.workspace, lang)) + "</td>" +
+      (removable ? removalCell(view, lang, options) : "") +
       "</tr>";
   }).join("");
 
-  return count +
+  const cols = ["name", "auto", "limit", "capacity", "ref", "workspace"];
+  if (removable) cols.push("actions");
+
+  return count + noticeRow(options, lang) +
     '<table class="table"><thead><tr>' +
-    ["name", "auto", "limit", "capacity", "ref", "workspace"]
-      .map(col => "<th>" + esc(t("projects.col." + col, lang)) + "</th>").join("") +
+    cols.map(col => "<th>" + esc(t("projects.col." + col, lang)) + "</th>").join("") +
     "</tr></thead><tbody>" + rows + "</tbody></table>";
 }

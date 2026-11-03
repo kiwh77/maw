@@ -39,6 +39,8 @@ const I18N = {
     "timeline.unauthenticated.hint": "使用本机会话或令牌后重试。",
     "timeline.unknown": "区间数据不完整。",
     "timeline.unknown.hint": "投影水位落后或完整性未知；已观测部分仍可查看。",
+    "no.project": "还没有选择工程。",
+    "no.project.hint": "时间轴按工程物化：先在顶部选择工程，再查看区间。",
     "kind.task_phase": "阶段驻留",
     "kind.cli_process": "CLI 运行",
     "kind.turn": "模型轮次",
@@ -83,6 +85,8 @@ const I18N = {
     "timeline.unauthenticated.hint": "Use a local session or token, then retry.",
     "timeline.unknown": "Interval data is incomplete.",
     "timeline.unknown.hint": "Projection lags or completeness is unknown; observed parts remain visible.",
+    "no.project": "No project selected.",
+    "no.project.hint": "The timeline is materialised per project: pick one at the top first.",
     "kind.task_phase": "Phase dwell",
     "kind.cli_process": "CLI process",
     "kind.turn": "Model turn",
@@ -312,7 +316,23 @@ function formatAxis(iso, timezone) {
       timeZone: timezone, hour: "2-digit", minute: "2-digit", hour12: false,
     }).format(new Date(iso));
   } catch {
-    return iso.slice(11, 16);
+    return iso.slice(11, 16);  }
+}
+
+/**
+ * 窗口标签用的时间戳：带月日。
+ *
+ * 24 小时窗口若只印时分，首尾会显示成同一个时刻（例如 16:18 – 16:18），
+ * 读者会以为窗口是 0 长度；日期是区分跨天窗口的必要信息。
+ */
+function formatStamp(iso, timezone) {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone, month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date(iso));
+  } catch {
+    return iso.slice(5, 16).replace("T", " ");
   }
 }
 
@@ -383,6 +403,11 @@ export function renderTimeline(state = {}, options = {}) {
     return '<div class="timeline" data-status="expired">' +
       emptyState(lang, ["timeline.expired", "timeline.expired.hint"]) + "</div>";
   }
+  // 没选工程不是「这段时间没干活」：必须与 empty 分开说，否则会误导读者。
+  if (status === "no_project") {
+    return '<div class="timeline" data-status="no_project">' +
+      emptyState(lang, ["no.project", "no.project.hint"]) + "</div>";
+  }
 
   const dateCtx = options.dateContext || createDateContext(state.window || {});
   const normalized = normalizeIntervals(state.intervals);
@@ -395,9 +420,9 @@ export function renderTimeline(state = {}, options = {}) {
     completeness === "unknown";
 
   const toolbar = '<div class="timeline__toolbar" role="toolbar">' +
-    '<span class="field-hint">' + safeText(t("toolbar.window", lang)) + ": " +
-    safeText(formatAxis(dateCtx.start, dateCtx.timezone)) + " – " +
-    safeText(formatAxis(dateCtx.end, dateCtx.timezone)) +
+    '<span class="field-hint">' +     safeText(t("toolbar.window", lang)) + ": " +
+    safeText(formatStamp(dateCtx.start, dateCtx.timezone)) + " – " +
+    safeText(formatStamp(dateCtx.end, dateCtx.timezone)) +
     " (" + dateCtx.hours + "h · " + safeText(dateCtx.timezone) + ")</span>" +
     '<button type="button" class="button" data-action="prev">' + safeText(t("toolbar.prev", lang)) + "</button>" +
     '<button type="button" class="button" data-action="next">' + safeText(t("toolbar.next", lang)) + "</button>" +

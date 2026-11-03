@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kiwh77/maw/internal/board"
 	"github.com/kiwh77/maw/internal/db"
@@ -322,6 +323,7 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 	var agents []*db.Agent
 	var projects []*db.Project
 	var eventID int64
+	var lastEvent string
 	maxP := maxParallelFallback
 	if maxP <= 0 {
 		maxP = 4
@@ -341,7 +343,13 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 		if e != nil {
 			return e
 		}
-		return tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM events`).Scan(&eventID)
+		// 数据水位取「最近一条事件发生时间」：它不是渲染时刻，停更时不会假装在更新。
+		if projectID == "" {
+			return tx.QueryRow(`SELECT COALESCE(MAX(id), 0), COALESCE(MAX(ts), '') FROM events`).
+				Scan(&eventID, &lastEvent)
+		}
+		return tx.QueryRow(`SELECT COALESCE(MAX(id), 0), COALESCE(MAX(ts), '') FROM events WHERE project_id = ?`, projectID).
+			Scan(&eventID, &lastEvent)
 	})
 	if err != nil {
 		return board.Snapshot{}, err
@@ -355,7 +363,16 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 	}
 	snap := board.BuildSnapshot(tasks, agents, maxP)
 	snap.EventID = eventID
+	// 没有任何事件时留空：让前端显示「尚无事件」，而不是编一个时间。
+	if ts, perr := time.Parse(time.RFC3339, strings.TrimSpace(lastEvent)); perr == nil {
+		snap.UpdatedAt = ts.Local().Format("2006-01-02 15:04:05")
+	} else {
+		snap.UpdatedAt = ""
+	}
 	snap.Projects = projects
+	if snap.Projects == nil {
+		snap.Projects = []*db.Project{}
+	}
 	snap.FilterProject = projectID
 	snap.FilterAgent = agent
 	snap.FilterStatus = status

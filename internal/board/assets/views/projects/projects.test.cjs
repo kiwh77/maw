@@ -38,7 +38,8 @@ test("VN-725 列表四列含义不同，标签不复用", async () => {
   for (const field of ["limit", "capacity", "ref"]) {
     assert.ok(html.includes('data-field="' + field + '"'), "缺少独立列：" + field);
   }
-  assert.ok(html.includes("仅供参考，不是硬约束"));
+  // 语义只写在表头：单元格里不再重复「仅供参考，不是硬约束」这类提示。
+  assert.ok(!html.includes("仅供参考"), "参考值列不该再带说明文案");
 });
 
 test("VN-725 工程策略缺字段时显示未知，不用 0 冒充", async () => {
@@ -124,4 +125,60 @@ test("VN-725 工程名与 id 均转义", async () => {
   );
   assert.ok(!html.includes("<img src=x"));
   assert.ok(html.includes("&lt;img"));
+});
+
+test("工程移除按钮只在可写宿主出现", async () => {
+  const view = await load();
+  // 静态导出页没有写通道：不给一个点了没反应的按钮。
+  const readonly = view.renderProjectList({ projects: [PROJECT] }, { lang: "zh" });
+  assert.ok(!readonly.includes("data-project-remove"), "只读宿主不该渲染移除按钮");
+  assert.ok(!readonly.includes("操作"), "只读宿主不该多出操作列");
+
+  const writable = view.renderProjectList({ projects: [PROJECT] }, { lang: "zh", canRemove: true });
+  assert.ok(writable.includes('data-project-remove="p1"'), "可写宿主应带工程 id");
+  assert.ok(writable.includes(">移除<"));
+  assert.ok(writable.includes("操作"), "可写宿主应多出操作列");
+});
+
+test("工程移除是两段式：确认态不再给直接删除按钮", async () => {
+  const view = await load();
+  const html = view.renderProjectList(
+    { projects: [PROJECT, { project_id: "p9", name: "another" }] },
+    { lang: "zh", canRemove: true, pendingRemove: "p1" },
+  );
+  assert.ok(html.includes("确认移除？"));
+  assert.ok(html.includes('data-project-remove-confirm="p1"'));
+  assert.ok(html.includes('data-project-remove-cancel="p1"'));
+  // 同一行不能再保留一键删除入口，否则二次确认就是摆设。
+  assert.ok(!html.includes('data-project-remove="p1"'));
+  // 其他行照常，不受影响。
+  assert.ok(html.includes('data-project-remove="p9"'));
+});
+
+test("工程移除结果提示不静默：成功与失败都写明", async () => {
+  const view = await load();
+  const failed = view.renderProjectList(
+    { projects: [PROJECT] },
+    { lang: "zh", canRemove: true, removeNotice: { kind: "error", text: "工程还有未完成的任务或在线 Agent" } },
+  );
+  assert.ok(failed.includes('data-notice-kind="error"'));
+  assert.ok(failed.includes("工程还有未完成的任务或在线 Agent"));
+
+  const done = view.renderProjectList(
+    { projects: [PROJECT] },
+    { lang: "zh", canRemove: true, removeNotice: { kind: "ok", text: "已移除工程登记" } },
+  );
+  assert.ok(done.includes('data-notice-kind="ok"'));
+  assert.ok(!done.includes('data-notice-kind="error"'));
+});
+
+test("工程移除的英文界面不残留中文", async () => {
+  const view = await load();
+  const html = view.renderProjectList(
+    { projects: [PROJECT] },
+    { lang: "en", canRemove: true, pendingRemove: "p1", removeNotice: { kind: "error", text: "busy" } },
+  );
+  assert.ok(html.includes("Remove this project?"));
+  assert.ok(html.includes("Confirm removal"));
+  assert.ok(!/[\u4e00-\u9fa5]/.test(html), "英文界面不应出现中文");
 });

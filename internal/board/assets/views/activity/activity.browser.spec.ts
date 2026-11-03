@@ -174,4 +174,15 @@ test.describe("VN-742 全天活动与小时下钻", () => {
     await expect(page.locator(".activity")).toHaveAttribute("data-status", "empty");
     await expect(page.locator(".empty-state")).toContainText("这一天没有观测到活动");
   });
+  // 内容留白由外层 .vnext / .content 统一给：视图根元素自己再加一层，
+  // 页面左右就会缩进两次、底部也会多一段空白。
+  test("VN-742 视图根元素不再自带内边距", async ({ page }) => {
+    const view = await loadView();
+    await mount(page, view.renderActivity(state(), { lang: "zh", selectedHour: 0 }));
+    const padding = await page.locator(".activity").evaluate(el => {
+      const cs = getComputedStyle(el);
+      return [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft];
+    });
+    expect(padding).toEqual(["0px", "0px", "0px", "0px"]);
+  });
 });

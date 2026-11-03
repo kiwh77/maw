@@ -32,6 +32,8 @@ const I18N = {
     "sessions.unauthenticated.hint": "使用本机会话或令牌后重试。",
     "sessions.unknown": "部分会话数据不完整。",
     "sessions.unknown.hint": "投影水位落后或完整性未知；已观测部分仍可查看。",
+    "no.project": "还没有选择工程。",
+    "no.project.hint": "来源会话按工程归属：先在顶部选择工程，再看会话与轮次。",
     "col.session": "会话",
     "col.source": "来源",
     "col.opened": "打开时间",
@@ -81,6 +83,8 @@ const I18N = {
     "sessions.unauthenticated.hint": "Use a local session or token, then retry.",
     "sessions.unknown": "Some session data is incomplete.",
     "sessions.unknown.hint": "Projection lags or completeness is unknown; observed parts remain visible.",
+    "no.project": "No project selected.",
+    "no.project.hint": "Source sessions are attributed per project: pick one at the top first.",
     "col.session": "Session",
     "col.source": "Source",
     "col.opened": "Opened",
@@ -386,6 +390,11 @@ export function renderSessions(state = {}, options = {}) {
   if (status === "expired") {
     return '<div class="sessions" data-status="expired">' +
       emptyState(lang, ["sessions.expired", "sessions.expired.hint"]) + "</div>";
+  }
+  // 未选工程与「没有会话」是两件事：前者该去选工程，后者才是真的没有。
+  if (status === "no_project") {
+    return '<div class="sessions" data-status="no_project">' +
+      emptyState(lang, ["no.project", "no.project.hint"]) + "</div>";
   }
 
   const sessions = normalizeSessions(state.sessions);
