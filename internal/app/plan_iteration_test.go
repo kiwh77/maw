@@ -48,7 +48,7 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
-func TestPlanApplyIterationWaves(t *testing.T) {
+func TestPlanIterationApplyWaves(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "maw")
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/maw")
 	cmd.Dir = filepath.Join("..", "..")
@@ -223,6 +223,146 @@ func TestPlanApplyIterationWaves(t *testing.T) {
 		return nil
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPlanApplyIterationRetireKeepsReservedTasks 覆盖 retire 策略的确定语义：
+// 蓝图外的 idle 题退役并留事件，保留态（blocked）题不动，迭代归属不被改写。
+//
+// 失败信息一律带 iteration_id：红的时候一眼能看出是哪一迭代出的问题。
+func TestPlanIterationApplyRetireKeepsReservedTasks(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "maw")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/maw")
+	cmd.Dir = filepath.Join("..", "..")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+
+	repo := t.TempDir()
+	globalDir := t.TempDir()
+	pathEnv := "PATH=" + filepath.Dir(bin) + string(os.PathListSeparator) + os.Getenv("PATH")
+	baseEnv := append(os.Environ(), pathEnv, "MAW_GLOBAL="+globalDir)
+	run := func(args ...string) (string, error) {
+		c := exec.Command(bin, args...)
+		c.Dir = repo
+		c.Env = baseEnv
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	git := func(args ...string) {
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		c.Env = baseEnv
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	git("init", "-b", "main")
+	git("config", "user.email", "t@t")
+	git("config", "user.name", "t")
+	_ = os.WriteFile(filepath.Join(repo, "README.md"), []byte("# t\n"), 0o644)
+	for _, d := range []string{"mod_w1", "mod_w2"} {
+		_ = os.MkdirAll(filepath.Join(repo, d), 0o755)
+		_ = os.WriteFile(filepath.Join(repo, d, ".gitkeep"), nil, 0o644)
+	}
+	git("add", ".")
+	git("commit", "-m", "init")
+	if out, err := run("init"); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+
+	// 第一波：一道 idle 题与一道保留态（blocked）题，都属 IT-W1。
+	wave1 := writeIterationBP(t, repo, "wave1", map[string]string{"IT-W1": "第一波"}, []bpTask{
+		{id: "T-W1-IDLE", iteration: "IT-W1", dir: "mod_w1", prio: 10},
+		{id: "T-W1-KEPT", iteration: "IT-W1", dir: "mod_w1", prio: 20},
+	})
+	if out, err := run("plan", "apply", wave1, "--yes"); err != nil {
+		t.Fatalf("apply wave1: %v\n%s", err, out)
+	}
+
+	gdb := filepath.Join(globalDir, "maw.db")
+	if err := db.WithTx(gdb, func(tx *sql.Tx) error {
+		var pid string
+		if err := tx.QueryRow(`SELECT id FROM projects LIMIT 1`).Scan(&pid); err != nil {
+			return err
+		}
+		task, err := db.GetTask(tx, pid, "T-W1-KEPT")
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return fmt.Errorf("迭代 IT-W1 的题 T-W1-KEPT 不存在：wave1 apply 后应有该题")
+		}
+		task.Status = "blocked"
+		if err := db.UpsertTask(tx, task); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 第二波：只带第二波题与第一波的保留态题；第一波的 idle 题不在蓝图里。
+	wave2 := writeIterationBP(t, repo, "wave2", map[string]string{"IT-W1": "第一波", "IT-W2": "第二波"}, []bpTask{
+		{id: "T-W1-KEPT", iteration: "IT-W1", dir: "mod_w1", prio: 20},
+		{id: "T-W2-A", iteration: "IT-W2", dir: "mod_w2", prio: 30},
+	})
+	if out, err := run("plan", "apply", wave2, "--yes"); err != nil {
+		t.Fatalf("apply wave2: %v\n%s", err, out)
+	}
+
+	if err := db.WithTx(gdb, func(tx *sql.Tx) error {
+		var pid string
+		if err := tx.QueryRow(`SELECT id FROM projects LIMIT 1`).Scan(&pid); err != nil {
+			return err
+		}
+		// 蓝图外的 idle 题退役（IT-W1）。
+		idle, err := db.GetTask(tx, pid, "T-W1-IDLE")
+		if err != nil {
+			return err
+		}
+		if idle != nil {
+			return fmt.Errorf("迭代 IT-W1 的题 T-W1-IDLE 仍在库：蓝图外的 idle 题应退役（%+v）", idle)
+		}
+		var retired int
+		if err := tx.QueryRow(
+			`SELECT COUNT(*) FROM events WHERE project_id = ? AND type = 'task_retired'`,
+			pid,
+		).Scan(&retired); err != nil {
+			return err
+		}
+		if retired != 1 {
+			return fmt.Errorf("迭代 IT-W1 的退役事件数=%d 期望 1", retired)
+		}
+		// 保留态题不动，归属仍是 IT-W1。
+		kept, err := db.GetTask(tx, pid, "T-W1-KEPT")
+		if err != nil {
+			return err
+		}
+		if kept == nil {
+			return fmt.Errorf("迭代 IT-W1 的题 T-W1-KEPT 被删了：保留态题不该因 apply 退役")
+		}
+		if kept.IterationID != "IT-W1" {
+			return fmt.Errorf("迭代 IT-W1 的题 T-W1-KEPT 归属变成了 %q", kept.IterationID)
+		}
+		if kept.Status != "blocked" {
+			return fmt.Errorf("迭代 IT-W1 的题 T-W1-KEPT 状态变成了 %q 期望 blocked", kept.Status)
+		}
+		// 第二波题归属 IT-W2。
+		second, err := db.GetTask(tx, pid, "T-W2-A")
+		if err != nil {
+			return err
+		}
+		if second == nil {
+			return fmt.Errorf("迭代 IT-W2 的题 T-W2-A 不存在")
+		}
+		if second.IterationID != "IT-W2" {
+			return fmt.Errorf("迭代 IT-W2 的题 T-W2-A 归属是 %q 期望 IT-W2", second.IterationID)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
