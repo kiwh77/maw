@@ -161,7 +161,16 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 	sysH := sysAPI.Handler()
 
 	v1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch v1Route(r.URL.Path) {
+		kind := v1Route(r.URL.Path)
+		// 写方法落在没有专属写处理者的路径上时交给资源写树：
+		// 这样 /api/v1/projects/{id}/tasks、/api/v1/nodes/{id} 这类「中枢声明有写入口」
+		// 的路径，方法错与路径未知都回 JSON 错误码，而不是只读树的纯文本 405。
+		// 事件上报、系统作业、观测确认这些自带写处理者的路径仍按路径先分流。
+		if kind == v1Read && isV1WriteMethod(r.Method) {
+			resH.ServeHTTP(w, r)
+			return
+		}
+		switch kind {
 		case v1Events:
 			eventsH.ServeHTTP(w, r)
 		case v1Observability:
@@ -234,7 +243,7 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 		Log:     AgentLog,
 		Runtime: runtimeView,
 		Auth:    auth,
-		V1:      v1,
+		V1:      v1JSONErrorNormalizer{next: v1},
 	}, nil
 }
 
@@ -357,6 +366,101 @@ func newObservabilityAPI(store *db.Store, auth *localauth.Authenticator) *httpob
 	}
 }
 
+// v1JSONErrorNormalizer 把 /api/v1 子树里仍由 net/http mux 兜底产生的纯文本 404/405
+// 改写成契约 §6 的 JSON 错误体。
+//
+// 各子 API 内部仍用按方法注册的 mux；方法没匹配上时 mux 只会回 text/plain 的
+// 「Method Not Allowed」／「404 page not found」。中枢既然声明 managed_via=cli_or_api_v1，
+// 调用方就只能按 error.code 分支，纯文本会被当成服务端异常，所以在装配层统一改写。
+// 只改写这两类纯文本错误：正常响应与 SSE 流原样透传（不缓冲、不改头）。
+type v1JSONErrorNormalizer struct {
+	next http.Handler
+}
+
+func (n v1JSONErrorNormalizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ew := &v1ErrorWriter{ResponseWriter: w, status: http.StatusOK}
+	n.next.ServeHTTP(ew, r)
+	ew.finish()
+}
+
+// v1ErrorWriter 延迟写出状态头：先看清状态与 Content-Type 再决定是透传还是改写。
+type v1ErrorWriter struct {
+	http.ResponseWriter
+	status  int
+	started bool
+	swallow bool
+}
+
+func (w *v1ErrorWriter) WriteHeader(status int) {
+	if w.started {
+		return
+	}
+	w.status = status
+}
+
+func (w *v1ErrorWriter) Write(b []byte) (int, error) {
+	w.start()
+	if w.swallow {
+		// 已改写成 JSON 错误体：丢掉原先的纯文本正文。
+		return len(b), nil
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *v1ErrorWriter) Flush() {
+	w.start()
+	if f, ok := w.ResponseWriter.(http.Flusher); ok && !w.swallow {
+		f.Flush()
+	}
+}
+
+func (w *v1ErrorWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// start 只执行一次：纯文本 404/405 改写为 JSON，其余响应原样放行。
+func (w *v1ErrorWriter) start() {
+	if w.started {
+		return
+	}
+	w.started = true
+	if w.plainError() {
+		w.swallow = true
+		localauth.WriteJSONError(w.ResponseWriter, w.status,
+			v1ErrorCode(w.status), v1ErrorMessage(w.status), nil)
+		return
+	}
+	w.ResponseWriter.WriteHeader(w.status)
+}
+
+func (w *v1ErrorWriter) finish() {
+	if !w.started {
+		w.start()
+	}
+}
+
+func (w *v1ErrorWriter) plainError() bool {
+	switch w.status {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+	default:
+		return false
+	}
+	ct := w.Header().Get("Content-Type")
+	return ct == "" || strings.HasPrefix(ct, "text/plain")
+}
+
+func v1ErrorCode(status int) string {
+	if status == http.StatusMethodNotAllowed {
+		return "method_not_allowed"
+	}
+	return "not_found"
+}
+
+func v1ErrorMessage(status int) string {
+	if status == http.StatusMethodNotAllowed {
+		return "该 /api/v1 路径不接受此方法"
+	}
+	return "未知的 /api/v1 路径"
+}
+
 // v1HandlerKind 是 /api/v1 下的三类处理者。
 type v1HandlerKind int
 
@@ -367,11 +471,24 @@ const (
 	v1Events
 	// v1Observability 是时间轴、活动、会话、统计、提醒与观测能力。
 	v1Observability
-	// v1Resources 是写资源（工程登记移除等）；只有末段是 {project_id} 的路径走这里。
+	// v1Resources 是写资源（工程登记移除、任务定义、节点登记等）；
+	// 只读路径上的写方法也归这里（见 v1 装配处的 isV1WriteMethod 分流）。
 	v1Resources
 	// v1System 是系统 Agent 作业队列。
 	v1System
 )
+
+// isV1WriteMethod 判断是否是需要落到写树的方法。
+//
+// GET/HEAD/OPTIONS 归只读树：中枢的 /api/v1 查询接口按方法注册，
+// 写树只承载会改状态的 POST/PATCH/PUT/DELETE。
+func isV1WriteMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete:
+		return true
+	}
+	return false
+}
 
 // observabilitySuffixes 是观测子树的资源名。
 //

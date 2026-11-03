@@ -130,12 +130,15 @@ func TestRemoveProjectRejectsMalformedID(t *testing.T) {
 	}
 }
 
-func TestRemoveProjectWithoutUseCaseIs500(t *testing.T) {
+func TestRemoveProjectWithoutUseCaseIs501(t *testing.T) {
 	api, token := newProjectAPI(t, nil)
 
 	rec := doJSON(t, api, token, http.MethodDelete, "/api/v1/projects/"+projectID, nil, nil)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("期望 500（用例未注入），得到 %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("期望 501（本中枢未接线该写入口），得到 %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "unsupported") {
+		t.Fatalf("未接线要回 unsupported 错误码：%s", rec.Body.String())
 	}
 }
 

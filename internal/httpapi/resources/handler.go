@@ -21,14 +21,22 @@ type API struct {
 }
 
 // Handler 返回可挂载的 /api/v1 写树（不含根路由装配）。
+//
+// 路径与方法分开注册：同一个路径换错方法也要回 **JSON 错误码**（method_not_allowed），
+// 而不是 net/http ServeMux 的纯文本 405。未接线的写资源统一回 501 unsupported，
+// 让「中枢声明有写树」与「这台机器的写入口到底通不通」对得上。
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/projects/{project_id}/tasks", a.handleCreateTask)
-	mux.HandleFunc("PATCH /api/v1/tasks/{instance_id}", a.handleUpdateTask)
-	mux.HandleFunc("POST /api/v1/projects/{project_id}/nodes", a.handleRegisterNode)
-	mux.HandleFunc("PATCH /api/v1/nodes/{node_id}", a.handleUpdateNode)
-	mux.HandleFunc("POST /api/v1/nodes/{node_id}/probes", a.handleProbeNode)
-	mux.HandleFunc("DELETE /api/v1/projects/{project_id}", a.handleRemoveProject)
+	mux.HandleFunc("/api/v1/projects/{project_id}/tasks", a.handleCreateTask)
+	mux.HandleFunc("/api/v1/tasks/{instance_id}", a.handleUpdateTask)
+	mux.HandleFunc("/api/v1/projects/{project_id}/nodes", a.handleRegisterNode)
+	mux.HandleFunc("/api/v1/nodes/{node_id}", a.handleUpdateNode)
+	mux.HandleFunc("/api/v1/nodes/{node_id}/probes", a.handleProbeNode)
+	mux.HandleFunc("/api/v1/projects/{project_id}", a.handleRemoveProject)
+	// 写树兜底：未知写路径回 JSON not_found，不再让 404 落到纯文本页。
+	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, _ *http.Request) {
+		writeErr(w, http.StatusNotFound, "not_found", "未知的 /api/v1 写路径", nil)
+	})
 
 	var h http.Handler = mux
 	if a.Auth != nil {
@@ -37,18 +45,40 @@ func (a *API) Handler() http.Handler {
 	return h
 }
 
+// requireWriteMethod 把方法不匹配写成 JSON 405，并显式给出 Allow。
+func requireWriteMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method == method {
+		return true
+	}
+	w.Header().Set("Allow", method)
+	writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed",
+		"该写入口只接受 "+method, map[string]any{"allow": method})
+	return false
+}
+
+// writeNotWired 表示写树已挂载、但这台中枢没有注入对应用例。
+// 这是 unsupported（501），不是 internal_error（500）：请求本身没毛病，
+// 只是本中枢只提供定义/登记类写资源的一部分，受管执行仍走 CLI。
+func writeNotWired(w http.ResponseWriter, name string) {
+	writeErr(w, http.StatusNotImplemented, "unsupported",
+		name+" 写入口未在本中枢接线；受管执行请改用 CLI", map[string]any{"use": "cli"})
+}
+
 // handleRemoveProject 移除工程登记。
 //
 // DELETE 本身幂等，所以不要求 Idempotency-Key；但删除范围必须由用例回报，
 // 界面不能自行推断「删成功了」——只有 200 且带 removed 计数才算。
 func (a *API) handleRemoveProject(w http.ResponseWriter, r *http.Request) {
+	if !requireWriteMethod(w, r, http.MethodDelete) {
+		return
+	}
 	projectID := r.PathValue("project_id")
 	if !model.ProjectID(projectID).Valid() {
 		writeErr(w, http.StatusUnprocessableEntity, "invalid_project_id", "project_id 必须是 16 位十六进制", nil)
 		return
 	}
 	if a.Projects == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "Projects 用例未注入", nil)
+		writeNotWired(w, "工程移除")
 		return
 	}
 	force := false
@@ -78,6 +108,9 @@ func (a *API) handleRemoveProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleCreateTask(w http.ResponseWriter, r *http.Request) {
+	if !requireWriteMethod(w, r, http.MethodPost) {
+		return
+	}
 	key, ok := requireIdempotencyKey(w, r)
 	if !ok {
 		return
@@ -101,7 +134,7 @@ func (a *API) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Tasks == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "Tasks 用例未注入", nil)
+		writeNotWired(w, "任务定义创建")
 		return
 	}
 	out, err := a.Tasks.Create(r.Context(), TaskCreateRequest{
@@ -127,6 +160,9 @@ func (a *API) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	if !requireWriteMethod(w, r, http.MethodPatch) {
+		return
+	}
 	key, ok := requireIdempotencyKey(w, r)
 	if !ok {
 		return
@@ -151,7 +187,7 @@ func (a *API) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Tasks == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "Tasks 用例未注入", nil)
+		writeNotWired(w, "任务定义更新")
 		return
 	}
 	out, err := a.Tasks.UpdateDefinition(r.Context(), TaskUpdateRequest{
@@ -171,6 +207,9 @@ func (a *API) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleRegisterNode(w http.ResponseWriter, r *http.Request) {
+	if !requireWriteMethod(w, r, http.MethodPost) {
+		return
+	}
 	key, ok := requireIdempotencyKey(w, r)
 	if !ok {
 		return
@@ -182,7 +221,7 @@ func (a *API) handleRegisterNode(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = raw
 	if a.Nodes == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "Nodes 用例未注入", nil)
+		writeNotWired(w, "节点登记")
 		return
 	}
 	out, err := a.Nodes.Register(r.Context(), NodeWriteRequest{
@@ -203,6 +242,9 @@ func (a *API) handleRegisterNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
+	if !requireWriteMethod(w, r, http.MethodPatch) {
+		return
+	}
 	key, ok := requireIdempotencyKey(w, r)
 	if !ok {
 		return
@@ -222,7 +264,7 @@ func (a *API) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	}
 	reg.Config.NodeID = model.NodeID(nodeID)
 	if a.Nodes == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "Nodes 用例未注入", nil)
+		writeNotWired(w, "节点配置更新")
 		return
 	}
 	out, err := a.Nodes.UpdateConfig(r.Context(), NodeWriteRequest{
@@ -239,6 +281,9 @@ func (a *API) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleProbeNode(w http.ResponseWriter, r *http.Request) {
+	if !requireWriteMethod(w, r, http.MethodPost) {
+		return
+	}
 	key, ok := requireIdempotencyKey(w, r)
 	if !ok {
 		return
@@ -253,7 +298,7 @@ func (a *API) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Probes == nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "Probes 用例未注入", nil)
+		writeNotWired(w, "节点探测")
 		return
 	}
 	actor := ""

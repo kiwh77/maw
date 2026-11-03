@@ -113,6 +113,26 @@ maw doctor --json      # 库路径、协议版本、issues
 - 同一响应里的 `static_export_managed` 恒为 `false`、`managed_via` 为 `cli_or_api_v1`——静态页面不具备受管写入口。
 - 设置页（看板 → 设置）展示同一份数据；静态导出页面是**只读**的，只能看不能改。
 
+### `/api/v1` 写入口到底通到哪
+
+`managed_via=cli_or_api_v1` 是对调用方的承诺，所以中枢确实把 `/api/v1` 写树挂上了；
+但「挂载」不等于「每个写资源都已接上引擎」，下表就是当前这台机器的真实边界：
+
+| 写路径 | 方法 | 实际状态 | 说明 |
+| --- | --- | --- | --- |
+| `/api/v1/projects/{project_id}` | `DELETE` | 已接线 | 看板「工程」页移除登记，与 CLI 走同一套用例 |
+| `/api/v1/projects/{project_id}/tasks` | `POST` | `501 unsupported` | 任务定义创建尚未接引擎；建题走 `maw plan apply` |
+| `/api/v1/tasks/{task_instance}` | `PATCH` | `501 unsupported` | 同上，改定义走 CLI |
+| `/api/v1/projects/{project_id}/nodes`、`/api/v1/nodes/{node_id}`、`/api/v1/nodes/{node_id}/probes` | `POST`/`PATCH` | `501 unsupported` | 节点登记与探测未接引擎；用 CLI |
+| 其它未知写路径（如 `…/policy`） | 任意写方法 | `404 not_found` | 策略页确实没有写入口，见下条 |
+| 已挂载写路径换了方法 | 非该路径允许的方法 | `405 method_not_allowed`（响应带 `Allow`） | 不再回纯文本 `Method Not Allowed` |
+
+所有错误都是契约 §6 的 JSON 错误体（`{"ok":false,"error":{"code":…,"message":…}}`），
+调用方按 `code` 分支即可；`GET`/`HEAD` 仍走只读树，同一个路径的读写不会互相顶掉。
+
+策略页（看板 → 设置）与上表结论一致：**中枢没有策略写入口**，页面默认只读、保存按钮禁用，
+只回填 `/api/runtime` 报来的当前值（与 E2E-101 交叉核对）；要改策略用 CLI 改配置。
+
 ```bash
 curl -s http://127.0.0.1:7420/api/runtime | jq '.auto_execution.extensions'
 ```
