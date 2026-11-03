@@ -416,10 +416,34 @@ test.describe('B 组：看板真实渲染', () => {
     const sum = laneCounts.reduce((acc, n) => acc + Number(n.trim() || 0), 0);
     const cards = await page.locator('.card').count();
     expect(sum).toBe(cards);
+    // 页面自报的任务数与泳道计数之和必须一致：差值就是「有任务没落位」。
+    const total = Number((await page.locator('#columns').getAttribute('data-total')) || '0');
+    const laneTotal = Number((await page.locator('#columns').getAttribute('data-lane-total')) || '0');
+    expect(laneTotal, '泳道计数之和与看板任务数不一致：有任务没落位').toBe(total);
+    expect(sum).toBe(laneTotal);
+    expect(cards).toBe(total);
     expect(
-      cards,
-      `泳道合计 ${cards} 与接口 total ${global.total} 不一致：backlog/cancelled 没有落位（BOARD_DESIGN 的 Queued 含 backlog）`,
+      total,
+      `看板任务数 ${total} 与接口 total ${global.total} 不一致：backlog/cancelled 没有落位（BOARD_DESIGN 的 Queued 含 backlog）`,
     ).toBe(global.total);
+  });
+
+  test('B-27 全部工程时拓扑不可达，不会跳到执行节点', async ({ page }) => {
+    await open(page, '/?view=board');
+    await page.selectOption('#f-project', '');
+    await expect(page.locator('#page-h1')).toHaveText(/Task board|任务看板/i);
+
+    // 拓扑入口在「全部工程」下禁用。
+    await expect(page.locator('#view-topo')).toBeDisabled();
+
+    // 侧边栏里点拓扑也不该把人带走：拓扑按单工程物化，多工程图读不懂。
+    const topo = page.locator('#vnext-nav [data-view="topo"]');
+    if (await topo.count()) {
+      await topo.click();
+      await page.waitForTimeout(500);
+      await expect(page.locator('#page-h1')).toHaveText(/Task board|任务看板/i);
+      expect(page.url(), '拓扑视图要求单工程，不该在「全部工程」下可达').not.toMatch(/view=topo/);
+    }
   });
 
   test('B-25 筛选与搜索在刷新后保留', async ({ page }) => {

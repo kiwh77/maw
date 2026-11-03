@@ -28,15 +28,18 @@ const tasks = computed(() => {
 /** 契约外的状态不丢：给它们单独一列，而不是静默从看板上消失。 */
 const extraLane = computed(() => {
   const known = new Set(LANES.flatMap((lane) => lane.statuses))
-  const unknown = [...new Set(tasks.value.map((t) => String(t.status || '')).filter((s) => s && !known.has(s)))].sort()
-  if (!unknown.length) return null
+  // 按「不属于任何已知泳道」判定，而不是按状态字符串集合：
+  // 状态缺失（空串）的任务同样要落位，否则泳道计数之和会少于任务总数。
+  const items = tasks.value.filter((t) => !known.has(String(t.status || '')))
+  if (!items.length) return null
+  const labels = [...new Set(items.map((t) => String(t.status || '') || '—'))].sort()
   return {
     id: 'other',
     label: 'Other',
-    statuses: unknown,
+    statuses: labels,
     symbol: '?',
     empty: '—',
-    items: tasks.value.filter((t) => unknown.includes(String(t.status || ''))),
+    items,
   }
 })
 
@@ -48,6 +51,9 @@ const lanes = computed(() => {
   if (extraLane.value) base.push(extraLane.value)
   return base.filter((lane) => lane.id !== 'attention' || lane.items.length > 0)
 })
+
+/** 泳道计数之和：必须等于落在看板上的任务数，否则有卡片在泳道外丢了。 */
+const laneTotal = computed(() => lanes.value.reduce((n, lane) => n + lane.items.length, 0))
 
 const drawer = computed(() => board.state.drawer)
 
@@ -70,7 +76,13 @@ function isActive(task: Record<string, unknown>) {
 </script>
 
 <template>
-  <div class="board" id="columns" aria-label="Task flow">
+  <div
+    class="board"
+    id="columns"
+    aria-label="Task flow"
+    :data-total="tasks.length"
+    :data-lane-total="laneTotal"
+  >
     <section
       v-for="(lane, i) in lanes"
       :key="lane.id"

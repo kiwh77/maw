@@ -118,6 +118,9 @@ export const boardStore = {
 
   navigate(view: string, patch: Partial<BoardRoute> = {}, { replace = false } = {}) {
     const def = resolveView(registry, view)
+    // 需要单工程的视图（拓扑）只在选中工程时可达：侧边栏与视图切换都能点到它，
+    // 「全部工程」下进去只会得到一张读不懂的多工程图，不如留在原处。
+    if (def?.requiresProject && !String(state.route.project || '').trim()) return
     const next = withRoute(state.route, { view: def.id, detail: '', ...patch }) as BoardRoute
     if (!sameRoute(next, state.route)) {
       writeRoute(next, { history: window.history, location: window.location, replace })
