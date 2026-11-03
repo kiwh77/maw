@@ -69,22 +69,22 @@ type RunSourceLink struct {
 //
 // Token 指针为 nil 表示未知；不得把未知写成 0。
 type UsageRecord struct {
-	UsageID          string         `json:"usage_id"`
-	SourceNS         string         `json:"source_ns"`
-	TurnID           string         `json:"turn_id"`
-	Epoch            int            `json:"epoch"`
-	Scope            string         `json:"scope"`
-	Semantic         UsageSemantic  `json:"semantic"`
-	InputTokens      *int64         `json:"input_tokens"`
-	OutputTokens     *int64         `json:"output_tokens"`
-	CacheReadTokens  *int64         `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens *int64         `json:"cache_write_tokens,omitempty"`
-	TotalTokens      *int64         `json:"total_tokens,omitempty"`
-	Quality          model.Quality  `json:"quality"`
-	Basis            string         `json:"basis,omitempty"`
-	ResetObserved    bool           `json:"reset_observed"`
-	EventID          string         `json:"event_id,omitempty"`
-	RecordedAt       string         `json:"recorded_at"`
+	UsageID          string        `json:"usage_id"`
+	SourceNS         string        `json:"source_ns"`
+	TurnID           string        `json:"turn_id"`
+	Epoch            int           `json:"epoch"`
+	Scope            string        `json:"scope"`
+	Semantic         UsageSemantic `json:"semantic"`
+	InputTokens      *int64        `json:"input_tokens"`
+	OutputTokens     *int64        `json:"output_tokens"`
+	CacheReadTokens  *int64        `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int64        `json:"cache_write_tokens,omitempty"`
+	TotalTokens      *int64        `json:"total_tokens,omitempty"`
+	Quality          model.Quality `json:"quality"`
+	Basis            string        `json:"basis,omitempty"`
+	ResetObserved    bool          `json:"reset_observed"`
+	EventID          string        `json:"event_id,omitempty"`
+	RecordedAt       string        `json:"recorded_at"`
 }
 
 // ProjectionState 是某个投影的检查点与脏范围。
@@ -209,6 +209,23 @@ func InsertRunSourceLink(tx *sql.Tx, l RunSourceLink) error {
   turn_id, attributed, created_at) VALUES (?,?,?,?,?,?,?,?)`,
 		l.LinkID, l.ProjectID, l.RunID, l.InstanceID, l.SessionID, l.TurnID, attr, l.CreatedAt)
 	return err
+}
+
+// EnsureRunSourceLink 幂等写 Run↔来源关联。
+//
+// 重放同一条关联是常态（补交、崩溃恢复都会再来一遍）：重复写不能让整批事务失败。
+func EnsureRunSourceLink(tx *sql.Tx, l RunSourceLink) error {
+	if strings.TrimSpace(l.LinkID) == "" {
+		return model.Violation(model.CodePortFieldInvalid, "run_source_link", "link_id 必填")
+	}
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM run_source_links WHERE link_id = ?`, l.LinkID).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	return InsertRunSourceLink(tx, l)
 }
 
 // PutUsageRecord 写入一代用量。

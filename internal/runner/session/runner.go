@@ -15,6 +15,7 @@ import (
 	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/engine/ports"
 	"github.com/kiwh77/maw/internal/runner/journal"
+	"github.com/kiwh77/maw/internal/runner/observe"
 )
 
 // kindStreamRecord 是来源记录的 journal 类型。它是「一行原始记录」，
@@ -52,6 +53,10 @@ type Runner struct {
 	starter starter
 	clock   func() time.Time
 	stopCh  <-chan model.StopRequest
+	// observer 是可选的观测落库端口：没有它就不落观测（不伪造 0 Token）。
+	observer observe.Writer
+	// observationFailures 统计观测落库失败次数（只报告，不阻塞运行）。
+	observationFailures atomic.Int64
 
 	// deliverMu 串行化「取待交付记录 + 提交 + 推进游标」这一整段。
 	// 摄取与心跳会同时想交付，不串行就会把同一条记录提交两次。
@@ -161,6 +166,9 @@ type Report struct {
 	Stderr    string
 	// InterpretError 是判定侧的诊断（例如未登录）。它不改变事实，只解释结论。
 	InterpretError string
+	// ObservationFailures 是观测落库失败的次数。观测失败不影响运行结论，
+	// 但必须报出来：否则「没记上」会被当成「没有」。
+	ObservationFailures int64
 }
 
 // runState 是单次 Run 的幂等标记：终态只能提交一次。
@@ -288,6 +296,7 @@ loop:
 	r.resubmit(ctx, cfg)
 	rep.Submitted = int(r.delivered.Load())
 	rep.Pending = r.journal.Status().PendingRecords
+	rep.ObservationFailures = r.observationFailures.Load()
 	return rep, nil
 }
 
@@ -396,6 +405,8 @@ func (r *Runner) submitRecord(ctx context.Context, cfg Config, rec journal.Recor
 		return r.submitPhaseRecord(ctx, cfg, rec)
 	}
 	ref := fmt.Sprintf("journal#seq=%d&line=%d", rec.Seq, rec.Line)
+	// 观测先落：来源给得出会话身份与用量就记一份，失败不阻塞这次提交。
+	r.observeFacts(ctx, cfg, rec)
 	decoded, err := r.source.Decode(ctx, ports.DecodeRequest{
 		RecordRef:  ref,
 		RecordType: rec.Kind,

@@ -24,6 +24,7 @@ import (
 	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/runner/dbstore"
 	"github.com/kiwh77/maw/internal/runner/journal"
+	"github.com/kiwh77/maw/internal/runner/observe"
 	"github.com/kiwh77/maw/internal/runner/process"
 	"github.com/kiwh77/maw/internal/runner/session"
 )
@@ -386,7 +387,12 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, error) {
 	if err != nil {
 		return session.Report{}, true, err
 	}
-	r, err := session.New(store, source, jr)
+	// 观测落库：store 实现了观测端口就接上——来源给不出的事实不会硬凑。
+	var opts []session.Option
+	if w, ok := store.(observe.Writer); ok {
+		opts = append(opts, session.WithObserver(w))
+	}
+	r, err := session.New(store, source, jr, opts...)
 	if err != nil {
 		return session.Report{}, true, err
 	}
