@@ -218,6 +218,8 @@ export const boardStore = {
   syncFromLocation() {
     const next = parseRoute(location.search, location.hash, routeKnown) as BoardRoute
     Object.assign(state.route, next)
+    // 前进后退改的是筛选，看板数据也得跟着换：否则地址栏变了、卡片还是旧的。
+    void boardStore.fetchSnapshot()
   },
 
   applyProjectTaskCounts(snap: Snapshot, filtered: boolean) {

@@ -455,10 +455,29 @@ test.describe('B 组：看板真实渲染', () => {
 
     const url = page.url();
     expect(url, '看板视图把筛选丢出地址栏：刷新/分享链接都会回到未筛选状态').toMatch(/status=done|q=/);
+    // 工程锚点走 hash（#<project_id>），不该在查询串里再出现一份。
+    expect(url, '工程筛选在查询串与 hash 里重复出现，解析优先级成了暗规则').not.toMatch(/[?&]project=/);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#task-search');
     await expect(page.locator('#task-search')).toHaveValue(String(firstTask.id));
     await expect(page.locator('#f-status')).toHaveValue('done');
+  });
+
+  test('B-28 切换视图后筛选与搜索词仍在', async ({ page }) => {
+    await openView(page, 'board');
+    await page.selectOption('#f-status', 'done');
+    await page.fill('#task-search', String(firstTask.id));
+    await page.waitForTimeout(600);
+
+    // 切走再切回来：筛选与搜索词都不该丢。
+    await page.locator('#view-nodes').click();
+    await page.waitForTimeout(500);
+    await page.locator('#view-board').click();
+    await page.waitForTimeout(700);
+
+    await expect(page.locator('#f-status')).toHaveValue('done');
+    await expect(page.locator('#task-search')).toHaveValue(String(firstTask.id));
+    expect(page.url()).toMatch(/status=done|q=/);
   });
 });

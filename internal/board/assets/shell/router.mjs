@@ -24,9 +24,12 @@ export const PARAM_DETAIL = "id";
  *
  * 搜索词的参数名是 `q`、字段名是 `search`：两者不同名，早先直接拿参数名当字段名
  * 取值，导致 `q` 永远序列化不出去（切页/刷新就丢搜索词）。这里显式成对登记。
+ *
+ * 工程不在这里登记：工程锚点走 hash（`#<project_id>`），写进查询串会与锚点重复，
+ * 同一份筛选出现两个出处，解析时谁优先就成了暗规则。读的时候仍然接受旧的
+ * `?project=`（旧链接形态不能破），写的时候只写 hash。
  */
 const FILTER_KEYS = [
-  [PARAM_PROJECT, "project"],
   [PARAM_AGENT, "agent"],
   [PARAM_STATUS, "status"],
   [PARAM_SEARCH, "search"],
