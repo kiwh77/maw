@@ -398,6 +398,41 @@ func main() {
 	})
 	root.AddCommand(taskCmd)
 
+	iterationCmd := &cobra.Command{Use: "iteration", Short: i18n.T("cmd.iteration.short")}
+	iterationCmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: i18n.T("cmd.iteration.list.short"),
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.IterationList(cwd)) },
+	})
+	iterationCreateCmd := &cobra.Command{
+		Use:   "create",
+		Short: i18n.T("cmd.iteration.create.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			id, _ := cmd.Flags().GetString("id")
+			name, _ := cmd.Flags().GetString("name")
+			goal, _ := cmd.Flags().GetString("goal")
+			target, _ := cmd.Flags().GetString("target-branch")
+			status, _ := cmd.Flags().GetString("status")
+			printRes(app.IterationCreate(cwd, app.IterationCreateInput{
+				ID: id, Name: name, Goal: goal, TargetBranch: target,
+				Status: status, DryRun: dryRun,
+			}))
+		},
+	}
+	iterationCreateCmd.Flags().String("id", "", i18n.T("flag.iteration_id"))
+	iterationCreateCmd.Flags().String("name", "", i18n.T("flag.iteration_name"))
+	iterationCreateCmd.Flags().String("goal", "", i18n.T("flag.iteration_goal"))
+	iterationCreateCmd.Flags().String("target-branch", "", i18n.T("flag.iteration_target_branch"))
+	iterationCreateCmd.Flags().String("status", "planning", i18n.T("flag.iteration_status"))
+	iterationCmd.AddCommand(iterationCreateCmd)
+	iterationCmd.AddCommand(&cobra.Command{
+		Use:   "show [id]",
+		Short: i18n.T("cmd.iteration.show.short"),
+		Args:  cobra.ExactArgs(1),
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.IterationShow(cwd, args[0])) },
+	})
+	root.AddCommand(iterationCmd)
+
 	hookCmd := &cobra.Command{Use: "hook", Hidden: true}
 	hookCmd.AddCommand(&cobra.Command{
 		Use: "pre-commit",
