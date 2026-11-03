@@ -64,6 +64,7 @@ type ProjectPurgeCounts struct {
 	ProjectionStates      int64 `json:"projection_state"`
 	Notifications         int64 `json:"notification_deliveries"`
 	SystemJobs            int64 `json:"system_jobs"`
+	Iterations            int64 `json:"iterations"`
 	Projects              int64 `json:"projects"`
 }
 
@@ -231,6 +232,7 @@ func PurgeProject(tx *sql.Tx, projectID string) (ProjectPurgeCounts, error) {
 		{&c.Leases, `DELETE FROM resource_leases WHERE project_id = ?`},
 		{&c.Nodes, `DELETE FROM nodes WHERE project_id = ?`},
 		{nil, `DELETE FROM tasks WHERE project_id = ?`},
+		{&c.Iterations, `DELETE FROM iterations WHERE project_id = ?`},
 		{&c.Agents, `DELETE FROM agents WHERE project_id = ?`},
 		{&c.Locks, `DELETE FROM locks WHERE project_id = ?`},
 		{&c.Messages, `DELETE FROM messages WHERE project_id = ?`},

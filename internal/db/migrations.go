@@ -353,6 +353,7 @@ var migrations = []Migration{
 	{Version: 8, Name: "source_usage_projection", SQL: observabilityDDL},
 	{Version: 9, Name: "system_agent_jobs", SQL: systemAgentDDL},
 	{Version: 10, Name: "system_agent_dispatch_ready", SQL: systemAgentDispatchReadyDDL},
+	{Version: 11, Name: "iterations", SQL: iterationsDDL},
 }
 
 // systemAgentDDL 是 v9：系统 Agent 任务队列（阻塞自愈 / 拆题 / 运维）。
@@ -433,6 +434,31 @@ CREATE INDEX IF NOT EXISTS system_jobs_project ON system_jobs(project_id, status
 CREATE UNIQUE INDEX IF NOT EXISTS system_jobs_dedupe
     ON system_jobs(project_id, kind, task_id, trigger_event_id)
     WHERE trigger_event_id > 0;
+`
+
+// iterationsDDL 是 v11：迭代（批次）容器与任务归属。
+//
+// 迭代是任务的容器与合入单位；老任务升级后 iteration_id 为空，表示「未归属任何迭代」。
+const iterationsDDL = `
+CREATE TABLE IF NOT EXISTS iterations (
+    project_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    goal TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    target_branch TEXT NOT NULL DEFAULT '',
+    merge_commit TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    extra_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (project_id, id),
+    CHECK (status IN ('planning', 'running', 'finishing', 'merged', 'abandoned'))
+);
+CREATE INDEX IF NOT EXISTS iterations_project_status
+    ON iterations(project_id, status, created_at);
+ALTER TABLE tasks ADD COLUMN iteration_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS tasks_iteration
+    ON tasks(project_id, iteration_id, priority);
 `
 
 // observabilityDDL 是 v8：来源会话／轮次、用量、投影水位与通知去重身份。
