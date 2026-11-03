@@ -15,14 +15,18 @@ import (
 	"github.com/kiwh77/maw/internal/i18n"
 )
 
+// SnapshotTimeLayout 是看板对外时间字段的统一格式（本地时区）。
+const SnapshotTimeLayout = "2006-01-02 15:04:05"
+
 // Snapshot 看板数据（供 HTML 轮询 / API）
 type Snapshot struct {
 	// EventID also invalidates open task logs when only an event was appended.
 	EventID int64 `json:"-"`
-	// UpdatedAt 是**数据水位**（最近事件发生时间），不是渲染时刻。
-	// 渲染时刻另见 GeneratedAt，两者混用会让「数据停更」看起来一直在更新。
+	// UpdatedAt 是数据水位（最近一次业务数据变更的可观测时间），
+	// 不再等于渲染时刻：它只在数据真的变化时才推进。
 	UpdatedAt string `json:"updated_at"`
-	// GeneratedAt 是本次快照生成时间；只用于诊断与缓存，不当作数据新鲜度。
+	// GeneratedAt 是本次快照的生成时刻，仅供前端展示「刚刷新」，
+	// 不得用来判断数据新鲜度（同一份数据轮询多次，只有它变化）。
 	GeneratedAt   string         `json:"generated_at"`
 	MaxParallel   int            `json:"max_parallel"`
 	Total         int            `json:"total"`
@@ -31,15 +35,61 @@ type Snapshot struct {
 	Blocked       int            `json:"blocked"`
 	Percent       int            `json:"percent"`
 	NextHint      string         `json:"next_hint"`
-	Risks         []string       `json:"risks"`
+	Risks         RiskList       `json:"risks"`
 	Counts        map[string]int `json:"counts"`
-	Tasks         []*db.Task     `json:"tasks"`
-	Agents        []*db.Agent    `json:"agents"`
-	Projects      []*db.Project  `json:"projects"`
+	Tasks         TaskList       `json:"tasks"`
+	Agents        AgentList      `json:"agents"`
+	Projects      ProjectList    `json:"projects"`
 	FilterProject string         `json:"filter_project"`
 	FilterAgent   string         `json:"filter_agent"`
 	FilterStatus  string         `json:"filter_status"`
 	Global        bool           `json:"global"`
+}
+
+// TaskList / AgentList / ProjectList / RiskList 把「nil 集合」固定映射成 JSON []。
+// 装配层会在 BuildSnapshot 之后覆盖这些字段（例如空库的工程列表），
+// 如果直接用裸切片，nil 会被编码成 null，前端就得为两种空值各写一条分支。
+type TaskList []*db.Task
+
+// AgentList 见 TaskList。
+type AgentList []*db.Agent
+
+// ProjectList 见 TaskList。
+type ProjectList []*db.Project
+
+// RiskList 见 TaskList。
+type RiskList []string
+
+// MarshalJSON 让 nil 列表输出 []，语义等同「这批数据是空的」而不是「这批数据缺失」。
+func (l TaskList) MarshalJSON() ([]byte, error) {
+	if l == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]*db.Task(l))
+}
+
+// MarshalJSON 见 TaskList。
+func (l AgentList) MarshalJSON() ([]byte, error) {
+	if l == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]*db.Agent(l))
+}
+
+// MarshalJSON 见 TaskList。
+func (l ProjectList) MarshalJSON() ([]byte, error) {
+	if l == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]*db.Project(l))
+}
+
+// MarshalJSON 见 TaskList。
+func (l RiskList) MarshalJSON() ([]byte, error) {
+	if l == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]string(l))
 }
 
 func byStatus(tasks []*db.Task) map[string][]*db.Task {
@@ -65,7 +115,7 @@ func BuildSnapshot(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapsh
 	for _, t := range tasks {
 		counts[t.Status]++
 	}
-	var risks []string
+	risks := []string{}
 	for _, t := range by["blocked"] {
 		reason := t.BlockedReason
 		if reason == "" {
@@ -102,20 +152,13 @@ func BuildSnapshot(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapsh
 	if agents == nil {
 		agents = []*db.Agent{}
 	}
-	// 空集合一律编码成 []：null 会让客户端每处都要兜底，也会让「查过没有」与「没查」
-	// 在契约层分辨不出来。
 	if tasks == nil {
 		tasks = []*db.Task{}
 	}
-	if risks == nil {
-		risks = []string{}
-	}
-	now := time.Now()
-	return Snapshot{
-		// 数据水位由调用方差回（见 loadBoardSnapshot）；这里先给渲染时刻，保证只拿
-		// BuildSnapshot 的调用方（终端渲染、测试夹具）仍有一个可读值。
-		UpdatedAt:   now.Local().Format("2006-01-02 15:04:05"),
-		GeneratedAt: now.Local().Format("2006-01-02 15:04:05"),
+	snap := Snapshot{
+		// 数据水位来自数据本身；生成时刻单独记，避免轮询把 updated_at 一直往前推。
+		UpdatedAt:   dataWatermark(tasks, agents),
+		GeneratedAt: time.Now().Local().Format(SnapshotTimeLayout),
 		MaxParallel: maxParallel,
 		Total:       total,
 		Done:        done,
@@ -130,6 +173,87 @@ func BuildSnapshot(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapsh
 		Projects:    []*db.Project{},
 		Global:      true,
 	}
+	snap.Normalize()
+	return snap
+}
+
+// Normalize 把集合字段归一为非 nil 空切片，保证 JSON 恒为 [] 而不是 null。
+// 装配层（空库、未知工程、无 risks）可以覆盖字段，因此导出快照前必须再归一一次。
+func (s *Snapshot) Normalize() {
+	if s == nil {
+		return
+	}
+	if s.Tasks == nil {
+		s.Tasks = []*db.Task{}
+	}
+	if s.Agents == nil {
+		s.Agents = []*db.Agent{}
+	}
+	if s.Projects == nil {
+		s.Projects = []*db.Project{}
+	}
+	if s.Risks == nil {
+		s.Risks = []string{}
+	}
+	if s.Counts == nil {
+		s.Counts = map[string]int{}
+	}
+}
+
+// MarkDataWatermark 用装配层的真实事件水位（事件表最近 ts）覆盖推算值。
+// 传空或不可解析时间表示「没有任何数据水位」，updated_at 归零而不是伪造当前时间。
+func (s *Snapshot) MarkDataWatermark(ts string) {
+	if s == nil {
+		return
+	}
+	if t, ok := parseSnapshotTime(ts); ok {
+		s.UpdatedAt = t.Local().Format(SnapshotTimeLayout)
+		return
+	}
+	s.UpdatedAt = ""
+}
+
+// dataWatermark 从任务心跳与 Agent 活跃时间里取最大值，作为「数据最近变动」的近似水位。
+func dataWatermark(tasks []*db.Task, agents []*db.Agent) string {
+	latest, ok := time.Time{}, false
+	consider := func(raw string) {
+		t, parsed := parseSnapshotTime(raw)
+		if !parsed {
+			return
+		}
+		if !ok || t.After(latest) {
+			latest, ok = t, true
+		}
+	}
+	for _, t := range tasks {
+		if t != nil {
+			consider(t.Heartbeat)
+		}
+	}
+	for _, a := range agents {
+		if a != nil {
+			consider(a.LastSeen)
+			consider(a.RegisteredAt)
+		}
+	}
+	if !ok {
+		return ""
+	}
+	return latest.Local().Format(SnapshotTimeLayout)
+}
+
+// parseSnapshotTime 兼容状态库里的 RFC3339（UTC）与看板既有展示格式。
+func parseSnapshotTime(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, SnapshotTimeLayout, "2006-01-02T15:04:05"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func RenderTerminal(s Snapshot) string {
@@ -165,7 +289,11 @@ func RenderTerminal(s Snapshot) string {
 		}
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, i18n.T("term.updated_at")+"\n\n", s.UpdatedAt)
+	updated := s.UpdatedAt
+	if updated == "" {
+		updated = i18n.T("term.none")
+	}
+	fmt.Fprintf(&b, i18n.T("term.updated_at")+"\n\n", updated)
 	activeAgents := make([]*db.Agent, 0, len(agents))
 	for _, a := range agents {
 		if a != nil && a.Status != "idle" {
@@ -297,6 +425,7 @@ func Write(home string, snap Snapshot) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
+	snap.Normalize()
 	b, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return "", err

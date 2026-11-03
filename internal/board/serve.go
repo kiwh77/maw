@@ -120,6 +120,7 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		}
 		out := map[string]any{
 			"updated_at":     snap.UpdatedAt,
+			"generated_at":   snap.GeneratedAt,
 			"max_parallel":   snap.MaxParallel,
 			"total":          snap.Total,
 			"done":           snap.Done,

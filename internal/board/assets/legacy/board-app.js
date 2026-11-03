@@ -1870,7 +1870,8 @@ async function tick() {
 function updateSyncStatus(error = "") {
   const subtitle = document.getElementById("subtitle");
   const label = !snapshotHealthy ? t("sync_fail") : sseConnected ? t("live") : t("poll");
-  subtitle.innerHTML = '<span class="live'+(!snapshotHealthy ? ' err' : '')+'"><span class="dot"></span>'+label+'</span>' + (lastSnap ? '<time>'+esc(fmtTime(lastSnap.updated_at))+'</time>' : '');
+  // 顶栏时间展示快照生成时刻（generated_at）；updated_at 是数据水位，留给「尚无事件」语义。
+  subtitle.innerHTML = '<span class="live'+(!snapshotHealthy ? ' err' : '')+'"><span class="dot"></span>'+label+'</span>' + (lastSnap ? '<time>'+esc(fmtTime(lastSnap.generated_at || lastSnap.updated_at))+'</time>' : '');
   subtitle.title = error || (sseConnected ? t("live_hint") : t("poll_hint"));
 }
 
