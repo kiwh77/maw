@@ -352,6 +352,7 @@ var migrations = []Migration{
 	{Version: 7, Name: "delivery_manifests", SQL: deliveryDDL},
 	{Version: 8, Name: "source_usage_projection", SQL: observabilityDDL},
 	{Version: 9, Name: "system_agent_jobs", SQL: systemAgentDDL},
+	{Version: 10, Name: "system_agent_dispatch_ready", SQL: systemAgentDispatchReadyDDL},
 }
 
 // systemAgentDDL 是 v9：系统 Agent 任务队列（阻塞自愈 / 拆题 / 运维）。
@@ -381,6 +382,52 @@ CREATE TABLE IF NOT EXISTS system_jobs (
     CHECK (attempts >= 0),
     CHECK (max_attempts >= 1)
 );
+CREATE INDEX IF NOT EXISTS system_jobs_status ON system_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS system_jobs_project ON system_jobs(project_id, status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS system_jobs_dedupe
+    ON system_jobs(project_id, kind, task_id, trigger_event_id)
+    WHERE trigger_event_id > 0;
+`
+
+// systemAgentDispatchReadyDDL 是 v10：system_jobs.kind 放行 dispatch_ready。
+//
+// SQLite 不能就地修改 CHECK 约束，只能按原样重建表并回灌数据；索引随旧表删除后重建。
+const systemAgentDispatchReadyDDL = `
+CREATE TABLE system_jobs_v10 (
+    job_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    trigger_event_id INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    decision_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    locked_by TEXT NOT NULL DEFAULT '',
+    locked_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    CHECK (kind IN ('unblock_assist', 'task_split', 'ops_run', 'dispatch_ready')),
+    CHECK (status IN ('queued', 'running', 'done', 'failed', 'escalated', 'cancelled')),
+    CHECK (attempts >= 0),
+    CHECK (max_attempts >= 1)
+);
+INSERT INTO system_jobs_v10(
+    job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
+    decision_json, result_json, attempts, max_attempts, locked_by, locked_at,
+    created_at, updated_at, finished_at
+)
+SELECT
+    job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
+    decision_json, result_json, attempts, max_attempts, locked_by, locked_at,
+    created_at, updated_at, finished_at
+FROM system_jobs;
+DROP TABLE system_jobs;
+ALTER TABLE system_jobs_v10 RENAME TO system_jobs;
 CREATE INDEX IF NOT EXISTS system_jobs_status ON system_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS system_jobs_project ON system_jobs(project_id, status, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS system_jobs_dedupe

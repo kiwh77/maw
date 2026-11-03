@@ -33,7 +33,7 @@ func KindAllowed(kind string, cfg config.SystemAgent, explicit bool) bool {
 	}
 	if explicit {
 		switch kind {
-		case SystemKindUnblock, SystemKindTaskSplit, SystemKindOpsRun:
+		case SystemKindUnblock, SystemKindTaskSplit, SystemKindOpsRun, SystemKindDispatchReady:
 			return true
 		}
 		return false
@@ -65,7 +65,8 @@ func OpsAllowed(cmd string, allowlist []string) bool {
 }
 
 const (
-	SystemKindUnblock   = "unblock_assist"
-	SystemKindTaskSplit = "task_split"
-	SystemKindOpsRun    = "ops_run"
+	SystemKindUnblock       = "unblock_assist"
+	SystemKindTaskSplit     = "task_split"
+	SystemKindOpsRun        = "ops_run"
+	SystemKindDispatchReady = "dispatch_ready"
 )

@@ -32,15 +32,16 @@ type SystemJob struct {
 const ProjectionSystemAgentEvents = "system_agent.events"
 
 const (
-	SystemJobQueued     = "queued"
-	SystemJobRunning    = "running"
-	SystemJobDone       = "done"
-	SystemJobFailed     = "failed"
-	SystemJobEscalated  = "escalated"
-	SystemJobCancelled  = "cancelled"
-	SystemKindUnblock   = "unblock_assist"
-	SystemKindTaskSplit = "task_split"
-	SystemKindOpsRun    = "ops_run"
+	SystemJobQueued         = "queued"
+	SystemJobRunning        = "running"
+	SystemJobDone           = "done"
+	SystemJobFailed         = "failed"
+	SystemJobEscalated      = "escalated"
+	SystemJobCancelled      = "cancelled"
+	SystemKindUnblock       = "unblock_assist"
+	SystemKindTaskSplit     = "task_split"
+	SystemKindOpsRun        = "ops_run"
+	SystemKindDispatchReady = "dispatch_ready"
 )
 
 // InsertSystemJob 插入作业；与 UNIQUE(project,kind,task,trigger) 冲突时返回 (nil, nil) 表示幂等跳过。
