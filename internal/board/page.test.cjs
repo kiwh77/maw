@@ -330,17 +330,25 @@ test('VN-704 注册表同时登记 legacy 与 vnext 视图且分组稳定', asyn
   assert.equal(registry.resolveView(views, 'nope').id, 'execution');
   const groups = views.navModel();
   assert.deepEqual(groups.map(group => group.id), ['flow', 'control', 'review', 'settings']);
-  assert.deepEqual(groups[1].items.map(def => def.id), ['nodes', 'tasks', 'runs', 'deliveries']);
+  assert.deepEqual(groups[1].items.map(def => def.id), ['tasks', 'runs', 'deliveries']);
+  // 节点已迁入设置组，与控制组的深链视图分开。
+  assert.equal(views.get('nodes').group, 'settings');
+  assert.deepEqual(groups[3].items.map(def => def.id), ['nodes', 'projects', 'settings']);
 
   // 置顶工作台：唯一进侧栏的 flow 项，菜单名单独给（nav.workbench），不占用视图标题。
   assert.deepEqual(views.sidebarPinned().map(def => def.id), ['board']);
   assert.equal(views.sidebarPinned()[0].navKey, 'nav.workbench');
   assert.equal(registry.navLabelKey(views.sidebarPinned()[0]), 'nav.workbench');
   assert.equal(registry.navLabelKey(views.get('nodes')), 'view.nodes');
-  const sidebarIds = views.sidebarNavModel().flatMap(group => group.items.map(def => def.id));
+  const sidebarGroups = views.sidebarNavModel();
+  assert.deepEqual(sidebarGroups.map(group => group.id), ['review', 'settings']);
+  const sidebarIds = sidebarGroups.flatMap(group => group.items.map(def => def.id));
   assert.equal(sidebarIds.includes('board'), false, '置顶项不再重复出现在分组里');
   assert.equal(sidebarIds.includes('factory'), false);
-  assert.equal(sidebarIds.length, 10);
+  // 控制组不再进侧栏：tasks/runs/deliveries 只保留深链入口。
+  assert.deepEqual(['tasks', 'runs', 'deliveries'].filter(id => sidebarIds.includes(id)), []);
+  assert.equal(sidebarIds.includes('nodes'), true);
+  assert.equal(sidebarIds.length, 7);
 });
 
 test('VN-704 路由保留旧工程锚点并让 vnext 视图可往返', async () => {
@@ -361,6 +369,14 @@ test('VN-704 路由保留旧工程锚点并让 vnext 视图可往返', async () 
   // 工程只写锚点，不重复写进查询串（同一份筛选不留两个出处）。
   assert.equal(router.serializeRoute(detail), '/?view=runs&id=run_1#abc');
 
+  // 控制组视图仍在注册表里：侧栏没有入口，但深链 ?view=tasks 仍能解析并渲染。
+  const tasksLink = router.parseRoute('?view=tasks&project=abc&id=T-1', '', known);
+  assert.equal(tasksLink.view, 'tasks');
+  assert.equal(tasksLink.project, 'abc');
+  assert.equal(tasksLink.detail, '');
+  assert.equal(views.get('tasks').group, 'control');
+  assert.equal(router.serializeRoute(tasksLink), '/?view=tasks#abc');
+
   // 没有合法 view 时不分有无工程，都回默认页；只有能开详情的视图才收 id。
   assert.equal(router.parseRoute('?id=t-1', '', known).view, 'execution');
   assert.equal(router.parseRoute('?id=t-1', '', known).detail, '');
@@ -377,7 +393,7 @@ test('VN-704 路由保留旧工程锚点并让 vnext 视图可往返', async () 
   assert.equal(router.sameRoute(detail, router.parseRoute('?view=runs&project=abc&id=run_1', '', known)), true);
   assert.deepEqual(
     views.sidebarNavModel().map(group => group.id),
-    ['control', 'review', 'settings'],
+    ['review', 'settings'],
   );
 });
 
@@ -482,7 +498,7 @@ test('VN-705 回顾／统计／设置登记为独立分组，与执行视图共�
   const review = views.navModel().find(group => group.id === 'review');
   assert.deepEqual(review.items.map(def => def.id), ['timeline', 'activity', 'sessions', 'analytics']);
   const settings = views.navModel().find(group => group.id === 'settings');
-  assert.deepEqual(settings.items.map(def => def.id), ['projects', 'settings']);
+  assert.deepEqual(settings.items.map(def => def.id), ['nodes', 'projects', 'settings']);
 
   // 每个视图的四组语言键都必须存在，且中英都有；缺一版等于没做完。
   views.all.forEach(def => {

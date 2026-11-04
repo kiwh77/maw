@@ -45,8 +45,13 @@ export const DEFAULT_VIEW = "execution";
  */
 export const DEFAULT_VIEW_NO_PROJECT = "execution";
 
-/** 侧栏不展示的分组：flow 只留置顶的工作台，工坊/拓扑改由选中工程后的 toolbar 进入。 */
-export const SIDEBAR_HIDDEN_GROUPS = Object.freeze(["flow"]);
+/**
+ * 侧栏不展示的分组。
+ * - flow：只留置顶的工作台，工坊/拓扑改由选中工程后的 toolbar 进入；
+ * - control：tasks/runs/deliveries 与执行视图重叠，仅保留深链入口，不再占侧栏。
+ * 节点已迁入设置组，仍从侧栏进入。
+ */
+export const SIDEBAR_HIDDEN_GROUPS = Object.freeze(["flow", "control"]);
 
 /**
  * 侧栏置顶项：不归属任何分组，直接排在导航最前，不带分组标题。
@@ -61,8 +66,9 @@ export const SIDEBAR_PINNED_IDS = Object.freeze(["board"]);
 /**
  * 导航分组。
  *
- * 分组顺序即导航顺序：先看流程（谁在干什么），再看控制（节点／任务／运行／交付），
- * 然后是回顾统计，最后是设置。language 键统一为 `nav.<group>`，不再在 navModel 里
+ * 分组顺序即导航顺序：先看流程（谁在干什么），再看控制（任务／运行／交付），
+ * 然后是回顾统计，最后是设置（节点／工程／策略）。control 组不进侧栏，只支撑
+ * 深链页的分组与面包屑。language 键统一为 `nav.<group>`，不再在 navModel 里
  * 用三元表达式逐个猜——新增一组就必须在语言簿里补齐中英两版。
  */
 export const VIEW_GROUPS = Object.freeze([
@@ -77,7 +83,10 @@ export const VIEW_DEFS = Object.freeze([
   Object.freeze({ id: "board", group: "flow", legacy: true, titleKey: "view.board", navKey: "nav.workbench", headingKey: "heading.board", descKey: "desc.board", eyebrowKey: "eyebrow.board", symbol: "▦", dataKind: "", requiresProject: false }),
   Object.freeze({ id: "factory", group: "flow", legacy: true, titleKey: "view.factory", headingKey: "heading.factory", descKey: "desc.factory", eyebrowKey: "eyebrow.factory", symbol: "⚒", dataKind: "", requiresProject: false }),
   Object.freeze({ id: "topo", group: "flow", legacy: true, titleKey: "view.topo", headingKey: "heading.topo", descKey: "desc.topo", eyebrowKey: "eyebrow.topo", symbol: "⤳", dataKind: "", requiresProject: true }),
-  Object.freeze({ id: "nodes", group: "control", legacy: false, titleKey: "view.nodes", headingKey: "heading.nodes", descKey: "desc.nodes", eyebrowKey: "eyebrow.nodes", symbol: "▤", dataKind: "nodes", requiresProject: false }),
+  // 设置组：节点、工程清单与受管执行策略。不是筛选目标，而是配置入口。
+  // 节点从控制组迁来：侧栏不再有控制组，节点是唯一保留的常规入口。
+  Object.freeze({ id: "nodes", group: "settings", legacy: false, titleKey: "view.nodes", headingKey: "heading.nodes", descKey: "desc.nodes", eyebrowKey: "eyebrow.nodes", symbol: "▤", dataKind: "nodes", requiresProject: false }),
+  // 控制组：任务／运行／交付与执行视图重叠，只保留深链入口，不进侧栏。
   Object.freeze({ id: "tasks", group: "control", legacy: false, titleKey: "view.tasks", headingKey: "heading.tasks", descKey: "desc.tasks", eyebrowKey: "eyebrow.tasks", symbol: "☰", dataKind: "tasks", requiresProject: false }),
   Object.freeze({ id: "runs", group: "control", legacy: false, titleKey: "view.runs", headingKey: "heading.runs", descKey: "desc.runs", eyebrowKey: "eyebrow.runs", symbol: "⌁", dataKind: "runs", requiresProject: false }),
   Object.freeze({ id: "deliveries", group: "control", legacy: false, titleKey: "view.deliveries", headingKey: "heading.deliveries", descKey: "desc.deliveries", eyebrowKey: "eyebrow.deliveries", symbol: "✓", dataKind: "deliveries", requiresProject: false }),
@@ -138,18 +147,22 @@ export function createRegistry(defs = VIEW_DEFS) {
       const def = byId.get(id);
       return Boolean(def && def.requiresProject);
     },
-    /** 导航模型：按分组返回标题键与条目，保持定义顺序。 */
+    /** 导航模型：按 VIEW_GROUPS 分组顺序返回标题键与条目，组内保持定义顺序。 */
     navModel() {
-      const groups = [];
+      const groups = VIEW_GROUPS.map(group => ({ id: group.id, labelKey: group.labelKey, items: [] }));
+      const extras = new Map();
       list.forEach(def => {
         let group = groups.find(item => item.id === def.group);
         if (!group) {
-          group = { id: def.group, labelKey: groupLabelKey(def.group), items: [] };
-          groups.push(group);
+          group = extras.get(def.group) || { id: def.group, labelKey: groupLabelKey(def.group), items: [] };
+          if (!extras.has(def.group)) {
+            extras.set(def.group, group);
+            groups.push(group);
+          }
         }
         group.items.push(def);
       });
-      return groups;
+      return groups.filter(group => group.items.length > 0);
     },
     /** 侧栏置顶项：按定义顺序，渲染时不套分组标题。 */
     sidebarPinned() {
