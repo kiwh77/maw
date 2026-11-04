@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/engine/dispatch"
 	"github.com/kiwh77/maw/internal/engine/model"
 )
@@ -244,5 +247,103 @@ func TestRunMetaForFallsBackLikeRunner(t *testing.T) {
 	}
 	if meta.ProjectID != f.pc.ID() || meta.GlobalDB != f.pc.GlobalDB {
 		t.Fatalf("工程上下文未补全: %+v", meta)
+	}
+}
+
+// seedOccupiedNodeRun 造一条「run 已占用 node 槽位」的现场，供 argv 回退测试用。
+func seedOccupiedNodeRun(t *testing.T, f *fixture, nodeID string, meta map[string]any) dispatch.Operation {
+	t.Helper()
+	var op dispatch.Operation
+	err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		if err := db.UpsertNode(tx, &db.Node{
+			ID: nodeID, ProjectID: f.pc.ID(), Label: nodeID, SlotLimit: 1, Meta: meta,
+		}); err != nil {
+			return err
+		}
+		inst, err := db.CreateInstance(tx, f.pc.ID(), "CLI-1", db.InstanceDraft{Title: "node argv"})
+		if err != nil {
+			return err
+		}
+		out, err := db.ClaimRun(tx, db.ClaimSpec{
+			ProjectID: f.pc.ID(), InstanceID: string(inst.InstanceID),
+			VersionNo: 1, Generation: 1, NodeID: nodeID,
+			Workspace: f.repo, Coordinator: "test", IdempotencyKey: "test-node-argv",
+		})
+		if err != nil {
+			return err
+		}
+		op = dispatch.Operation{
+			OperationID: model.OperationID(out.Operation.ID), ProjectID: model.ProjectID(f.pc.ID()),
+			RunID: model.RunID(out.Run.ID), Instance: model.InstanceID(out.Run.InstanceID),
+			Generation: model.Generation(out.Run.Generation),
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed occupied node: %v", err)
+	}
+	return op
+}
+
+func TestSystemPolicyUsesAllowedNodesFromConfig(t *testing.T) {
+	f := newFixture(t)
+	f.pc.Config.Managed.AllowedNodes = []string{"node-a", " node-b ", "node-a"}
+	rt, err := NewRuntime(f.pc, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := (systemDispatchProjection{rt: rt, workerNode: "worker-x"}).Policy(context.Background(), f.pc.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(policy.Projects) != 1 {
+		t.Fatalf("projects=%+v", policy.Projects)
+	}
+	got := policy.Projects[0].AllowedNodes
+	want := []model.NodeID{"node-a", "node-b"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("allowed_nodes=%v want %v", got, want)
+	}
+}
+
+func TestPrepareRunnerArtifactsFallsBackToOccupiedNodeArgv(t *testing.T) {
+	f := newFixture(t)
+	rt, err := NewRuntime(f.pc, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(managedLaunchSpecEnv, "")
+	t.Setenv(managedLaunchCmdEnv, "")
+
+	op := seedOccupiedNodeRun(t, f, "cli-a", map[string]any{"argv": []string{"/bin/echo", "ok"}})
+	opDir := t.TempDir()
+	if err := rt.PrepareRunnerArtifacts(opDir, op); err != nil {
+		t.Fatalf("PrepareRunnerArtifacts: %v", err)
+	}
+	spec := readLaunchSpec(t, opDir)
+	if spec.Executable != "/bin/echo" {
+		t.Fatalf("executable=%q", spec.Executable)
+	}
+	if len(spec.Argv) != 1 || spec.Argv[0] != "ok" {
+		t.Fatalf("argv=%v", spec.Argv)
+	}
+}
+
+func TestPrepareRunnerArtifactsSkipsNodeWithoutArgv(t *testing.T) {
+	f := newFixture(t)
+	rt, err := NewRuntime(f.pc, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(managedLaunchSpecEnv, "")
+	t.Setenv(managedLaunchCmdEnv, "")
+
+	op := seedOccupiedNodeRun(t, f, "cli-empty", map[string]any{"entry_state": "ready"})
+	opDir := t.TempDir()
+	if err := rt.PrepareRunnerArtifacts(opDir, op); err != nil {
+		t.Fatalf("PrepareRunnerArtifacts: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(opDir, launchSpecFile)); !os.IsNotExist(err) {
+		t.Fatalf("节点没有 argv 时不应写 launch_spec.json: %v", err)
 	}
 }

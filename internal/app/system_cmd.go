@@ -325,10 +325,32 @@ func (p systemDispatchProjection) Policy(_ context.Context, projectID string) (m
 			ManagedExecutionLimit: limit,
 		},
 	}
-	if node := strings.TrimSpace(p.workerNode); node != "" {
+	// 节点白名单优先读 config [managed].allowed_nodes；为空时回退 system_agent.worker_node，
+	// 两者都没有就不写 ProjectRule（表示不限制）。
+	var allowed []model.NodeID
+	if p.rt != nil && p.rt.pc != nil && p.rt.pc.Config != nil {
+		seen := map[string]struct{}{}
+		for _, id := range p.rt.pc.Config.Managed.AllowedNodes {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			allowed = append(allowed, model.NodeID(id))
+		}
+	}
+	if len(allowed) == 0 {
+		if node := strings.TrimSpace(p.workerNode); node != "" {
+			allowed = []model.NodeID{model.NodeID(node)}
+		}
+	}
+	if len(allowed) > 0 {
 		policy.Projects = []matching.ProjectRule{{
 			ProjectID:    model.ProjectID(projectID),
-			AllowedNodes: []model.NodeID{model.NodeID(node)},
+			AllowedNodes: allowed,
 		}}
 	}
 	return policy, nil
