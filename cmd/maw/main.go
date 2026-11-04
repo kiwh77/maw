@@ -197,11 +197,13 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			agent, _ := cmd.Flags().GetString("agent")
 			logPath, _ := cmd.Flags().GetString("log-path")
-			printRes(app.Next(cwd, agent, dryRun, logPath))
+			claim, _ := cmd.Flags().GetBool("claim")
+			printRes(app.NextWith(cwd, agent, app.NextOptions{DryRun: dryRun, LogPath: logPath, Claim: claim}))
 		},
 	}
 	nextCmd.Flags().String("agent", "", i18n.T("flag.agent"))
 	nextCmd.Flags().String("log-path", "", i18n.T("flag.log_path"))
+	nextCmd.Flags().Bool("claim", false, i18n.T("flag.claim"))
 	root.AddCommand(nextCmd)
 
 	progCmd := &cobra.Command{

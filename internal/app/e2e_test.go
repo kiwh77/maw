@@ -80,7 +80,7 @@ merge_order = 2
 		t.Fatalf("plan apply: %v\n%s", err, out)
 	}
 
-	if out, err := run([]string{"MAW_AGENT=w1"}, "next"); err != nil {
+	if out, err := run([]string{"MAW_AGENT=w1"}, "next", "--claim"); err != nil {
 		t.Fatalf("next w1: %v\n%s", err, out)
 	}
 	wt1 := filepath.Join(repo, ".worktrees", "w1")
@@ -102,7 +102,7 @@ merge_order = 2
 		t.Fatalf("submit w1: %v\n%s", err, out)
 	}
 
-	if out, err := run([]string{"MAW_AGENT=w2"}, "next"); err != nil {
+	if out, err := run([]string{"MAW_AGENT=w2"}, "next", "--claim"); err != nil {
 		t.Fatalf("next w2: %v\n%s", err, out)
 	}
 	wt2 := filepath.Join(repo, ".worktrees", "w2")
@@ -243,7 +243,7 @@ merge_order = 2
 	wt := filepath.Join(repo, ".worktrees", "w1")
 	ignored := filepath.Join(wt, "node_modules", "keep.txt")
 
-	if out, err := run([]string{"MAW_AGENT=w1"}, "next"); err != nil {
+	if out, err := run([]string{"MAW_AGENT=w1"}, "next", "--claim"); err != nil {
 		t.Fatalf("next T-001: %v\n%s", err, out)
 	}
 	if st, err := os.Stat(wt); err != nil || !st.IsDir() {
@@ -268,7 +268,7 @@ merge_order = 2
 		t.Fatalf("ignored deps should survive merge: %v %q", err, b)
 	}
 
-	if out, err := run([]string{"MAW_AGENT=w1"}, "next"); err != nil {
+	if out, err := run([]string{"MAW_AGENT=w1"}, "next", "--claim"); err != nil {
 		t.Fatalf("next T-002: %v\n%s", err, out)
 	}
 	// Same path reused
@@ -386,7 +386,7 @@ merge_order = 1
 	if out, err := run(nil, "plan", "apply", bp, "--yes"); err != nil {
 		t.Fatalf("plan apply: %v\n%s", err, out)
 	}
-	if out, err := run([]string{"MAW_AGENT=w1"}, "next"); err != nil {
+	if out, err := run([]string{"MAW_AGENT=w1"}, "next", "--claim"); err != nil {
 		t.Fatalf("next: %v\n%s", err, out)
 	}
 	wt := filepath.Join(repo, ".worktrees", "w1")

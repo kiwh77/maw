@@ -32,12 +32,30 @@ import (
 	"github.com/kiwh77/maw/internal/workspace"
 )
 
+// NextOptions 是 next 的查询／领取开关。
+//
+// 查询与领取必须分离：默认只预览下一题候选，只有显式 Claim 才动任务状态、
+// 建 Run/租约、准备 worktree。误敲一次 next 不应该占坑。
+type NextOptions struct {
+	DryRun  bool
+	LogPath string
+	Claim   bool
+}
+
+// Next 保留旧的程序化入口：调用方明确要求领取。
+//
+// CLI 走 NextWith，默认不领取；这里的兼容签名让既有调用方（含受管链路测试）
+// 语义不变，避免「换个名字顺手改了行为」。
 func Next(cwd, agentFlag string, dryRun bool, logPath string) (Result, error) {
+	return NextWith(cwd, agentFlag, NextOptions{DryRun: dryRun, LogPath: logPath, Claim: true})
+}
+
+func NextWith(cwd, agentFlag string, opts NextOptions) (Result, error) {
 	pc, err := resolveProject(cwd)
 	if err != nil {
 		return nil, err
 	}
-	logPath = strings.TrimSpace(logPath)
+	logPath := strings.TrimSpace(opts.LogPath)
 	if logPath != "" {
 		abs, verr := board.ValidateLogPath(logPath)
 		if verr != nil {
@@ -56,6 +74,18 @@ func Next(cwd, agentFlag string, dryRun bool, logPath string) (Result, error) {
 		return nil, err
 	}
 	if task != nil {
+		// 查询模式只看不改：已持有的任务如实报出，状态收敛与目录准备留给 --claim。
+		if !opts.Claim {
+			res := Result{
+				"ok": true, "preview": true, "held": true, "task": task, "agent": who,
+				"project_id": pc.ID(), "worktree": filepath.Join(pc.Repo, task.Worktree),
+				"limits": limitsOf(pc),
+				"next":   i18n.T("next.preview_held", who),
+			}
+			attachRunMeta(res, pc, task)
+			attachAgentNameMeta(res, who, allocated, nameWarn)
+			return res, nil
+		}
 		// 卡在 claimed 的续做要把状态收敛到 in_progress，否则 submit 会拒绝
 		// （它只认 in_progress／self_check／conflict），任务就永远停在中途。
 		if err := resumeClaim(pc, task, who); err != nil {
@@ -82,13 +112,17 @@ func Next(cwd, agentFlag string, dryRun bool, logPath string) (Result, error) {
 	}
 
 	wtRel := filepath.Join(".worktrees", who)
-	if dryRun {
+	if opts.DryRun || !opts.Claim {
 		preview, err := pickClaimTarget(pc, who)
 		if err != nil {
 			return nil, err
 		}
-		res := Result{"ok": true, "dry_run": true, "task": preview, "agent": who,
-			"project_id": pc.ID(), "limits": limitsOf(pc)}
+		res := Result{"ok": true, "preview": true, "task": preview, "agent": who,
+			"project_id": pc.ID(), "limits": limitsOf(pc),
+			"next": i18n.T("next.preview_only", who)}
+		if opts.DryRun {
+			res["dry_run"] = true
+		}
 		attachAgentNameMeta(res, who, allocated, nameWarn)
 		return res, nil
 	}

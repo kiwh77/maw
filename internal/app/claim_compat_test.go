@@ -629,3 +629,121 @@ func TestConcurrentNextOnlyOneWins(t *testing.T) {
 		t.Fatalf("赢家应推进到 in_progress，实际 %s", task.Status)
 	}
 }
+
+// TestNextWithoutClaimOnlyPreviews 是 CQ-002 的第一条验收：裸 next 只查询。
+// 任务必须仍是 ready，不能建 Run、不能写 worktree、不能改归属。
+func TestNextWithoutClaimOnlyPreviews(t *testing.T) {
+	f := newFixture(t)
+	const id = "VN-Q1"
+	f.seedTask(id, "ready", "", []string{"mod_q1/**"})
+
+	res, err := NextWith(f.repo, "cursor-peek", NextOptions{})
+	if err != nil {
+		t.Fatalf("next（查询）: %v", err)
+	}
+	if preview, _ := res["preview"].(bool); !preview {
+		t.Fatalf("查询模式必须标记 preview：%v", res)
+	}
+	if _, ok := res["run_id"]; ok {
+		t.Fatalf("查询模式不得产出 run_id：%v", res)
+	}
+	if _, ok := res["env"]; ok {
+		t.Fatalf("查询模式不得给出领取环境变量：%v", res)
+	}
+
+	task := f.task(id)
+	if task.Status != string(model.TaskReady) {
+		t.Fatalf("查询后任务仍应为 ready，实际 %s", task.Status)
+	}
+	if task.Owner != "" {
+		t.Fatalf("查询不得占用归属，实际 owner=%q", task.Owner)
+	}
+	if n := activeRunCount(t, f); n != 0 {
+		t.Fatalf("查询不得建 Run，实际 %d 条", n)
+	}
+	if _, statErr := os.Stat(filepath.Join(f.repo, ".worktrees", "cursor-peek")); statErr == nil {
+		t.Fatal("查询不得创建 worktree")
+	}
+}
+
+// TestNextClaimMatchesLegacy 是第二条验收：显式 --claim 之后的状态、run_id 与
+// worktree 与改造前的正式领取完全一致。
+func TestNextClaimMatchesLegacy(t *testing.T) {
+	f := newFixture(t)
+	const id = "VN-Q2"
+	f.seedTask(id, "ready", "", []string{"mod_q2/**"})
+
+	res, err := NextWith(f.repo, "cursor-claim", NextOptions{Claim: true})
+	if err != nil {
+		t.Fatalf("next --claim: %v", err)
+	}
+	for _, k := range []string{
+		"ok", "task", "worktree", "branch", "agent", "project_id", "registered", "limits", "env", "next",
+	} {
+		if _, ok := res[k]; !ok {
+			t.Fatalf("领取输出缺少字段 %q：%v", k, res)
+		}
+	}
+	task := f.task(id)
+	if task.Status != string(model.TaskInProgress) || task.Owner != "cursor-claim" {
+		t.Fatalf("领取后应落 in_progress：status=%s owner=%q", task.Status, task.Owner)
+	}
+	if got, _ := res["run_id"].(string); got == "" {
+		t.Fatalf("领取必须产出 run_id：%v", res)
+	}
+	wt, _ := res["worktree"].(string)
+	if wt == "" {
+		t.Fatalf("领取必须给出 worktree：%v", res)
+	}
+	if _, statErr := os.Stat(wt); statErr != nil {
+		t.Fatalf("领取后 worktree 应存在：%v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(wt, ".maw", "task.json")); statErr != nil {
+		t.Fatalf("领取后应写好任务卡：%v", statErr)
+	}
+}
+
+// TestNextWithoutClaimKeepsHeldTask 是第三条验收：已持有任务时查询不产生副作用，
+// 续做仍由 --claim 走原路径。
+func TestNextWithoutClaimKeepsHeldTask(t *testing.T) {
+	f := newFixture(t)
+	const id = "VN-Q3"
+	f.seedTask(id, "ready", "", []string{"mod_q3/**"})
+
+	if _, err := NextWith(f.repo, "cursor-hold", NextOptions{Claim: true}); err != nil {
+		t.Fatalf("首次领取: %v", err)
+	}
+	before := f.task(id)
+
+	peek, err := NextWith(f.repo, "cursor-hold", NextOptions{})
+	if err != nil {
+		t.Fatalf("查询: %v", err)
+	}
+	if held, _ := peek["held"].(bool); !held {
+		t.Fatalf("已持有任务时查询应报 held：%v", peek)
+	}
+	after := f.task(id)
+	if after.Status != before.Status || after.Revision != before.Revision {
+		t.Fatalf("查询不得改动任务：before=%s/%d after=%s/%d",
+			before.Status, before.Revision, after.Status, after.Revision)
+	}
+
+	res, err := NextWith(f.repo, "cursor-hold", NextOptions{Claim: true})
+	if err != nil {
+		t.Fatalf("续做: %v", err)
+	}
+	if idem, _ := res["idempotent"].(bool); !idem {
+		t.Fatalf("续做应保持幂等语义：%v", res)
+	}
+}
+
+func activeRunCount(t *testing.T, f *fixture) int {
+	t.Helper()
+	var n int
+	if err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM runs WHERE project_id = ?`, f.pc.ID()).Scan(&n)
+	}); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	return n
+}
