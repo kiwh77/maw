@@ -82,6 +82,11 @@ type ServeOpts struct {
 	Auth *localauth.Authenticator
 	// V1 挂载版本化 API（events／read／commands 等）；路径须自带 /api/v1 前缀。
 	V1 http.Handler
+	// DefaultActiveView 为真时，/api/board 未带 include 参数的响应默认只列活动态
+	// （隐藏 done / archived）。ServeWith 的生产入口统一开启；旧只读兼容包装
+	// newHandler 不开启，保持既有调用方与迭代筛选测试的响应形状不变。
+	// 无论此开关如何，只要请求显式带了 include 参数，就按 ParseTaskView 过滤。
+	DefaultActiveView bool
 }
 
 // MaxSSEEventBurst 是单次 SSE／feed 页的事件上限；更大积压走 catchup，禁止跳过。
@@ -157,6 +162,12 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		if q.Has("iteration") {
 			snap = snap.WithIteration(strings.TrimSpace(q.Get("iteration")))
 		}
+		// 生产看板默认只展示活动态；?include=done,archived 或 ?include=all 显式取回。
+		// 放在迭代筛选之后，保证两者叠加时聚合仍基于完整迭代数据。
+		// 兼容包装 newHandler 不开启默认视图，显式 include 则一律生效。
+		if opts.DefaultActiveView || q.Has("include") {
+			snap = snap.WithTaskView(ParseTaskView(q.Get("include")))
+		}
 		out := map[string]any{
 			"updated_at":   snap.UpdatedAt,
 			"generated_at": snap.GeneratedAt,
@@ -179,6 +190,8 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 			"filter_agent":     snap.FilterAgent,
 			"filter_status":    snap.FilterStatus,
 			"filter_iteration": snap.FilterIteration,
+			"include_done":     snap.IncludeDone,
+			"include_archived": snap.IncludeArchived,
 			"global":           snap.Global,
 			// 旧只读响应保持字段兼容；附带契约视图（自动模式默认关闭）。
 			"auto_execution": defaultAutoExecution(opts),
@@ -416,6 +429,9 @@ func ServeWith(addr string, opts ServeOpts) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// 真实看板入口启用「默认活动任务」；兼容包装与直连 newHandlerOpts 的
+	// 旧调用方保持原响应形状，不产生破坏性变更。
+	opts.DefaultActiveView = true
 	url := "http://" + ln.Addr().String() + "/"
 	go func() {
 		_ = http.Serve(ln, newHandlerOpts(opts))

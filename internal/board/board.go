@@ -54,7 +54,11 @@ type Snapshot struct {
 	// FilterIteration 是迭代筛选值：nil 表示没按迭代筛；指向空串表示只筛
 	// 「未归属任何迭代」的任务——两者是不同语义，所以不能用一个空字符串表示。
 	FilterIteration *string `json:"filter_iteration"`
-	Global          bool    `json:"global"`
+	// IncludeDone / IncludeArchived 记录当前列表视图放行了什么，
+	// 前端据此知道「隐藏了什么」以及怎么显式取回。
+	IncludeDone     bool `json:"include_done"`
+	IncludeArchived bool `json:"include_archived"`
+	Global          bool `json:"global"`
 }
 
 // TaskList / AgentList / ProjectList / RiskList 把「nil 集合」固定映射成 JSON []。
@@ -268,6 +272,44 @@ func aggregate(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapshot {
 	}
 	snap.Normalize()
 	return snap
+}
+
+// TaskView 是看板任务列表的显示范围。零值＝默认活动视图：
+// 不含已完成、不含已归档，避免完成题长期占着日常视图。
+type TaskView struct {
+	IncludeDone     bool
+	IncludeArchived bool
+}
+
+// ParseTaskView 解析 /api/board 的 include 参数：逗号分隔的
+// done / archived / all。未知值忽略，不报错、不猜。
+func ParseTaskView(include string) TaskView {
+	v := TaskView{}
+	for _, part := range strings.Split(include, ",") {
+		switch strings.ToLower(strings.TrimSpace(part)) {
+		case "done":
+			v.IncludeDone = true
+		case "archived":
+			v.IncludeArchived = true
+		case "all":
+			v.IncludeDone, v.IncludeArchived = true, true
+		}
+	}
+	return v
+}
+
+// WithTaskView 返回按视图过滤任务列表的快照副本，原快照不变。
+//
+// 只改 Tasks 列表：Total/Done/Percent/Counts 仍描述全量数据，
+// 「隐藏已完成」不会让进度条失真。叠加迭代筛选时应先 WithIteration
+// 再 WithTaskView，否则迭代重算会基于已过滤的列表。
+func (s Snapshot) WithTaskView(v TaskView) Snapshot {
+	out := s
+	out.Tasks = db.FilterActivity(s.Tasks, v.IncludeDone, v.IncludeArchived)
+	out.IncludeDone = v.IncludeDone
+	out.IncludeArchived = v.IncludeArchived
+	out.Normalize()
+	return out
 }
 
 // WithIteration 返回只含指定迭代任务的快照副本，并按这批任务重算聚合。
