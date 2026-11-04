@@ -21,9 +21,15 @@
 > | `COL-ACL-001` 权限分层 | `41f061b` | 仅中枢/Lead 可 reassign/interrupt |
 > | `COL-ARCH-001` 活动视图 + archive | `eceb7a2` | 归档写 `tasks.extra_json` + 审计事件，不新增 TaskStatus 值 |
 >
-> 收尾发现：`maw iteration` 只有 create/list/show，**没有收口命令**，`iterations.status`
-> 全仓也没有任何 UPDATE 路径，所以 `IT-COL-001`（连同 `IT-BP-001`）会一直显示 `running`。
-> 这是工具缺口，不是本波漏做；是否补一个 `maw iteration close` 需另开卡。
+> 收尾发现并已修复：`maw iteration` 原先只有 create/list/show，`iterations.status`
+> 全仓没有写入路径，`IT-COL-001` 会一直显示 `running`（`IT-BP-001` 当时由另一个
+> Agent 用 `direct_db_close` 直改库关掉，正是这个缺口的证据）。已由 `ITR-001`
+> （提交 `1c5a5aa`）补上 `maw iteration close`：状态机单向推进、终态不可回退、
+> 迭代内仍有未完成任务时默认拒绝（`--force` 放行并回报被跳过的任务）、
+> 同状态幂等且写 `iteration_status_changed` 审计事件。
+>
+> 本迭代已用该命令收口：`IT-COL-001` → `merged`（`41f061b`）；同批把 `IT-BUX-001`
+> 与 `IT-BP-001` 一并对齐到 `merged`。
 
 
 硬规则：一次一题、不越 Surface、Verify 先于完成；**不**对接 DeepSeek Harness 任务板；**不**弱化 worktree / 强制 `write_scope`。
