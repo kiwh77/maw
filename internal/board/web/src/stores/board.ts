@@ -52,6 +52,8 @@ export type Snapshot = {
   percent?: number
   next_hint?: string
   risks?: string[]
+  /** 运行问题（BuildProblems 聚合结果）；问题审查视图只读消费，不在此派发动作。 */
+  problems?: Array<Record<string, unknown>>
   updated_at?: string
   filter_project?: string
   filter_agent?: string

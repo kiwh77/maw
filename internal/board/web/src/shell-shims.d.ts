@@ -91,6 +91,31 @@ declare module '*/assets/shell/view-context.mjs' {
   export function errorState(reason?: string): any
 }
 
+declare module '*/lib/problems.mjs' {
+  export const SEVERITY_ORDER: readonly string[]
+  export const KIND_ORDER: readonly string[]
+  export function severityLabel(severity: string, lang?: string): string
+  export function kindLabel(kind: string, lang?: string): string
+  export function normalizeProblems(raw: unknown): Array<Record<string, string>>
+  export function drawerTarget(problem: unknown): { tid: string; pid: string } | null
+  export function emptyMessage(lang?: string, project?: string): string
+  export function buildProblemGroups(
+    raw: unknown,
+    options?: { lang?: string; project?: string },
+  ): {
+    groups: Array<{
+      severity: string
+      label: string
+      count: number
+      kinds: Array<{ kind: string; label: string; items: Array<Record<string, string>> }>
+    }>
+    total: number
+    allCount: number
+    project: string
+    counts: { high: number; medium: number; low: number; other: number }
+  }
+}
+
 declare module '*/assets/views/*/*-view.mjs' {
   export function renderNodeList(state: unknown, ctx: unknown): string
   export function renderNodeDetail(item: unknown, ctx: unknown): string

@@ -12,6 +12,7 @@ import JoinPromptButton from './components/JoinPromptButton.vue'
 import BoardView from './views/BoardView.vue'
 import FactoryView from './views/FactoryView.vue'
 import TopoView from './views/TopoView.vue'
+import ProblemsView from './views/ProblemsView.vue'
 
 const board = useBoard()
 const def = computed(() => resolveView(board.registry, board.state.route.view))
@@ -63,7 +64,10 @@ onMounted(async () => {
   if (board.state.route.project) void board.refreshProjectTaskCounts()
   eventStream = board.connectEvents()
   pollTimer = setInterval(() => void board.fetchSnapshot(), 3000)
-  if (!def.value?.legacy && def.value?.dataKind) await board.loadView(def.value.dataKind || def.value.id)
+  // 问题审查视图直接读 snapshot.problems，不需要旧 sources.problems() 再取一次。
+  if (!def.value?.legacy && def.value?.dataKind && def.value.id !== 'problems') {
+    await board.loadView(def.value.dataKind || def.value.id)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -78,7 +82,7 @@ watch(
   async () => {
     await board.fetchSnapshot()
     const d = def.value
-    if (d && !d.legacy) await board.loadView(d.dataKind || d.id)
+    if (d && !d.legacy && d.id !== 'problems') await board.loadView(d.dataKind || d.id)
   },
 )
 
@@ -139,6 +143,9 @@ const themeValue = readTheme()
         <BoardView v-if="board.state.route.view === 'board'" />
         <FactoryView v-else-if="board.state.route.view === 'factory'" />
         <TopoView v-else-if="board.state.route.view === 'topo'" />
+        <!-- problems 走 Vue 问题审查视图（读 snapshot.problems）；VnextHost 里
+             旧的 renderProblems 映射保留给旧挂载层与既有单测，不再由本壳渲染。 -->
+        <ProblemsView v-else-if="board.state.route.view === 'problems'" />
         <VnextHost v-else :view-id="board.state.route.view" />
       </div>
     </main>
