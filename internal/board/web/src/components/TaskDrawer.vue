@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useBoard } from '../stores/board'
 import { buildTaskPrompt, copyText } from '../lib/prompts'
+import { depRows, depTone, taskDeps, type DepRow } from '../lib/deps'
 
 const board = useBoard()
 const open = computed(() => Boolean(board.state.drawer))
@@ -60,6 +61,33 @@ const agent = computed(() => {
 })
 
 const zh = computed(() => board.state.lang !== 'en')
+
+function snapshotTasks(): Array<Record<string, unknown>> {
+  return (board.state.snapshot?.tasks || []) as Array<Record<string, unknown>>
+}
+
+/** 上游依赖行：本卡 deps 指向的任务（快照外按未知状态降级）。 */
+const upstreamDeps = computed<DepRow[]>(() => depRows(task.value, snapshotTasks()))
+
+/** 下游依赖行：快照中 deps 引用本卡任务 ID 的任务。 */
+const downstreamDeps = computed<DepRow[]>(() => {
+  const t = task.value
+  if (!t) return []
+  const tid = String(t.id || '')
+  if (!tid) return []
+  return snapshotTasks()
+    .filter((x) => taskDeps(x).includes(tid))
+    .map((x) => ({
+      id: String(x.id || ''),
+      pid: String(x.project_id || ''),
+      title: String(x.title || ''),
+      status: String(x.status || ''),
+    }))
+})
+
+function jumpDep(row: { id: string; pid: string }) {
+  board.openTaskDrawer(row.id, row.pid)
+}
 
 function bullets(arr: unknown, empty: string) {
   const list = Array.isArray(arr) ? arr.map(String) : []
@@ -310,6 +338,48 @@ onBeforeUnmount(() => {
               <dd>{{ task.blocked_reason }}</dd>
             </template>
           </dl>
+        </div>
+
+        <div class="drawer-section" id="d-deps">
+          <h3>{{ zh ? '依赖' : 'Dependencies' }}</h3>
+          <div class="dep-group">
+            <p class="dep-dir">{{ zh ? '上游' : 'Upstream' }}</p>
+            <ul v-if="upstreamDeps.length" class="dep-list">
+              <li v-for="row in upstreamDeps" :key="'up-' + row.id">
+                <button
+                  type="button"
+                  class="dep-row"
+                  :data-dep-tone="depTone(row.status)"
+                  :title="zh ? '打开该任务抽屉' : 'Open task drawer'"
+                  @click="jumpDep(row)"
+                >
+                  <span class="dep-id">{{ row.id }}</span>
+                  <span class="dep-status">{{ row.status || (zh ? '未知' : 'unknown') }}</span>
+                  <span class="dep-title">{{ row.title || '—' }}</span>
+                </button>
+              </li>
+            </ul>
+            <p v-else class="empty">{{ zh ? '无上游依赖' : 'No upstream deps' }}</p>
+          </div>
+          <div class="dep-group">
+            <p class="dep-dir">{{ zh ? '下游' : 'Downstream' }}</p>
+            <ul v-if="downstreamDeps.length" class="dep-list">
+              <li v-for="row in downstreamDeps" :key="'down-' + row.id">
+                <button
+                  type="button"
+                  class="dep-row"
+                  :data-dep-tone="depTone(row.status)"
+                  :title="zh ? '打开该任务抽屉' : 'Open task drawer'"
+                  @click="jumpDep(row)"
+                >
+                  <span class="dep-id">{{ row.id }}</span>
+                  <span class="dep-status">{{ row.status || (zh ? '未知' : 'unknown') }}</span>
+                  <span class="dep-title">{{ row.title || '—' }}</span>
+                </button>
+              </li>
+            </ul>
+            <p v-else class="empty">{{ zh ? '无下游依赖' : 'No downstream tasks' }}</p>
+          </div>
         </div>
 
         <div class="drawer-section">

@@ -52,6 +52,23 @@ internal/board/web
 
 `@antv/x6` 的 ESM 产物引用了 `tslib` 但未在其 `dependencies` 中声明，因此在本包显式依赖 `tslib`，否则构建会报 `Rolldown failed to resolve import "tslib"`。
 
+## 依赖可读性（BUX-FE-001）
+
+- **卡片依赖 chips**（`src/views/BoardView.vue`）：含 deps 的卡片在标题下渲染上游任务
+  chips，底色按上游当前状态着色（done/cancelled 完成色、claimed/in_progress 等活跃色、
+  blocked/conflict 受阻色、backlog/ready 等待色）；点击 chip 直接打开上游任务抽屉。
+- **等待标记**：deps 未全部完成的 backlog/ready 卡片显示
+  「等待：<上游ID>(<状态>)」（英文 `Waiting: ...`），纯前端按快照计算。
+- **抽屉依赖面板**（`src/components/TaskDrawer.vue`）：新增「依赖」区块，上游（本卡
+  deps）与下游（快照中 deps 引用本卡的任务）两个列表，每行 ID／状态／标题，行点击
+  跳转对应任务抽屉。
+- **全局拓扑**（`src/views/TopoView.vue`）：未选工程时用全部快照任务按多工程 band
+  渲染全局拓扑，视图切换按钮与路由不再禁用拓扑。
+
+共享规则在 `src/lib/deps.ts`：`taskDeps` / `findUpstream` / `depTone` /
+`depRows` / `unsatisfiedDeps` 都是纯函数，看板与抽屉复用同一份状态语义，
+颜色只消费既有 token（chips 底色由状态色低透明度派生，不引入第二套主题色）。
+
 ## Receiving yard (RF-002)
 
 The Board view switch includes a live Three.js receiving yard (`src/factory`).

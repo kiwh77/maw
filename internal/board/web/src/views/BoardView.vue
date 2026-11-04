@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useBoard } from '../stores/board'
+import { depRows, depTone, taskDeps, unsatisfiedDeps } from '../lib/deps'
 
 const board = useBoard()
 
@@ -73,6 +74,46 @@ function isActive(task: Record<string, unknown>) {
   if (!d) return false
   return String(task.id) === d.tid && String(task.project_id || '') === String(d.pid || '')
 }
+
+function allTasks(): Array<Record<string, unknown>> {
+  return (board.state.snapshot?.tasks || []) as Array<Record<string, unknown>>
+}
+
+/** 卡片依赖 chips：上游 ID + 状态色，点击开上游抽屉。 */
+function depChips(task: Record<string, unknown>) {
+  return depRows(task, allTasks()).map((row) => ({
+    ...row,
+    tone: depTone(row.status),
+  }))
+}
+
+function openDep(row: { id: string; pid: string }) {
+  board.openTaskDrawer(row.id, row.pid)
+}
+
+function onChipKey(event: KeyboardEvent, row: { id: string; pid: string }) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    event.stopPropagation()
+    openDep(row)
+  }
+}
+
+/**
+ * 等待标记：仅 backlog/ready 卡片，列出尚未完成的上游（含快照外未知状态）。
+ * 活跃泳道的卡片靠 chips 表达同样的信息，不再重复一行。
+ */
+function waitingText(task: Record<string, unknown>) {
+  const status = String(task.status || '')
+  if (status !== 'backlog' && status !== 'ready') return ''
+  const list = unsatisfiedDeps(task, allTasks())
+  if (!list.length) return ''
+  const head = board.state.lang === 'zh' ? '等待' : 'Waiting'
+  const body = list
+    .map((row) => `${row.id}(${row.status || (board.state.lang === 'zh' ? '未知' : 'unknown')})`)
+    .join(', ')
+  return `${head}: ${body}`
+}
 </script>
 
 <template>
@@ -117,6 +158,26 @@ function isActive(task: Record<string, unknown>) {
             <h4 class="task-title">{{ task.title }}</h4>
             <div class="card-project">{{ task.project_name || task.project_id || '—' }}</div>
             <div v-if="task.blocked_reason" class="task-reason">{{ task.blocked_reason }}</div>
+            <div v-if="taskDeps(task).length" class="card-deps" :data-deps="taskDeps(task).length">
+              <button
+                v-for="chip in depChips(task)"
+                :key="chip.id"
+                type="button"
+                class="dep-chip"
+                :data-dep-tone="chip.tone"
+                :data-dep="chip.id"
+                :title="chip.status || (board.state.lang === 'zh' ? '快照中未见该上游' : 'upstream not in snapshot')"
+                @click.stop="openDep(chip)"
+                @keydown="onChipKey($event, chip)"
+              >
+                {{ chip.id }}
+              </button>
+            </div>
+            <div
+              v-if="waitingText(task)"
+              class="task-waiting"
+              data-waiting="true"
+            >{{ waitingText(task) }}</div>
             <div class="card-bottom">
               <span class="owner">{{ task.owner || (board.state.lang === 'zh' ? '未指派' : 'unassigned') }}</span>
               <span class="priority">P{{ task.priority ?? '—' }}</span>

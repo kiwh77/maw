@@ -18,6 +18,8 @@ import projectsCSS from '../../assets/views/projects/projects.css?inline'
 import settingsCSS from '../../assets/views/settings/settings.css?inline'
 import executionCSS from '../../assets/views/execution/execution.css?inline'
 import nodesCSS from '../../assets/views/nodes/nodes.css?inline'
+// 依赖可读性样式（BUX-FE-001）：必须走 ?inline 进产物，页面只加载 board-web.js。
+import boardDepsCSS from './board-deps.css?inline'
 import App from './App.vue'
 
 export { Graph } from '@antv/x6'
@@ -45,6 +47,7 @@ export const VNEXT_STYLES = [
   settingsCSS,
   executionCSS,
   nodesCSS,
+  boardDepsCSS,
 ].join('\n')
 
 function injectStyles() {

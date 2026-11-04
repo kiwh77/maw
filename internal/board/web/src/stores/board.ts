@@ -150,9 +150,10 @@ export const boardStore = {
 
   navigate(view: string, patch: Partial<BoardRoute> = {}, { replace = false } = {}) {
     const def = resolveView(registry, view)
-    // 需要单工程的视图（拓扑）只在选中工程时可达：侧边栏与视图切换都能点到它，
-    // 「全部工程」下进去只会得到一张读不懂的多工程图，不如留在原处。
-    if (def?.requiresProject && !String(state.route.project || '').trim()) return
+    // 需要单工程的观测视图（timeline/activity/sessions/analytics）只在选中工程时可达：
+    // 侧边栏与视图切换都能点到它们，「全部工程」下进去只会得到读不懂的空态。
+    // 拓扑例外（BUX-FE-001）：未选工程时按多工程 band 出全局拓扑。
+    if (def?.requiresProject && def.id !== 'topo' && !String(state.route.project || '').trim()) return
     const next = withRoute(state.route, { view: def.id, detail: '', ...patch }) as BoardRoute
     if (!sameRoute(next, state.route)) {
       writeRoute(next, { history: window.history, location: window.location, replace })
@@ -166,9 +167,8 @@ export const boardStore = {
     // 从「全部工程」选到一个工程：回到默认视图（EV-003 起是执行视图）。
     // 以前这里写死 board，默认页一改就会把用户从执行视图弹回旧看板。
     if (id && !state.route.project) patch.view = DEFAULT_VIEW
-    // 选「全部工程」保持当前视图：契约要求多工程时回到看板并禁用拓扑，
-    // 而不是把用户悄悄带去另一个视图。
-    if (!id && state.route.view === 'topo') patch.view = 'board'
+    // 取消选择工程时保持当前视图：拓扑已支持全局多工程 band（BUX-FE-001），
+    // 不再把用户从拓扑视图悄悄带回看板。
     const next = withRoute(state.route, patch) as BoardRoute
     writeRoute(next, { history: window.history, location: window.location, replace: true })
     Object.assign(state.route, next)

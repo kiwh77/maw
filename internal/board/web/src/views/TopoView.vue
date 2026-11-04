@@ -55,15 +55,8 @@ function asTasks(raw: Array<Record<string, unknown>>): TopoTask[] {
 function paint() {
   if (!root.value) return
   const zh = board.state.lang === 'zh'
-  if (!board.state.route.project) {
-    disposeTopology(root.value)
-    handle = null
-    fitKey = ''
-    root.value.innerHTML = zh
-      ? '<p class="empty">依赖拓扑需要先选择工程</p>'
-      : '<p class="empty">Select a project to view topology</p>'
-    return
-  }
+  // 未选工程也照常渲染：快照含全部任务时按多工程 band 出全局拓扑，
+  // 不再强迫先选工程（BUX-FE-001）。
   const tasks = asTasks((board.state.snapshot?.tasks || []) as Array<Record<string, unknown>>)
   if (!tasks.length) {
     disposeTopology(root.value)
@@ -105,7 +98,8 @@ function paint() {
           },
       onOpen: (tid, pid) => board.openTaskDrawer(String(tid || ''), String(pid || '')),
     })
-    const nextFitKey = String(board.state.route.project || '') + '|' + board.state.lang
+    // 未选工程时用 'all' 参与 fit 键：全局视图与单工程视图各自适应一次画布。
+    const nextFitKey = (board.state.route.project || 'all') + '|' + board.state.lang
     // 首屏交给 renderTopology 内部 fit；仅换工程／语言时再适应，避免二次 fit 冲掉缩放。
     if (fitKey && nextFitKey !== fitKey) handle.fitView()
     fitKey = nextFitKey
