@@ -16,6 +16,8 @@ const (
 	ActionEscalateHuman    Action = "escalate_human"
 	ActionOpsRun           Action = "ops_run"
 	ActionNotifyOnly       Action = "notify_only"
+	// ActionDispatchReady 是 dispatch_ready 的系统内动作，只由编排器产出，不进 LLM 决策空间。
+	ActionDispatchReady Action = "dispatch_ready"
 )
 
 // Decision 是系统 Agent 对一次作业的结构化决策。

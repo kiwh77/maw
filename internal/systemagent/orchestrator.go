@@ -60,10 +60,13 @@ func sanitize(s string) string {
 
 // Orchestrator 领取并执行 system_jobs。
 type Orchestrator struct {
-	Store       *db.Store
-	Config      config.SystemAgent
-	Invoker     Invoker
-	Effects     Effects
+	Store   *db.Store
+	Config  config.SystemAgent
+	Invoker Invoker
+	Effects Effects
+	// Dispatch 处理 dispatch_ready：Match → Claim → launch_spec → Coordinator.Step。
+	// 为空时该 kind 的作业按「派发未接线」升级人工，不做空转。
+	Dispatch    DispatchPort
 	ResolvePath func(projectID string) (string, error)
 	WorkerID    string
 	Clock       func() time.Time
@@ -93,8 +96,8 @@ func (o *Orchestrator) Step(ctx context.Context) (int, error) {
 		n = 1
 	}
 	kinds := append([]string{}, o.Config.AutoKinds...)
-	// 显式入队的 task_split / ops_run 也要能被消费
-	for _, extra := range []string{SystemKindTaskSplit, SystemKindOpsRun} {
+	// 显式入队的 task_split / ops_run / dispatch_ready 也要能被消费
+	for _, extra := range []string{SystemKindTaskSplit, SystemKindOpsRun, SystemKindDispatchReady} {
 		found := false
 		for _, k := range kinds {
 			if k == extra {
@@ -194,6 +197,9 @@ func (o *Orchestrator) runJob(ctx context.Context, job *db.SystemJob) error {
 			cmd = job.Reason
 		}
 		decision = Decision{Action: ActionOpsRun, OpsCommand: cmd, Reason: "ops_run"}
+	case SystemKindDispatchReady:
+		// dispatch_ready 有确定动作，不调 LLM：匹配结论本身就是结果。
+		return o.runDispatchJob(ctx, job, projectPath)
 	default:
 		if o.Invoker == nil {
 			decision = Decision{Action: ActionEscalateHuman, Reason: "无 LLM Invoker"}
@@ -278,6 +284,49 @@ func (o *Orchestrator) finish(job *db.SystemJob, d Decision, result map[string]a
 	return o.Store.Write(func(tx *sql.Tx) error {
 		return db.FinishSystemJob(tx, job.JobID, status, DecisionJSON(d), result)
 	})
+}
+
+// runDispatchJob 处理 dispatch_ready：一次 Match 到 Claim 再到 Step。
+//
+// 未匹配不是失败：job 正常结束并把可解释原因写进结果；只有接线缺失才升级人工，
+// 这样「没有可跑的题」与「这台机器根本没接派发」在看板上分得开。
+func (o *Orchestrator) runDispatchJob(ctx context.Context, job *db.SystemJob, projectPath string) error {
+	if o.Dispatch == nil {
+		return o.finish(job, Decision{Action: ActionEscalateHuman, Reason: "自动派发未接线"},
+			map[string]any{"mode": "unwired"}, db.SystemJobEscalated)
+	}
+	out, err := o.Dispatch.DispatchReady(ctx, DispatchRequest{
+		ProjectID:   job.ProjectID,
+		ProjectPath: projectPath,
+		JobID:       job.JobID,
+	})
+	if err != nil {
+		return err
+	}
+	result := map[string]any{
+		"matched":     out.Matched,
+		"progressed":  out.Progressed,
+		"step_action": out.Action,
+		"launch_spec": out.LaunchSpec,
+	}
+	if out.Note != "" {
+		result["note"] = out.Note
+	}
+	if out.Matched {
+		result["task_id"] = out.TaskID
+		result["node_id"] = string(out.NodeID)
+		result["run_id"] = out.RunID
+		result["operation_id"] = out.OperationID
+		result["replay"] = out.Replay
+		if out.SteppedOperationID != "" {
+			result["stepped_operation_id"] = out.SteppedOperationID
+		}
+	}
+	if len(out.Reasons) > 0 {
+		result["reasons"] = out.Reasons
+		result["reason_lines"] = RenderQueueReasons(out.Reasons)
+	}
+	return o.finish(job, Decision{Action: ActionDispatchReady, Reason: "dispatch_ready"}, result, db.SystemJobDone)
 }
 
 func runOps(ctx context.Context, dir, cmdline string) (string, error) {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,8 +13,11 @@ import (
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/engine/dispatch"
+	"github.com/kiwh77/maw/internal/engine/matching"
+	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/i18n"
+	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/runner/process"
 	"github.com/kiwh77/maw/internal/systemagent"
 )
@@ -201,7 +205,21 @@ func loadSystemAgentConfig(cwd string) (*projCtx, config.SystemAgent, error) {
 }
 
 func buildOrchestrator(pc *projCtx, cfg config.SystemAgent) (*systemagent.Orchestrator, error) {
+	return buildOrchestratorWithCoord(pc, cfg, nil)
+}
+
+// buildOrchestratorWithCoord 组装编排器；coord 非空时复用 serve 内已经持有
+// coordinator.lock 的协调者，避免自动选题的 Step 被自己的锁挡在门外。
+func buildOrchestratorWithCoord(pc *projCtx, cfg config.SystemAgent, coord *dispatch.Coordinator) (*systemagent.Orchestrator, error) {
 	store, err := db.OpenStore(pc.GlobalDB)
+	if err != nil {
+		return nil, err
+	}
+	rt, err := NewRuntime(pc, "")
+	if err != nil {
+		return nil, err
+	}
+	disp, err := newSystemDispatcher(pc, cfg, store, rt, coord)
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +238,7 @@ func buildOrchestrator(pc *projCtx, cfg config.SystemAgent) (*systemagent.Orches
 		Config:   cfg,
 		Invoker:  inv,
 		Effects:  appSystemEffects{cwd: pc.Repo},
+		Dispatch: disp,
 		WorkerID: "system-agent",
 		ResolvePath: func(projectID string) (string, error) {
 			if projectID == pc.ID() {
@@ -240,6 +259,289 @@ func buildOrchestrator(pc *projCtx, cfg config.SystemAgent) (*systemagent.Orches
 			return path, err
 		},
 	}, nil
+}
+
+// newSystemDispatcher 接线「Match → Claim → launch_spec → Coordinator.Step」。
+//
+// 投影只读库与配置；推进复用协调者（serve 内传 leader 的实例，CLI 路径自建）。
+func newSystemDispatcher(pc *projCtx, cfg config.SystemAgent, store *db.Store, rt *Runtime, coord *dispatch.Coordinator) (*systemagent.Dispatcher, error) {
+	if coord == nil {
+		c, err := rt.BuildCoordinator(dispatch.NewDBQueue(store))
+		if err != nil {
+			return nil, err
+		}
+		coord = c
+	}
+	return &systemagent.Dispatcher{
+		Store:      store,
+		Projection: systemDispatchProjection{store: store, rt: rt, workerNode: cfg.WorkerNode},
+		Advance:    systemDispatchAdvance{rt: rt, coord: coord},
+		Workspace: func(projectID, taskID string) (string, error) {
+			_ = projectID
+			dir := filepath.Join(rt.StateDir(), "workspaces", taskID)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return "", err
+			}
+			return filepath.Abs(dir)
+		},
+		AgentID: identity.Format("system", pc.Project.Name, 1),
+	}, nil
+}
+
+// systemDispatchProjection 把库里的任务／节点与受管策略投影成 matching 的只读输入。
+//
+// 节点四维只认节点行里已经落盘的观测证据（meta）；缺证据时保持 unknown，
+// matching 会给出 node_stale／node_not_ready 的可解释原因，而不是猜 ready。
+type systemDispatchProjection struct {
+	store      *db.Store
+	rt         *Runtime
+	workerNode string
+}
+
+func (p systemDispatchProjection) Policy(_ context.Context, projectID string) (matching.Policy, error) {
+	view := p.rt.ManagedView()
+	auto, _ := view["auto_enabled"].(bool)
+	limit, _ := view["managed_execution_limit"].(int)
+	supported, _ := view["platform_supported"].(bool)
+	if limit < 0 {
+		limit = 0
+	}
+	policy := matching.Policy{
+		AutoExecution: model.AutoExecution{
+			// 平台不支持受管启动时降级为关闭：匹配到也起不来不算可执行。
+			Enabled:               auto && supported && limit >= 1,
+			ManagedExecutionLimit: limit,
+		},
+	}
+	if node := strings.TrimSpace(p.workerNode); node != "" {
+		policy.Projects = []matching.ProjectRule{{
+			ProjectID:    model.ProjectID(projectID),
+			AllowedNodes: []model.NodeID{model.NodeID(node)},
+		}}
+	}
+	return policy, nil
+}
+
+func (p systemDispatchProjection) Tasks(_ context.Context, projectID string) ([]matching.Task, error) {
+	var out []matching.Task
+	err := p.store.Read(func(tx *sql.Tx) error {
+		rows, e := db.ListTasks(tx, projectID)
+		if e != nil {
+			return e
+		}
+		for _, t := range rows {
+			out = append(out, matching.Task{
+				ID:         t.ID,
+				ProjectID:  model.ProjectID(t.ProjectID),
+				Status:     model.TaskStatus(t.Status),
+				Priority:   t.Priority,
+				MergeOrder: t.MergeOrder,
+				Deps:       t.Deps,
+				WriteScope: t.WriteScope,
+			})
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (p systemDispatchProjection) Nodes(_ context.Context, projectID string) ([]matching.Node, error) {
+	var out []matching.Node
+	err := p.store.Read(func(tx *sql.Tx) error {
+		rows, e := db.ListNode(tx, projectID)
+		if e != nil {
+			return e
+		}
+		for _, n := range rows {
+			c, e := db.Capacity(tx, n.ID)
+			if e != nil {
+				return e
+			}
+			out = append(out, matchingNode(n, c.ActiveSlots))
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (p systemDispatchProjection) ActiveManaged(_ context.Context, projectID string) (int, error) {
+	var n int
+	err := p.store.Read(func(tx *sql.Tx) error {
+		runs, e := db.ListRuns(tx, projectID)
+		if e != nil {
+			return e
+		}
+		for _, r := range runs {
+			if r.Occupies() {
+				n++
+			}
+		}
+		return nil
+	})
+	return n, err
+}
+
+// 节点行 meta 里的观测字段名；由写观测的一方与这里约定，缺字段即视为没有证据。
+const (
+	metaNodeAcceptNew   = "accept_new"
+	metaNodeDraining    = "draining"
+	metaNodeEntry       = "entry_state"
+	metaNodeAuth        = "auth_state"
+	metaNodeConnection  = "connection_state"
+	metaNodeCapacity    = "capacity_state"
+	metaNodeObservedAt  = "observed_at"
+	metaNodeSharedGroup = "shared_group"
+	metaNodeGroupLimit  = "group_limit"
+	metaNodeGroupActive = "group_active"
+	metaNodeCapability  = "capabilities"
+)
+
+// matchingNode 把节点行投影成匹配输入：配置默认按受管 CLI，观测证据只从 meta 取。
+func matchingNode(n *db.Node, active int) matching.Node {
+	out := matching.Node{
+		ID:        model.NodeID(n.ID),
+		ProjectID: model.ProjectID(n.ProjectID),
+		Config: model.NodeConfig{
+			NodeID:    model.NodeID(n.ID),
+			Name:      n.Label,
+			Mode:      model.NodeManagedCLI,
+			SlotLimit: n.SlotLimit,
+			AcceptNew: metaBool(n.Meta, metaNodeAcceptNew, true),
+		},
+		Draining:     metaBool(n.Meta, metaNodeDraining, false),
+		Entry:        model.EntryState(metaString(n.Meta, metaNodeEntry)),
+		Auth:         model.ReadinessState(metaString(n.Meta, metaNodeAuth)),
+		Connection:   model.ReadinessState(metaString(n.Meta, metaNodeConnection)),
+		Capacity:     model.ReadinessState(metaString(n.Meta, metaNodeCapacity)),
+		ObservedAt:   metaTime(n.Meta, metaNodeObservedAt),
+		ActiveSlots:  active,
+		SharedGroup:  metaString(n.Meta, metaNodeSharedGroup),
+		GroupLimit:   metaInt(n.Meta, metaNodeGroupLimit),
+		GroupActive:  metaInt(n.Meta, metaNodeGroupActive),
+		Capabilities: metaCapabilities(n.Meta),
+	}
+	return out
+}
+
+func metaValue(meta map[string]any, key string) (any, bool) {
+	if meta == nil {
+		return nil, false
+	}
+	v, ok := meta[key]
+	return v, ok
+}
+
+func metaString(meta map[string]any, key string) string {
+	v, ok := metaValue(meta, key)
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
+}
+
+func metaBool(meta map[string]any, key string, def bool) bool {
+	v, ok := metaValue(meta, key)
+	if !ok {
+		return def
+	}
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		return b == "true" || b == "yes" || b == "1"
+	case float64:
+		return b != 0
+	}
+	return def
+}
+
+func metaInt(meta map[string]any, key string) int {
+	v, ok := metaValue(meta, key)
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err == nil {
+			return int(i)
+		}
+	}
+	return 0
+}
+
+func metaTime(meta map[string]any, key string) time.Time {
+	s := metaString(meta, key)
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// metaCapabilities 只接受能完整解析的能力证据；解析不了的条目丢弃，
+// 让它们落回「缺少能力证据」，而不是变成一次伪造的 observed。
+func metaCapabilities(meta map[string]any) []matching.Capability {
+	v, ok := metaValue(meta, metaNodeCapability)
+	if !ok {
+		return nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var caps []matching.Capability
+	if err := json.Unmarshal(raw, &caps); err != nil {
+		return nil
+	}
+	out := make([]matching.Capability, 0, len(caps))
+	for _, c := range caps {
+		if strings.TrimSpace(c.Name) == "" {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// systemDispatchAdvance 用协调者推进一步：launch_spec 由 PrepareRunnerArtifacts 在
+// Launch 前写入，这里只回报「本次是否真的写了」。
+type systemDispatchAdvance struct {
+	rt    *Runtime
+	coord *dispatch.Coordinator
+}
+
+func (a systemDispatchAdvance) Advance(ctx context.Context) (systemagent.DispatchStep, error) {
+	if a.coord == nil {
+		return systemagent.DispatchStep{}, fmt.Errorf("systemagent: 缺少协调者")
+	}
+	step, err := a.coord.Step(ctx)
+	if err != nil {
+		return systemagent.DispatchStep{}, err
+	}
+	out := systemagent.DispatchStep{
+		OperationID: string(step.OperationID),
+		Action:      string(step.Action),
+		Progressed:  step.Progressed,
+		Note:        step.Note,
+	}
+	if a.rt != nil && step.OperationID != "" {
+		spec := filepath.Join(a.rt.OpDir(string(step.OperationID)), launchSpecFile)
+		if _, err := os.Stat(spec); err == nil {
+			out.LaunchSpec = true
+		}
+	}
+	return out, nil
 }
 
 type appSystemEffects struct {
@@ -339,7 +641,8 @@ func startServeLoops(cwd string) {
 		},
 	}
 	if cfg.Enabled {
-		orch, err := buildOrchestrator(pc, cfg)
+		// 复用 leader 已持锁的协调者，自动选题的 Step 不再自抢锁。
+		orch, err := buildOrchestratorWithCoord(pc, cfg, coord)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "serve leader: build orchestrator: %v\n", err)
 		} else {
