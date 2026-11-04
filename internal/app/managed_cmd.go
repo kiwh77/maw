@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -348,6 +349,14 @@ func InternalRunner(opts RunnerOpts) (Result, error) {
 // 写入方见 Runtime.PrepareRunnerArtifacts：显式来源缺失时不写，Runner 保持驻留。
 const launchSpecFile = "launch_spec.json"
 
+// launchContextRecord 是写进 journal 冻结规格的起跑快照。
+// launch_spec 与 context 一起冻结，读侧才能判断这次 Run 是干净上下文
+// 还是继承了上一题摘要，而不是靠进程启动参数去猜。
+type launchContextRecord struct {
+	LaunchSpec model.LaunchSpec       `json:"launch_spec"`
+	Context    journal.RunContextSpec `json:"context"`
+}
+
 // maybeRunSession 若存在 launch_spec.json 则用 session.Runner + passthrough Source 执行；
 // wired 表示是否接线，reportPath 是执行后 report.json 的位置（写失败时为空）。
 func maybeRunSession(opDir, opID string) (session.Report, bool, string, error) {
@@ -359,6 +368,13 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, string, error) {
 	var spec model.LaunchSpec
 	if err := json.Unmarshal(b, &spec); err != nil {
 		return session.Report{}, true, "", err
+	}
+	// 起跑上下文（fresh / fork）在起进程之前解析并校验：非法值直接拒绝，
+	// 绝不留一个「跑过但上下文不明」的 Run。model.LaunchSpec 是冻结值对象，
+	// 所以 context 从 launch_spec.json 顶层或同目录 context.json / 环境变量取。
+	runCtx, err := journal.ResolveContext(opDir, b)
+	if err != nil {
+		return session.Report{}, true, "", fmt.Errorf("受管起跑上下文非法: %w", err)
 	}
 	// 与 Launch 侧写出的形状共用同一个结构：读的一侧跟着写的一侧变，不会再漂移。
 	metaPath := filepath.Join(opDir, runMetaFile)
@@ -381,6 +397,11 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, string, error) {
 		return session.Report{}, true, "", err
 	}
 	defer jr.Close()
+	// 把上下文决策和启动规格一起冻结落盘：fresh / fork 在 journal 里可区分，
+	// fork 的摘要来源字段可查，fresh 则明确不带旧摘要。同一 Run 内容相同即幂等。
+	if _, err := jr.WriteSpec(launchContextRecord{LaunchSpec: spec, Context: runCtx}); err != nil {
+		return session.Report{}, true, "", fmt.Errorf("冻结起跑上下文: %w", err)
+	}
 
 	var store session.Store = recordingNopStore{}
 	if meta.GlobalDB != "" {
@@ -412,6 +433,7 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, string, error) {
 		Generation: model.Generation(meta.Generation),
 		Spec:       spec,
 		Protocol:   spec.ExpectedProtocol,
+		Context:    runCtx,
 		Heartbeat:  2 * time.Second,
 	})
 	// 执行结束（无论成败）都把事实快照落盘，op 目录因此自解释。

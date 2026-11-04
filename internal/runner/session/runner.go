@@ -116,6 +116,9 @@ type Config struct {
 	Generation model.Generation
 	Spec       model.LaunchSpec
 	Protocol   model.Protocol
+	// Context 是本次起跑的上下文决策（fresh / fork）。零值按 fresh 处理，
+	// 保证未声明 context 的既有调用方行为不变；非法值在 validate 里拒绝。
+	Context journal.RunContextSpec
 	// Timeout 为 0 表示不设墙钟上限（由 StopRequest 或外部 ctx 终止）。
 	Timeout time.Duration
 	// Heartbeat 是补交与巡检间隔；0 用默认值。
@@ -134,6 +137,11 @@ func (c Config) validate() []*model.Error {
 		out = append(out, model.Violation(model.CodeRuntimeFieldInvalid, "config.generation", "代际必须从 1 开始"))
 	}
 	out = append(out, c.Spec.Validate()...)
+	// 上下文策略是起跑前的硬约束：非法值 / fresh 带旧摘要 / fork 缺摘要来源
+	// 都不能悄悄起一个「看起来跑过」的进程。
+	if err := c.Context.Validate(); err != nil {
+		out = append(out, model.Violation(model.CodeRuntimeFieldInvalid, "config.context", err.Error()))
+	}
 	if c.Protocol.Format == "" || c.Protocol.Version == "" {
 		out = append(out, model.Violation(model.CodeRuntimeFieldInvalid, "config.protocol", "必须写明预期协议"))
 	}
