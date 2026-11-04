@@ -27,27 +27,30 @@ type Snapshot struct {
 	UpdatedAt string `json:"updated_at"`
 	// GeneratedAt 是本次快照的生成时刻，仅供前端展示「刚刷新」，
 	// 不得用来判断数据新鲜度（同一份数据轮询多次，只有它变化）。
-	GeneratedAt   string         `json:"generated_at"`
-	MaxParallel   int            `json:"max_parallel"`
-	Total         int            `json:"total"`
-	Done          int            `json:"done"`
-	Active        int            `json:"active"`
-	Blocked       int            `json:"blocked"`
-	Percent       int            `json:"percent"`
-	NextHint      string         `json:"next_hint"`
-	Risks         RiskList       `json:"risks"`
+	GeneratedAt string   `json:"generated_at"`
+	MaxParallel int      `json:"max_parallel"`
+	Total       int      `json:"total"`
+	Done        int      `json:"done"`
+	Active      int      `json:"active"`
+	Blocked     int      `json:"blocked"`
+	Percent     int      `json:"percent"`
+	NextHint    string   `json:"next_hint"`
+	Risks       RiskList `json:"risks"`
 	// Problems 是聚合出的运行问题（blocked/conflict/重试/停滞/依赖等待），
 	// 随本批任务重算，供前端「问题」视图一屏审查。
 	Problems ProblemList    `json:"problems"`
 	Counts   map[string]int `json:"counts"`
-	Tasks         TaskList       `json:"tasks"`
-	Agents        AgentList      `json:"agents"`
-	Projects      ProjectList    `json:"projects"`
+	Tasks    TaskList       `json:"tasks"`
+	Agents   AgentList      `json:"agents"`
+	// AgentActivity 是 agent id → working|stalled|idle 的展示推导。
+	// 纯只读：不写 agents 表、不释放占用，CQ-003 的过期释放语义保持不变。
+	AgentActivity map[string]string `json:"agent_activity"`
+	Projects      ProjectList       `json:"projects"`
 	// Iterations 是筛选下拉里的候选迭代（工程内全部；与当前任务筛选无关）。
-	Iterations    IterationList  `json:"iterations"`
-	FilterProject string         `json:"filter_project"`
-	FilterAgent   string         `json:"filter_agent"`
-	FilterStatus  string         `json:"filter_status"`
+	Iterations    IterationList `json:"iterations"`
+	FilterProject string        `json:"filter_project"`
+	FilterAgent   string        `json:"filter_agent"`
+	FilterStatus  string        `json:"filter_status"`
 	// FilterIteration 是迭代筛选值：nil 表示没按迭代筛；指向空串表示只筛
 	// 「未归属任何迭代」的任务——两者是不同语义，所以不能用一个空字符串表示。
 	FilterIteration *string `json:"filter_iteration"`
@@ -61,6 +64,65 @@ type TaskList []*db.Task
 
 // AgentList 见 TaskList。
 type AgentList []*db.Agent
+
+// AgentActivityKind 是看板上 Agent 的三态展示：在推进 / 停滞 / 待命。
+//
+// 与 db.Agent.Status 不是同一套概念：Status 是权威状态机（working/idle/offline），
+// activity 是把它和心跳新鲜度合起来看的**展示推导**，只用于让人一眼分辨
+// 「卡住了」和「没活干」。因此绝不反向写回状态、也不触发占用释放。
+type AgentActivityKind string
+
+const (
+	AgentActivityWorking AgentActivityKind = "working"
+	AgentActivityStalled AgentActivityKind = "stalled"
+	AgentActivityIdle    AgentActivityKind = "idle"
+)
+
+// agentStaleAfter 与 [locks] heartbeat_ttl_sec、project_busy 守卫对齐（15 分钟）。
+// 它只是展示阈值：判为 stalled 不会释放任务占用，释放仍由 CQ-003 的
+// expireStaleAgents 单独决定。
+const agentStaleAfter = 15 * time.Minute
+
+// DeriveAgentActivity 推导单个 Agent 的展示态。纯函数，不改入参。
+//
+// 判定顺序：
+//   - offline：仍占着任务 = stalled，否则 idle；
+//   - 非 working 或没有任务：idle；
+//   - working + 有任务：心跳在窗口内 = working，过期或时间不可解析 = stalled
+//     （证据不足不假装还在推进）。
+func DeriveAgentActivity(a *db.Agent, now time.Time) AgentActivityKind {
+	if a == nil {
+		return AgentActivityIdle
+	}
+	st := strings.ToLower(strings.TrimSpace(a.Status))
+	hasTask := strings.TrimSpace(a.TaskID) != ""
+	switch {
+	case st == "offline":
+		if hasTask {
+			return AgentActivityStalled
+		}
+		return AgentActivityIdle
+	case st != "working" || !hasTask:
+		return AgentActivityIdle
+	}
+	last, ok := parseSnapshotTime(a.LastSeen)
+	if !ok || now.Sub(last) > agentStaleAfter {
+		return AgentActivityStalled
+	}
+	return AgentActivityWorking
+}
+
+// BuildAgentActivity 为一批 Agent 生成 id → activity 的只读映射。
+func BuildAgentActivity(agents []*db.Agent, now time.Time) map[string]string {
+	out := make(map[string]string, len(agents))
+	for _, a := range agents {
+		if a == nil || strings.TrimSpace(a.ID) == "" {
+			continue
+		}
+		out[a.ID] = string(DeriveAgentActivity(a, now))
+	}
+	return out
+}
 
 // ProjectList 见 TaskList。
 type ProjectList []*db.Project
@@ -201,6 +263,8 @@ func aggregate(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapshot {
 		Counts:      counts,
 		Tasks:       tasks,
 		Agents:      agents,
+		// 与 agents 同一批事实推导，避免快照里两个字段对不上。
+		AgentActivity: BuildAgentActivity(agents, time.Now().UTC()),
 	}
 	snap.Normalize()
 	return snap
@@ -257,6 +321,9 @@ func (s *Snapshot) Normalize() {
 	}
 	if s.Agents == nil {
 		s.Agents = []*db.Agent{}
+	}
+	if s.AgentActivity == nil {
+		s.AgentActivity = map[string]string{}
 	}
 	if s.Projects == nil {
 		s.Projects = []*db.Project{}
