@@ -37,7 +37,69 @@ var (
 	ErrIterationNotFound = errors.New("db: 迭代不存在")
 	// ErrIterationNotEmpty 表示迭代里还绑着任务，不能单独删除。
 	ErrIterationNotEmpty = errors.New("db: 迭代仍有任务")
+	// ErrIterationTransition 表示请求的状态迁移不在允许的推进链上。
+	ErrIterationTransition = errors.New("db: 非法迭代状态迁移")
 )
+
+// iterationTransitions 是迭代的状态机：规划 → 执行 → 收尾 → 合入/放弃。
+//
+// 只允许沿链向前推进，终态（merged / abandoned）不可回退，也不能把已合入
+// 改成已放弃——那会把「这批题合进过主干」的事实抹掉。收尾动作由 callers 显式
+// 触发（maw iteration close），本包只负责判定与落库。
+var iterationTransitions = map[string][]string{
+	IterationPlanning:  {IterationRunning, IterationAbandoned},
+	IterationRunning:   {IterationFinishing, IterationMerged, IterationAbandoned},
+	IterationFinishing: {IterationMerged, IterationAbandoned},
+	IterationMerged:    {},
+	IterationAbandoned: {},
+}
+
+// CanTransitionIteration 报告 from → to 是否是允许的推进。
+//
+// 同状态不算迁移（幂等），由 SetIterationStatus 单独处理；未知状态一律拒绝。
+func CanTransitionIteration(from, to string) bool {
+	for _, next := range iterationTransitions[strings.TrimSpace(from)] {
+		if next == strings.TrimSpace(to) {
+			return true
+		}
+	}
+	return false
+}
+
+// SetIterationStatus 把迭代推进到 to，返回最新快照与「是否真的变更」。
+//
+// 同状态直接返回 changed=false：不写库、不刷 updated_at，重复收口是幂等的。
+// mergeCommit 非空时一并记录合入提交；迁移不在允许链上返回 ErrIterationTransition，
+// 且不改动库中任何字段。
+func SetIterationStatus(tx *sql.Tx, projectID, id, to, mergeCommit string) (*Iteration, bool, error) {
+	it, err := GetIteration(tx, projectID, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if it == nil {
+		return nil, false, ErrIterationNotFound
+	}
+	to = strings.TrimSpace(to)
+	if !ValidIterationStatus(to) {
+		return nil, false, fmt.Errorf("db: 非法迭代状态 %q", to)
+	}
+	if it.Status == to {
+		return it, false, nil
+	}
+	if !CanTransitionIteration(it.Status, to) {
+		return nil, false, fmt.Errorf("%w: %s → %s", ErrIterationTransition, it.Status, to)
+	}
+	it.Status = to
+	if commit := strings.TrimSpace(mergeCommit); commit != "" {
+		it.MergeCommit = commit
+	}
+	// 留空让 UpsertIteration 取当前 UTC，收口时间才可核对。
+	it.UpdatedAt = ""
+	if err := UpsertIteration(tx, it); err != nil {
+		return nil, false, err
+	}
+	return it, true, nil
+}
 
 // Iteration 是一次加入的任务列表，也是任务的容器与合入单位。
 //

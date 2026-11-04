@@ -1,10 +1,10 @@
 package main
 
 import (
-	"time"
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -614,6 +614,24 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run:   func(cmd *cobra.Command, args []string) { printRes(app.IterationShow(cwd, args[0])) },
 	})
+	iterationCloseCmd := &cobra.Command{
+		Use:   "close [id]",
+		Short: i18n.T("cmd.iteration.close.short"),
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			status, _ := cmd.Flags().GetString("status")
+			commit, _ := cmd.Flags().GetString("merge-commit")
+			force, _ := cmd.Flags().GetBool("force")
+			printRes(app.IterationClose(cwd, app.IterationCloseInput{
+				ID: args[0], Status: status, MergeCommit: commit,
+				Force: force, DryRun: dryRun,
+			}))
+		},
+	}
+	iterationCloseCmd.Flags().String("status", "merged", i18n.T("flag.iteration_close_status"))
+	iterationCloseCmd.Flags().String("merge-commit", "", i18n.T("flag.iteration_merge_commit"))
+	iterationCloseCmd.Flags().Bool("force", false, i18n.T("flag.iteration_force"))
+	iterationCmd.AddCommand(iterationCloseCmd)
 	root.AddCommand(iterationCmd)
 
 	hookCmd := &cobra.Command{Use: "hook", Hidden: true}

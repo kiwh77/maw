@@ -198,3 +198,119 @@ func TestPurgeProjectRemovesIterations(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestIterationStatusMachine(t *testing.T) {
+	// 允许的推进：沿链向前，或中途放弃。
+	allowed := [][2]string{
+		{IterationPlanning, IterationRunning},
+		{IterationPlanning, IterationAbandoned},
+		{IterationRunning, IterationFinishing},
+		{IterationRunning, IterationMerged},
+		{IterationRunning, IterationAbandoned},
+		{IterationFinishing, IterationMerged},
+		{IterationFinishing, IterationAbandoned},
+	}
+	for _, pair := range allowed {
+		if !CanTransitionIteration(pair[0], pair[1]) {
+			t.Fatalf("%s → %s 应允许", pair[0], pair[1])
+		}
+	}
+	// 拒绝的迁移：终态不可回退，也不能跳过执行直接收尾，未知状态一律拒绝。
+	denied := [][2]string{
+		{IterationMerged, IterationRunning},
+		{IterationMerged, IterationAbandoned},
+		{IterationAbandoned, IterationMerged},
+		{IterationAbandoned, IterationRunning},
+		{IterationPlanning, IterationMerged},
+		{IterationPlanning, IterationFinishing},
+		{"bogus", IterationMerged},
+		{IterationRunning, "bogus"},
+	}
+	for _, pair := range denied {
+		if CanTransitionIteration(pair[0], pair[1]) {
+			t.Fatalf("%s → %s 应拒绝", pair[0], pair[1])
+		}
+	}
+}
+
+func TestSetIterationStatusRecordsCommitAndRejectsBackward(t *testing.T) {
+	path := openTestDB(t)
+	err := WithTx(path, func(tx *sql.Tx) error {
+		if err := UpsertIteration(tx, &Iteration{
+			ProjectID: "p1", ID: "IT-001", Name: "收口",
+			Status: IterationRunning, TargetBranch: "main",
+		}); err != nil {
+			return err
+		}
+		got, changed, err := SetIterationStatus(tx, "p1", "IT-001", IterationMerged, "abc1234")
+		if err != nil {
+			return err
+		}
+		if !changed || got.Status != IterationMerged || got.MergeCommit != "abc1234" {
+			t.Fatalf("收口结果不符：changed=%v %+v", changed, got)
+		}
+		// 再读一次，确认落库而不是只改了内存对象。
+		again, err := GetIteration(tx, "p1", "IT-001")
+		if err != nil {
+			return err
+		}
+		if again.Status != IterationMerged || again.MergeCommit != "abc1234" {
+			t.Fatalf("收口未落库：%+v", again)
+		}
+		// 终态回退必须被拒绝，且库中状态不变。
+		if _, _, err := SetIterationStatus(tx, "p1", "IT-001", IterationRunning, ""); !errors.Is(err, ErrIterationTransition) {
+			t.Fatalf("merged → running 应回 ErrIterationTransition，得到 %v", err)
+		}
+		still, err := GetIteration(tx, "p1", "IT-001")
+		if err != nil {
+			return err
+		}
+		if still.Status != IterationMerged {
+			t.Fatalf("被拒绝的迁移不得改库：%+v", still)
+		}
+		// 非法状态与非空迭代不存在的错误语义。
+		if _, _, err := SetIterationStatus(tx, "p1", "IT-001", "bogus", ""); err == nil {
+			t.Fatal("非法状态应被拒绝")
+		}
+		if _, _, err := SetIterationStatus(tx, "p1", "IT-404", IterationMerged, ""); !errors.Is(err, ErrIterationNotFound) {
+			t.Fatalf("未知迭代应回 ErrIterationNotFound，得到 %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetIterationStatusIdempotent(t *testing.T) {
+	path := openTestDB(t)
+	err := WithTx(path, func(tx *sql.Tx) error {
+		if err := UpsertIteration(tx, &Iteration{
+			ProjectID: "p1", ID: "IT-002", Name: "重复收口", Status: IterationRunning,
+		}); err != nil {
+			return err
+		}
+		first, changed, err := SetIterationStatus(tx, "p1", "IT-002", IterationMerged, "")
+		if err != nil {
+			return err
+		}
+		if !changed {
+			t.Fatal("首次收口应报告变更")
+		}
+		stamp := first.UpdatedAt
+		second, changed, err := SetIterationStatus(tx, "p1", "IT-002", IterationMerged, "")
+		if err != nil {
+			return err
+		}
+		if changed {
+			t.Fatal("重复收口不应再报告变更")
+		}
+		if second.UpdatedAt != stamp {
+			t.Fatalf("幂等收口不该刷新 updated_at：%q → %q", stamp, second.UpdatedAt)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
