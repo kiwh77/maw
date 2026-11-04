@@ -32,7 +32,7 @@ maw-init（main_branch 仅为探测占位）
   → maw-plan-push（蓝图 meta.main_branch → plan apply 同步 config）
   → maw-task-pull（本工程 next，或 board 选仓后 next -C）
   → worktree 内实现 → submit → maw merge --yes
-  → （仍有 ready）maw next → … 循环
+  → （仍有 ready）maw next 查询 → maw next --claim 领取 → … 循环
   → maw board --serve
 ```
 
@@ -42,17 +42,19 @@ maw-init（main_branch 仅为探测占位）
 # 本工程领题（Worker 名：{应用}-{工程}-{序号}，如 cursor-demo-1）
 maw register --json          # 未指定则自动分配规范名
 export MAW_AGENT=<返回的 agent>
-maw next --json
-# 或一步：maw next --json（无 MAW_AGENT 时同样自动分配）
+maw next --json          # 先查询：只预览候选，不占坑
+maw next --claim --json  # 确认后领取（无 MAW_AGENT 时同样自动分配）
 # 全局：先看再进仓领
 maw board --json --status ready
-maw next -C "<project_path>" --json
+maw next -C "<project_path>" --json         # 先查询预览
+maw next -C "<project_path>" --claim --json # 再领取
 
 maw progress -m "里程碑"
 maw submit
 maw merge --yes          # 成功后保留 .worktrees/{agent}，仅删除 agent/{agent}/{task} 分支
 # 仍有 ready 则继续（同树 reset 到主干 tip 后换新题分支）
-maw next
+maw next          # 查询
+maw next --claim  # 领取
 # 历史「一题一树」残留：
 # maw prune            # 预览
 # maw prune --yes      # 删除

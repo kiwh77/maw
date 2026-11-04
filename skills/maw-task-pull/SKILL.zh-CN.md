@@ -41,7 +41,7 @@ maw register --json   # 记下返回的 agent，本会话 export MAW_AGENT=<agen
 # 应用段可用 MAW_APP=cursor|codebuddy|trae|qoder|claude|windsurf 覆盖
 ```
 
-- 同一 `MAW_AGENT` 若已有进行中任务：`maw next` **幂等**，回到原 worktree（不新领）。
+- 同一 `MAW_AGENT` 若已有进行中任务：裸 `maw next` 只读报 held；`maw next --claim` **幂等**回到原 worktree（不新领）。
 - 换题前须 `maw submit` / `block` / `unregister`，勿多人共用一名。
 - 禁止再用 `w1`/`w2` 或业务绰号（如 `cursor-admin-fe`）。
 
@@ -54,10 +54,14 @@ maw register --json   # 记下返回的 agent，本会话 export MAW_AGENT=<agen
 ```bash
 maw doctor
 maw board --json --status ready          # 可选：看 ready
-maw next --agent "$MAW_AGENT" --json     # 自动 register
-# 预览不落盘：
+maw next --agent "$MAW_AGENT" --json     # 先查询：只预览候选，不占坑
+maw next --agent "$MAW_AGENT" --claim --json   # 确认后再领取（自动 register）
+# 预览不落盘（与裸 next 等价，保留兼容）：
 # maw next --agent "$MAW_AGENT" --dry-run --json
 ```
+
+裸 `maw next` 是只读查询：任务仍是 `ready`，不建 Run／租约，也不写 worktree；只有
+`maw next --claim` 才真正领取。误敲一次 next 不会占坑。
 
 成功后：
 
@@ -94,7 +98,8 @@ maw board --json --status ready
 
 # 3) 在该工程路径下拉取
 export MAW_AGENT="${MAW_AGENT:-w1}"
-maw next -C "<project_path>" --agent "$MAW_AGENT" --json
+maw next -C "<project_path>" --agent "$MAW_AGENT" --json          # 先查询预览
+maw next -C "<project_path>" --agent "$MAW_AGENT" --claim --json   # 确认后领取
 ```
 
 筛选示例：
@@ -118,15 +123,15 @@ maw board --serve   # 浏览器看全局；仍须用 CLI next -C 拉取
 [ ] git commit（仅 scope 内）
 [ ] maw submit
 [ ] maw merge --yes —— submit 后可自行合入（保留 `.worktrees/{agent}`，删题分支）
-[ ] 仍有 ready → maw next（同树 reset 主干 tip）领下一题；无题可领再停
+[ ] 仍有 ready → maw next 查询、maw next --claim 领取（同树 reset 主干 tip）；无题可领再停
 ```
 
 ## 硬规则
 
-1. **一次一题**：有进行中任务时 next 只恢复原题，不双开（除非换 agent 名）。
+1. **先查后领**：裸 `maw next` 只预览；领取必须 `maw next --claim`。**一次一题**：有进行中任务时查询只报 held、`--claim` 只恢复原题，不双开（除非换 agent 名）。
 2. **写盘不越界**：超出 write_scope 的改动 submit 会失败。
 3. submit 后可自行 `maw merge --yes`；**禁止**直接 git `merge` / `rebase` / `push` 主干。
-4. 合入后若仍有 ready，继续 `maw next` 循环执行，直至无题可领或用户叫停。
+4. 合入后若仍有 ready，继续 `maw next` 查询、`maw next --claim` 领取，直至无题可领或用户叫停。
 5. 全局模式下先 **board 选仓**，再 **`next -C`**；没有「一条命令跨库自动领最优题」时，由本技能按优先级选仓。
 6. 选仓启发式：`ready>0` → priority 更优的题所在仓 → 用户当前打开的工程优先。**不按 max_parallel 卡槽**（≥0.3.6：有可激活 ready 即派活）。
 7. **上下文亲和（maw ≥0.3.5）**：同一 `MAW_AGENT` 再 `next` 时，调度优先领与其近期完成题亲和的 ready（deps 续链 > 写盘重叠 > 同模块路径前缀），再比 `priority`/`merge_order`/`id`。无锚点（新 agent / 首题）则纯序位。  

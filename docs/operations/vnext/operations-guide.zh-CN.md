@@ -155,14 +155,16 @@ maw init                       # 首次：注册工程并写入协议
 maw plan apply .multiagent/blueprint.toml --yes
 
 export MAW_AGENT=<你的 Agent 名>
-maw register                   # 或直接用 maw next 自动注册
-maw next                       # 领题，拿到 worktree 路径与 write_scope
+maw register                   # 或直接用 maw next --claim 自动注册
+maw next                       # 查询：只预览下一题候选，不占坑
+maw next --claim               # 确认后领取，拿到 worktree 路径与 write_scope
 # 在打印出的 worktree 里改 write_scope 内的文件
 maw progress -m "完成一半"      # 心跳 + 进度；这不是可选项
 git commit -am "..."
 maw submit                     # 范围检查 → 门禁 → merging
 maw merge --yes                # 串行合入；保留 worktree，删题分支
-maw next                       # 还有 ready 就继续
+maw next                       # 还有 ready：先查询预览
+maw next --claim               # 确认后领下一题
 ```
 
 四条容易踩的规矩：
@@ -186,7 +188,7 @@ maw status report -m "coding" --phase code --pct 40
 2. 确认能跑：`maw --version`、`maw doctor --json` 的 `issues` 为空。
 3. 注册工程：仓库里 `maw init`；老仓库用 `maw init --upgrade`（会先备份，见升级说明）。
 4. 写蓝图并压入：`maw plan apply .multiagent/blueprint.toml --yes`；`maw plan check` 只校验不落库。
-5. 注册 Agent 并领第一题：`maw register` → `maw next`。
+5. 注册 Agent 并领第一题：`maw register` → `maw next` 预览 → `maw next --claim` 领取。裸 `maw next` 只读，不会占坑。
 6. 想用受管执行：先 `maw managed status` 看 `platform_supported`；为 true 时
    `maw managed start --task <ID> --node <node_id>`。不要先开自动派发来「顺便验证」受管能力。
 

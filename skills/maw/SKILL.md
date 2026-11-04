@@ -32,7 +32,7 @@ maw-init (main_branch is only a probe placeholder)
   → maw-plan-push (blueprint meta.main_branch → plan apply syncs config)
   → maw-task-pull (in-repo next, or board pick then next -C)
   → implement in worktree → submit → maw merge --yes
-  → (if ready remains) maw next → … loop
+  → (if ready remains) maw next to preview → maw next --claim → … loop
   → maw board --serve
 ```
 
@@ -41,13 +41,14 @@ maw-init (main_branch is only a probe placeholder)
 ```bash
 maw register --json
 export MAW_AGENT=<returned agent>
-maw next --json
-# or one step: maw next --json (auto-assigns without MAW_AGENT)
+maw next --json          # query: preview only, no claim
+maw next --claim --json  # claim it (auto-assigns without MAW_AGENT)
 
 maw progress -m "milestone"
 maw submit
 maw merge --yes
-maw next
+maw next          # query
+maw next --claim  # claim
 
 # hub bookkeeping: list / remove project registrations (refuses while tasks or Agents are live)
 maw project list

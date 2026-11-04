@@ -111,7 +111,7 @@ ls .multiagent/config.toml .multiagent/blueprint.toml
 
 1. 用 **maw-task-list** 拆清单（文首写明主分支）
 2. 用 **maw-plan-push** 写蓝图（`meta.main_branch`）并 `plan apply`
-3. `maw register && maw next`（自动分配如 `cursor-demo-1`）
+3. `maw register && maw next` 预览，再 `maw next --claim` 领取（自动分配如 `cursor-demo-1`）
 4. 可选：`maw board --serve`
 
 写一句 `.multiagent/STATUS.md`（建议）：
@@ -128,7 +128,7 @@ ls .multiagent/config.toml .multiagent/blueprint.toml
 2. **不要手改** `<!-- maw:begin` … `maw:end -->` 内协议正文；升级用 `maw init --upgrade`。
 3. init 不会合并代码、不会 apply 业务蓝图；示例 blueprint 仅占位。
 4. 已有自定义 `config.toml` / `blueprint.toml` 时：普通 `maw init` **不覆盖**已存在文件；`--upgrade` 会重写 **config** 默认模板——升级前先 diff/备份。
-5. submit 后可自行 `maw merge --yes`；禁止直接 git merge/rebase/push 主干。合入后若仍有 ready，继续 `maw next`。
+5. submit 后可自行 `maw merge --yes`；禁止直接 git merge/rebase/push 主干。合入后若仍有 ready，继续 `maw next` 查询、`maw next --claim` 领取。
 
 ## 输出给用户（中文）
 
