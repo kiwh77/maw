@@ -56,7 +56,9 @@ test("EV-001 按迭代分组：任务归组，运行／交付经 task_instance �
   const view = await load();
   const groups = view.iterationGroupsOf(fixture());
 
-  assert.deepEqual(groups.map(g => g.id), ["it-1", "it-2"]);
+  // 分组键带工程：中枢首页不选工程时会同时拿到多个工程的迭代。
+  assert.deepEqual(groups.map(g => g.id), ["p-1::it-1", "p-1::it-2"]);
+  assert.deepEqual(groups.map(g => g.iterationId), ["it-1", "it-2"], "标签仍用迭代编号");
   assert.deepEqual(groups[0].tasks.map(t => t.display_id), ["EV-001", "EV-002", "EV-003"]);
   // run_x 的实例不在任务里：不猜迭代，也不新建空迭代。
   assert.deepEqual(groups[0].runs.map(r => r.run_id), ["run_1", "run_2"]);
@@ -81,10 +83,10 @@ test("EV-001 摘要计数分开算：任务按状态，运行按是否仍占资�
 test("EV-001 选中迭代可见三类摘要，默认选第一个", async () => {
   const view = await load();
   const state = fixture();
-  assert.equal(view.selectedIterationOf(state, view.iterationGroupsOf(state)), "it-1");
+  assert.equal(view.selectedIterationOf(state, view.iterationGroupsOf(state)), "p-1::it-1");
 
   const html = view.renderExecution(state, { lang: "zh" });
-  assert.match(html, /data-iteration-panel="it-1"/);
+  assert.match(html, /data-iteration-panel="p-1::it-1"/);
   assert.ok(html.includes('data-summary="tasks"'));
   assert.ok(html.includes('data-summary="runs"'));
   assert.ok(html.includes('data-summary="deliveries"'));
@@ -95,17 +97,17 @@ test("EV-001 选中迭代可见三类摘要，默认选第一个", async () => {
   // 选中态只有一个
   assert.equal((html.match(/is-active/g) || []).length, 1);
   // 第二个迭代的摘要不该混进来
-  assert.ok(!html.includes('data-iteration-panel="it-2"'));
+  assert.ok(!html.includes('data-iteration-panel="p-1::it-2"'));
 });
 
 test("EV-001 切换迭代只换面板，不丢另一个迭代的入口", async () => {
   const view = await load();
-  const state = { ...fixture(), selectedIteration: "it-2" };
+  const state = { ...fixture(), selectedIteration: "p-1::it-2" };
   const html = view.renderExecution(state, { lang: "zh" });
 
-  assert.match(html, /data-iteration-panel="it-2"/);
-  assert.match(html, /data-iteration="it-1"/, "另一个迭代仍要能点回去");
-  assert.match(html, /data-iteration="it-2"[^>]*aria-pressed="true"/);
+  assert.match(html, /data-iteration-panel="p-1::it-2"/);
+  assert.match(html, /data-iteration="p-1::it-1"/, "另一个迭代仍要能点回去");
+  assert.match(html, /data-iteration="p-1::it-2"[^>]*aria-pressed="true"/);
   // 选中的迭代变了，任务行也跟着变。
   assert.ok(html.includes("IT-005"));
   assert.ok(!html.includes("EV-001"));
@@ -113,9 +115,9 @@ test("EV-001 切换迭代只换面板，不丢另一个迭代的入口", async (
 
 test("EV-001 不存在的选中值退回第一个迭代，不渲染空面板", async () => {
   const view = await load();
-  const state = { ...fixture(), selectedIteration: "it-404" };
-  assert.equal(view.selectedIterationOf(state, view.iterationGroupsOf(state)), "it-1");
-  assert.match(view.renderExecution(state, { lang: "zh" }), /data-iteration-panel="it-1"/);
+  const state = { ...fixture(), selectedIteration: "p-1::it-404" };
+  assert.equal(view.selectedIterationOf(state, view.iterationGroupsOf(state)), "p-1::it-1");
+  assert.match(view.renderExecution(state, { lang: "zh" }), /data-iteration-panel="p-1::it-1"/);
 });
 
 test("EV-001 没选迭代时默认第一组，别把空串当成「未归属」", async () => {
@@ -131,15 +133,15 @@ test("EV-001 没选迭代时默认第一组，别把空串当成「未归属」"
   };
   const groups = view.iterationGroupsOf(state);
   // 空串这一组是「未归属迭代」，它排在最后，不是默认选中项。
-  assert.deepEqual(groups.map(g => g.id), ["it-1", ""]);
-  assert.equal(view.selectedIterationOf(state, groups), "it-1", "没给选中值时不能落到未归属组");
-  assert.match(view.renderExecution(state, { lang: "zh" }), /data-iteration-panel="it-1"/);
+  assert.deepEqual(groups.map(g => g.id), ["p-1::it-1", "p-1::"]);
+  assert.equal(view.selectedIterationOf(state, groups), "p-1::it-1", "没给选中值时不能落到未归属组");
+  assert.match(view.renderExecution(state, { lang: "zh" }), /data-iteration-panel="p-1::it-1"/);
 
   // 显式选「未归属」仍然可点：空串是合法 id，不是「没选」。
-  const unassigned = { ...state, selectedIteration: "" };
-  assert.equal(view.selectedIterationOf(unassigned, groups), "");
+  const unassigned = { ...state, selectedIteration: "p-1::" };
+  assert.equal(view.selectedIterationOf(unassigned, groups), "p-1::");
   const html = view.renderExecution(unassigned, { lang: "zh" });
-  assert.match(html, /data-iteration-panel=""/);
+  assert.match(html, /data-iteration-panel="p-1::"/);
   assert.match(html, /data-unassigned="1"/);
   assert.ok(!html.includes("EV-001"), "未归属面板里不该出现别的迭代的任务");
 });
@@ -159,7 +161,7 @@ test("EV-001 没有迭代时给明确空态，不渲染空表格", async () => {
   const html = view.renderExecution({ status: "ok", tasks: [], runs: [], deliveries: [] }, { lang: "zh" });
 
   assert.ok(html.includes('data-state="empty"'));
-  assert.ok(html.includes("这个工程还没有迭代"));
+  assert.ok(html.includes("还没有可聚合的迭代"));
   assert.ok(html.includes("maw plan apply"), "空态要指出下一步");
   assert.ok(!html.includes("<table"), "没有迭代时不渲染空表格");
 });
@@ -168,7 +170,7 @@ test("EV-001 未归属迭代的任务单独成组并说明后果", async () => {
   const view = await load();
   const state = { status: "ok", tasks: [task("CQ-001", "ti_x", "", "ready")], runs: [], deliveries: [] };
   const groups = view.iterationGroupsOf(state);
-  assert.deepEqual(groups.map(g => g.id), [""]);
+  assert.deepEqual(groups.map(g => g.id), ["p-1::"]);
 
   const html = view.renderExecution(state, { lang: "zh" });
   assert.ok(html.includes("未归属迭代"));
@@ -183,7 +185,7 @@ test("EV-001 各类加载态各有独立分支，缺数据不冒充空结果", a
     error: "执行视图加载失败",
     expired: "执行数据已过期",
     unauthenticated: "未登录",
-    no_project: "先选一个工程",
+    no_project: "还没有选定工程",
   };
   for (const [status, text] of Object.entries(cases)) {
     const html = view.renderExecution({ status }, { lang: "zh" });
@@ -215,4 +217,32 @@ test("EV-001 标题与编号经过转义，不把数据当 HTML", async () => {
   const html = view.renderExecution(state, { lang: "zh" });
   assert.ok(!html.includes("<script>alert(1)</script>"));
   assert.ok(html.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
+});
+
+test("EV-001 不同工程同名迭代不合并：分组键带工程", async () => {
+  const view = await load();
+  const state = {
+    status: "ok",
+    tasks: [
+      task("EV-001", "ti_a", "IT-005", "in_progress", { project_id: "p-1", project_name: "goal-agents" }),
+      task("CQ-001", "ti_b", "IT-005", "done", { project_id: "p-2", project_name: "other" }),
+    ],
+    runs: [],
+    deliveries: [],
+  };
+  const groups = view.iterationGroupsOf(state);
+  assert.equal(groups.length, 2, "两个工程各有 IT-005，不能并成一个迭代");
+  assert.deepEqual(groups.map(g => g.projectId), ["p-1", "p-2"]);
+
+  const html = view.renderExecution(state, { lang: "zh" });
+  // 跨工程看时标签补工程名：只写 IT-005 会让读者以为是一个迭代。
+  assert.ok(html.includes("IT-005 · goal-agents"));
+  assert.ok(html.includes("IT-005 · other"));
+
+  // 只看一个工程时不加后缀：那是噪声。
+  const single = view.renderExecution(
+    { status: "ok", tasks: [state.tasks[0]], runs: [], deliveries: [] },
+    { lang: "zh" },
+  );
+  assert.ok(single.includes(">IT-005<"), "单工程时标签就是迭代编号");
 });

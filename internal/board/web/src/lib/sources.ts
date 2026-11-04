@@ -222,19 +222,20 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
   return {
     tasks: fetchTasks,
     /**
-     * 执行视图（EV-001）：任务、运行、交付三类一次取齐。
+     * 执行视图（EV-001 / EV-003）：任务、运行、交付三类一次取齐。
      *
      * 三类缺一类就整份判失败，不返回「有任务、零运行」这种半成品——
      * 渲染层据此把整页标成加载失败，而不是显示成「这批题没跑过」。
-     * 迭代是工程内的容器，没有工程时连请求都不发，由挂载层给「先选工程」。
+     *
+     * 没有工程时不发「先选工程」的空转：运行与交付按登记工程逐个取再合并，
+     * 与看板「全部工程」同一口径（迭代按工程分组由视图负责）。
      */
     async execution(route: RouteLike) {
       const project = String(route?.project || '').trim()
-      if (!project) return { unavailable: true as const, status: 0 }
       const [taskPayload, runsPayload, deliveriesPayload] = await Promise.all([
         fetchTasks(route),
-        fetchControl('runs', project),
-        fetchControl('deliveries', project),
+        project ? fetchControl('runs', project) : fetchControlAll('runs'),
+        project ? fetchControl('deliveries', project) : fetchControlAll('deliveries'),
       ])
       const parts = [taskPayload, runsPayload, deliveriesPayload]
       if (parts.some((p) => p && (p as JsonFail).unauthenticated === true)) {

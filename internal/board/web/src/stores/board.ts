@@ -6,6 +6,7 @@ import {
   withRoute,
   sameRoute,
   resolveView,
+  DEFAULT_VIEW,
 } from '../lib/route'
 import {
   normalizeLang,
@@ -142,7 +143,9 @@ export const boardStore = {
   setProject(projectId: string) {
     const id = String(projectId || '').trim()
     const patch: Partial<BoardRoute> = { project: id, detail: '' }
-    if (id && !state.route.project) patch.view = 'board'
+    // 从「全部工程」选到一个工程：回到默认视图（EV-003 起是执行视图）。
+    // 以前这里写死 board，默认页一改就会把用户从执行视图弹回旧看板。
+    if (id && !state.route.project) patch.view = DEFAULT_VIEW
     // 选「全部工程」保持当前视图：契约要求多工程时回到看板并禁用拓扑，
     // 而不是把用户悄悄带去另一个视图。
     if (!id && state.route.view === 'topo') patch.view = 'board'

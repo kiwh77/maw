@@ -5,10 +5,10 @@
 //   - vnext 视图 `?view=nodes&project=…&id=…`：用 pushState 前进后退，返回列表时保留筛选。
 //
 // 规则：
-//   1. 请求串里没有合法 `view` 时回到 board（与旧直达链接一致）；
-//   2. 视图 id 未知时不猜测，回退 board，避免渲染空白；
+//   1. 请求串里没有合法 `view` 时回到默认视图（EV-003 起是执行视图，旧链接仍可直达 board）；
+//   2. 视图 id 未知时不猜测，回退默认视图，避免渲染空白；
 //   3. 工程锚点优先取 `?project=`，缺省时取旧 hash，两处始终序列化回 hash；
-//   4. `id` 只在 vnext 视图生效；board 视图忽略它，不改变 legacy 详情抽屉行为。
+//   4. `id` 只在有详情面板的视图生效；其余视图忽略它，不改变 legacy 详情抽屉行为。
 
 import { DEFAULT_VIEW, DEFAULT_VIEW_NO_PROJECT } from "./view-registry.mjs";
 
@@ -34,6 +34,16 @@ const FILTER_KEYS = [
   [PARAM_STATUS, "status"],
   [PARAM_SEARCH, "search"],
 ];
+
+/**
+ * 有详情面板的视图。
+ *
+ * 以前用「不是默认视图就收 id」来挡：默认视图是 board，而 board 的详情在
+ * legacy 抽屉里，不吃 `id` 参数。默认视图改成执行视图之后这条判据就失效了
+ * （执行视图也不吃 id，反倒 board 会开始收），所以这里改成显式清单：
+ * 与挂载层的 DETAIL 表同源，只有这三类会把 id 当详情打开。
+ */
+const DETAIL_VIEWS = Object.freeze(["nodes", "runs", "deliveries"]);
 
 /** 合法的 legacy 工程锚点：非空且不含 `=`（我们的路由参数只出现在 query 里）。 */
 export function isLegacyProjectAnchor(hash = "") {
@@ -75,7 +85,7 @@ export function parseRoute(search = "", hash = "", isKnownView = null) {
     agent: params.get(PARAM_AGENT) || "",
     status: params.get(PARAM_STATUS) || "",
     search: params.get(PARAM_SEARCH) || "",
-    detail: view === DEFAULT_VIEW ? "" : (params.get(PARAM_DETAIL) || ""),
+    detail: DETAIL_VIEWS.indexOf(view) >= 0 ? (params.get(PARAM_DETAIL) || "") : "",
     fromHash: Boolean(anchor) && !params.get(PARAM_PROJECT),
   };
 }

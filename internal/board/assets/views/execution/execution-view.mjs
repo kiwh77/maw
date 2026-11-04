@@ -31,9 +31,9 @@ const I18N = {
     "execution.expired.hint": "刷新后重新读取，不沿用上次结论。",
     "execution.unauthenticated": "未登录，无法读取执行数据。",
     "execution.unauthenticated.hint": "使用本机会话或令牌后重试。",
-    "execution.no_project": "先选一个工程。",
-    "execution.no_project.hint": "执行视图按工程的迭代聚合；工程下拉里选一个再回来。",
-    "execution.empty": "这个工程还没有迭代。",
+    "execution.no_project": "还没有选定工程。",
+    "execution.no_project.hint": "不选工程时这里汇总全部工程的迭代；只想看一个工程，就在工程下拉里选它。",
+    "execution.empty": "还没有可聚合的迭代。",
     "execution.empty.hint": "用 maw plan apply 把任务带迭代归属写入，或先建迭代再加题。",
     "execution.unassigned": "未归属迭代",
     "execution.unassigned.hint": "这些任务还没归入任何迭代：它们会执行、也会合入，但不会出现在迭代收尾里。",
@@ -76,9 +76,9 @@ const I18N = {
     "execution.expired.hint": "Refresh to re-read; previous conclusions are not reused.",
     "execution.unauthenticated": "Not signed in; execution data is unavailable.",
     "execution.unauthenticated.hint": "Use a local session or token and retry.",
-    "execution.no_project": "Pick a project first.",
-    "execution.no_project.hint": "The execution view aggregates iterations per project; choose one in the project menu and come back.",
-    "execution.empty": "This project has no iterations yet.",
+    "execution.no_project": "No project selected yet.",
+    "execution.no_project.hint": "With no project selected this view aggregates every project; pick one in the project menu to narrow it down.",
+    "execution.empty": "No iterations to aggregate yet.",
     "execution.empty.hint": "Run maw plan apply to write tasks with iteration ids, or create an iteration and add tasks.",
     "execution.unassigned": "No iteration",
     "execution.unassigned.hint": "These tasks belong to no iteration: they still run and merge, but they never appear in an iteration close-out.",
@@ -162,6 +162,25 @@ function iterationOf(task) {
   return String(task?.iteration_id ?? "").trim();
 }
 
+function projectOf(task) {
+  return String(task?.project_id ?? "").trim();
+}
+
+/** 分组键的分隔符：迭代编号只在一个工程内唯一，跨工程必须带上工程。 */
+const KEY_SEP = "::";
+
+/**
+ * 分组键 = 工程 + 迭代。
+ *
+ * 不选工程时（中枢首页默认）这里会同时拿到多个工程的迭代，
+ * 而 `IT-001` 这种编号在每个工程里都可能有——只按迭代编号分组会把
+ * 两个工程的题合成一个面板，摘要数字跟着错。工程名不参与键：
+ * 名字可改，id 不会。
+ */
+export function groupKeyOf(task) {
+  return projectOf(task) + KEY_SEP + iterationOf(task);
+}
+
 function summarize(group) {
   const tasks = group.tasks;
   return {
@@ -183,9 +202,12 @@ function summarize(group) {
 /**
  * 按迭代分组。
  *
+ * 分组键是「工程 + 迭代」（见 groupKeyOf）：不选工程时首页会同时拿到多个工程的
+ * 迭代，只按迭代编号分组会把两个工程同名迭代的题合成一个面板。
+ *
  * 迭代顺序取任务在列表里首次出现的顺序（列表已按合入序位排过），
  * 不按 id 排序：id 是机器编号，排序结果对人没有意义。
- * 未归属迭代的任务单独成一组（id 为空串），并显式标注——
+ * 未归属迭代的任务在各自工程内单独成一组（迭代为空串），并显式标注——
  * 把它们混进某个迭代会让收尾清单漏项。
  */
 export function iterationGroupsOf(state = {}) {
@@ -194,11 +216,22 @@ export function iterationGroupsOf(state = {}) {
   const deliveries = Array.isArray(state.deliveries) ? state.deliveries : [];
 
   const groups = new Map();
-  const ensure = id => {
-    if (!groups.has(id)) groups.set(id, { id, tasks: [], runs: [], deliveries: [] });
+  const ensure = task => {
+    const id = groupKeyOf(task);
+    if (!groups.has(id)) {
+      groups.set(id, {
+        id,
+        projectId: projectOf(task),
+        projectName: String(task?.project_name ?? "").trim(),
+        iterationId: iterationOf(task),
+        tasks: [],
+        runs: [],
+        deliveries: [],
+      });
+    }
     return groups.get(id);
   };
-  tasks.forEach(task => ensure(iterationOf(task)).tasks.push(task));
+  tasks.forEach(task => ensure(task).tasks.push(task));
 
   // 运行与交付没有迭代字段：只能经 task_instance 归到任务所在迭代。
   const groupOfInstance = new Map();
@@ -211,12 +244,12 @@ export function iterationGroupsOf(state = {}) {
   for (const run of runs) {
     const id = groupOfInstance.get(String(run?.task_instance || "").trim());
     if (id === undefined) continue;
-    ensure(id).runs.push(run);
+    groups.get(id).runs.push(run);
   }
   for (const item of deliveries) {
     const id = groupOfInstance.get(String(item?.task_instance || "").trim());
     if (id === undefined) continue;
-    ensure(id).deliveries.push(item);
+    groups.get(id).deliveries.push(item);
   }
 
   return [...groups.values()].map(group => ({ ...group, counts: summarize(group) }));
@@ -236,16 +269,23 @@ export function selectedIterationOf(state = {}, groups = []) {
   return groups.length ? groups[0].id : "";
 }
 
-function iterationLabel(lang, id) {
-  return id ? id : t("execution.unassigned", lang);
+/**
+ * 迭代标签。跨工程看时补上工程名：两个工程都有 IT-001，
+ * 只写编号会让读者以为是一个迭代。
+ */
+function iterationLabel(lang, group, multiProject) {
+  const base = group.iterationId ? group.iterationId : t("execution.unassigned", lang);
+  if (!multiProject) return base;
+  const name = group.projectName || group.projectId || "";
+  return name ? base + " · " + name : base;
 }
 
 // ---------- 渲染 ----------
 
-function iterationBar(lang, groups, selected) {
+function iterationBar(lang, groups, selected, multiProject) {
   const items = groups.map(group => {
     const active = group.id === selected;
-    const label = iterationLabel(lang, group.id);
+    const label = iterationLabel(lang, group, multiProject);
     return '<button type="button" class="execution-iteration' + (active ? " is-active" : "") +
       '" data-iteration="' + esc(group.id) + '" aria-pressed="' + (active ? "true" : "false") + '">' +
       '<span class="execution-iteration__id">' + esc(label) + "</span>" +
@@ -348,7 +388,9 @@ export function renderExecution(state = {}, options = {}) {
 
   const selected = selectedIterationOf(state, groups);
   const group = groups.find(item => item.id === selected) || groups[0];
-  const unassigned = group.id === "";
+  const unassigned = group.iterationId === "";
+  // 跨工程看时才在标签上补工程名：单工程里那个后缀是噪声。
+  const multiProject = new Set(groups.map(item => item.projectId)).size > 1;
   const heading = '<div class="execution-head">' +
     '<p class="field-hint">' + esc(t("execution.subtitle", lang)) + "</p>" +
     '<p class="field-hint" data-iteration-total="' + esc(groups.length) + '">' +
@@ -356,7 +398,7 @@ export function renderExecution(state = {}, options = {}) {
       (Array.isArray(state.tasks) ? state.tasks.length : 0) + " " + t("execution.task.count", lang)) + "</p></div>";
 
   const panel = '<section class="execution-panel" data-iteration-panel="' + esc(group.id) + '">' +
-    '<h2 class="execution-panel__title">' + esc(iterationLabel(lang, group.id)) + "</h2>" +
+    '<h2 class="execution-panel__title">' + esc(iterationLabel(lang, group, multiProject)) + "</h2>" +
     (unassigned ? '<p class="field-hint" data-unassigned="1">' + esc(t("execution.unassigned.hint", lang)) + "</p>" : "") +
     summaryCards(lang, group) +
     '<h3 class="execution-panel__section">' + esc(t("execution.section.tasks", lang)) + "</h3>" + tasksTable(lang, group) +
@@ -364,5 +406,5 @@ export function renderExecution(state = {}, options = {}) {
     '<h3 class="execution-panel__section">' + esc(t("execution.section.deliveries", lang)) + "</h3>" + deliveriesTable(lang, group) +
     "</section>";
 
-  return heading + iterationBar(lang, groups, selected) + panel;
+  return heading + iterationBar(lang, groups, selected, multiProject) + panel;
 }

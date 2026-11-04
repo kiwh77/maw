@@ -22,9 +22,11 @@ export const DATA_KINDS = Object.freeze([
  * 这四类事实的来源是投影，而投影按工程建。没有工程时「什么都没查到」与
  * 「没有查」是两件事：这里必须让调用方能区分，不能用空列表冒充空成功。
  *
- * 执行视图同样按工程物化：迭代是工程内的容器，没有工程就没有可聚合的迭代。
+ * 执行视图**不在**此列：它是中枢首页的默认视图，没有工程时按工程逐个取数再合并，
+ * 分组键带上工程（见 execution-view.mjs 的 groupKeyOf），所以「全部工程」是
+ * 一个有内容的正常状态，而不是「先选工程」。
  */
-export const PROJECT_SCOPED_KINDS = Object.freeze(["timeline", "activity", "sessions", "analytics", "execution"]);
+export const PROJECT_SCOPED_KINDS = Object.freeze(["timeline", "activity", "sessions", "analytics"]);
 
 /** 缺少工程上下文时的显式状态（既不是空成功，也不是错误）。 */
 export const NO_PROJECT_STATE = Object.freeze({ status: "no_project", reason: "project_required" });

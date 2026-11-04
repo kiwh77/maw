@@ -326,8 +326,8 @@ test('VN-704 注册表同时登记 legacy 与 vnext 视图且分组稳定', asyn
   assert.equal(views.ids.length, views.legacyIds.length + views.vnextIds.length);
   assert.equal(views.get('nodes').headingKey, 'heading.nodes');
   assert.equal(views.get('nope'), null);
-  // 未知视图不猜测，回退到看板。
-  assert.equal(registry.resolveView(views, 'nope').id, 'board');
+  // 未知视图不猜测，回退到默认视图（EV-003 起执行视图是默认页）。
+  assert.equal(registry.resolveView(views, 'nope').id, 'execution');
   const groups = views.navModel();
   assert.deepEqual(groups.map(group => group.id), ['flow', 'control', 'review', 'settings']);
   assert.deepEqual(groups[1].items.map(def => def.id), ['nodes', 'tasks', 'runs', 'deliveries']);
@@ -349,7 +349,7 @@ test('VN-704 路由保留旧工程锚点并让 vnext 视图可往返', async () 
   const known = id => Boolean(views.get(id));
 
   const legacy = router.parseRoute('', '#7b24d390e1ee056d', known);
-  assert.equal(legacy.view, 'board');
+  assert.equal(legacy.view, 'execution', '旧锚点只带工程，视图走默认页');
   assert.equal(legacy.project, '7b24d390e1ee056d');
   assert.equal(legacy.fromHash, true);
   assert.equal(router.serializeRoute(legacy), '/#7b24d390e1ee056d');
@@ -358,18 +358,22 @@ test('VN-704 路由保留旧工程锚点并让 vnext 视图可往返', async () 
   assert.equal(detail.view, 'runs');
   assert.equal(detail.project, 'abc');
   assert.equal(detail.detail, 'run_1');
-  assert.equal(router.serializeRoute(detail), '/?view=runs&project=abc&id=run_1#abc');
+  // 工程只写锚点，不重复写进查询串（同一份筛选不留两个出处）。
+  assert.equal(router.serializeRoute(detail), '/?view=runs&id=run_1#abc');
 
-  // 无工程且无合法 view 时默认 nodes；board 视图才忽略 id。
-  assert.equal(router.parseRoute('?id=t-1', '', known).view, 'nodes');
+  // 没有合法 view 时不分有无工程，都回默认页；只有能开详情的视图才收 id。
+  assert.equal(router.parseRoute('?id=t-1', '', known).view, 'execution');
+  assert.equal(router.parseRoute('?id=t-1', '', known).detail, '');
+  // 旧看板深链仍然可达，且它不吃 id（详情在 legacy 抽屉里）。
+  assert.equal(router.parseRoute('?view=board', '', known).view, 'board');
   assert.equal(router.parseRoute('?view=board&id=t-1', '', known).detail, '');
-  // 未知视图：无工程回退 nodes（可带 id），有工程回退 board（board 忽略 id）。
   const unknown = router.parseRoute('?view=ghost&id=x', '', known);
-  assert.equal(unknown.view, 'nodes');
-  assert.equal(unknown.detail, 'x');
-  assert.equal(router.parseRoute('?view=ghost&project=p-9&id=x', '', known).view, 'board');
-  assert.equal(router.parseRoute('?view=ghost&project=p-9&id=x', '', known).detail, '');
-  assert.equal(router.serializeQuery({ view: 'board', project: 'abc' }), '');
+  assert.equal(unknown.view, 'execution');
+  assert.equal(unknown.detail, '', '未知视图回退到默认页，不把 id 当详情');
+  assert.equal(router.parseRoute('?view=ghost&project=p-9&id=x', '', known).view, 'execution');
+  // 默认视图不参与序列化：执行视图的地址就是不带 view 参数的 /。
+  assert.equal(router.serializeQuery({ view: 'execution', project: 'abc' }), '');
+  assert.equal(router.serializeQuery({ view: 'board', project: 'abc' }), '?view=board');
   assert.equal(router.sameRoute(detail, router.parseRoute('?view=runs&project=abc&id=run_1', '', known)), true);
   assert.deepEqual(
     views.sidebarNavModel().map(group => group.id),
@@ -517,7 +521,7 @@ test('VN-705 切换回顾与统计保留同一套筛选，URL 与面包屑能恢
 
   // 同一份路由切到统计，筛选原样带走；地址可再次解析回相同状态。
   const switched = router.withRoute(route, { view: 'analytics', detail: '' });
-  assert.equal(router.serializeRoute(switched), '/?view=analytics&project=p-9&agent=a-1&status=done&q=VN-70#p-9');
+  assert.equal(router.serializeRoute(switched), '/?view=analytics&agent=a-1&status=done&q=VN-70#p-9');
   const back = router.parseRoute('?view=analytics&project=p-9&agent=a-1&status=done&q=VN-70', '#p-9', known);
   const { fromHash, ...comparable } = back;
   assert.deepEqual(comparable, switched);
@@ -528,7 +532,7 @@ test('VN-705 切换回顾与统计保留同一套筛选，URL 与面包屑能恢
   assert.equal(back.project, 'p-9');
 
   // 未知视图仍然回退看板，不会留在一个空白页上。
-  assert.equal(router.parseRoute('?view=ghost&project=p-9', '', known).view, 'board');
+  assert.equal(router.parseRoute('?view=ghost&project=p-9', '', known).view, 'execution');
 });
 
 test('VN-705 观测适配：能力缺失降级为「未提供该数据」，不构造空成功', async () => {

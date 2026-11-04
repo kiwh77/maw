@@ -28,11 +28,22 @@
  * @property {boolean} requiresProject 是否必须先选定工程
  */
 
-/** 有工程时的默认视图（toolbar 可进看板）。 */
-export const DEFAULT_VIEW = "board";
+/**
+ * 冷启动的默认视图（EV-003）。
+ *
+ * 中枢首页先回答「这一批题在发生什么」：执行视图按迭代聚合任务、运行与交付，
+ * 旧看板（`board`）保留为次级入口——它在侧栏置顶，也可以直接用 `?view=board` 深链进入。
+ * 默认视图不参与查询串序列化，所以执行视图的地址就是不带 `view` 参数的 `/`。
+ */
+export const DEFAULT_VIEW = "execution";
 
-/** 无工程时的默认视图（左栏无 flow，落到 control）。 */
-export const DEFAULT_VIEW_NO_PROJECT = "nodes";
+/**
+ * 无工程时的默认视图。
+ *
+ * 与 `DEFAULT_VIEW` 同值：执行视图在「全部工程」下按工程逐个取数再合并，
+ * 没有工程也是有内容的正常状态（见 view-context 的 PROJECT_SCOPED_KINDS）。
+ */
+export const DEFAULT_VIEW_NO_PROJECT = "execution";
 
 /** 侧栏不展示的分组：flow 只留置顶的工作台，工坊/拓扑改由选中工程后的 toolbar 进入。 */
 export const SIDEBAR_HIDDEN_GROUPS = Object.freeze(["flow"]);
@@ -40,11 +51,10 @@ export const SIDEBAR_HIDDEN_GROUPS = Object.freeze(["flow"]);
 /**
  * 侧栏置顶项：不归属任何分组，直接排在导航最前，不带分组标题。
  *
- * 看板既是「无 `view` 参数」时的默认页，又因为整个 flow 组被隐藏而没有入口——
- * 一旦从侧栏切到别的视图就回不去（`view-toggle` 在 vnext 视图下也是隐藏的）。
- * 这里把它单独提成置顶菜单，菜单名用 `nav.workbench`（工作台），指向的仍是
- * board 视图本身：`DEFAULT_VIEW` 不参与查询串序列化，所以点它得到的地址就是
- * 无 `view` 参数的默认页，而不是 `?view=board`。
+ * 整个 flow 组在侧栏被隐藏（入口在工具栏的视图切换器里），看板如果没有置顶项，
+ * 一旦切到别的视图就回不去。这里把它单独提成置顶菜单，菜单名用 `nav.workbench`
+ * （工作台），指向 board 视图本身。EV-003 之后 board 不再是默认视图，
+ * 所以它的地址会显式带上 `?view=board`——这正是「深链旧看板」要走的那条路。
  */
 export const SIDEBAR_PINNED_IDS = Object.freeze(["board"]);
 

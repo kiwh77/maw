@@ -56,6 +56,7 @@ import { renderSessions } from "../views/sessions/sessions-view.mjs";
 import { renderAnalytics } from "../views/analytics/analytics-view.mjs";
 import { renderProjectList } from "../views/projects/projects-view.mjs";
 import { renderSettings, normalizePolicy } from "../views/settings/settings-view.mjs";
+import { renderExecution } from "../views/execution/execution-view.mjs";
 
 /** vnext 视图 id → 列表渲染函数。 */
 const LIST_RENDERERS = Object.freeze({
@@ -69,6 +70,8 @@ const LIST_RENDERERS = Object.freeze({
   analytics: renderAnalytics,
   projects: renderProjectList,
   settings: renderSettings,
+  // 执行视图是默认落地页：这条不登记，legacy 挂载层打开首页就会拿到 undefined。
+  execution: renderExecution,
 });
 
 /** vnext 视图 id → 详情渲染函数；tasks 走 legacy 抽屉，故不在此表。 */
@@ -271,14 +274,50 @@ export function createDefaultSources(win, fetchImpl = null) {
     };
   }
 
+  /** 看板快照（带当前筛选）。执行视图与任务视图共用同一个来源。 */
+  async function fetchTasks(route) {
+    const params = new URLSearchParams();
+    if (route.project) params.set("project", route.project);
+    if (route.agent) params.set("agent", route.agent);
+    if (route.status) params.set("status", route.status);
+    const query = params.toString();
+    return getJSON(TASKS_SOURCE + (query ? "?" + query : ""));
+  }
+
+  /** 从列表载荷里取数组：契约用资源名，分页外壳用 `items`。 */
+  function listOf(payload, name) {
+    if (!payload || payload.unavailable === true) return null;
+    if (Array.isArray(payload[name])) return payload[name];
+    if (Array.isArray(payload.items)) return payload.items;
+    return null;
+  }
+
   return {
-    async tasks(route) {
-      const params = new URLSearchParams();
-      if (route.project) params.set("project", route.project);
-      if (route.agent) params.set("agent", route.agent);
-      if (route.status) params.set("status", route.status);
-      const query = params.toString();
-      return getJSON(TASKS_SOURCE + (query ? "?" + query : ""));
+    tasks: fetchTasks,
+    /**
+     * 执行视图（EV-001 / EV-003）：任务、运行、交付三类一次取齐。
+     *
+     * 与 web/src/lib/sources.ts 同一口径：缺一类就整份判失败，不返回
+     * 「有任务、零运行」的半成品；没有工程时按登记工程逐个取再合并。
+     */
+    async execution(route) {
+      const project = String((route && route.project) || "").trim();
+      const [taskPayload, runsPayload, deliveriesPayload] = await Promise.all([
+        fetchTasks(route || {}),
+        project ? fetchControl("runs", project) : fetchControlAll("runs"),
+        project ? fetchControl("deliveries", project) : fetchControlAll("deliveries"),
+      ]);
+      const parts = [taskPayload, runsPayload, deliveriesPayload];
+      if (parts.some(p => p && p.unauthenticated === true)) {
+        return { unavailable: true, status: 401, unauthenticated: true };
+      }
+      const failed = parts.find(p => !p || p.unavailable === true);
+      if (failed) return { unavailable: true, status: failed.status || 0 };
+      const tasks = listOf(taskPayload, "tasks");
+      const runs = listOf(runsPayload, "runs");
+      const deliveries = listOf(deliveriesPayload, "deliveries");
+      if (!tasks || !runs || !deliveries) return { unavailable: true, status: 0 };
+      return { tasks, runs, deliveries };
     },
     nodes: controlSource("nodes"),
     runs: controlSource("runs"),
