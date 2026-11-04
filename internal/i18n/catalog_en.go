@@ -82,7 +82,7 @@ var catalogEn = map[string]string{
 	"cmd.system.trigger.short":     "Enqueue a system job",
 	"cmd.system.run.short":         "Run one or a batch of system jobs",
 	"cmd.system.watch.short":       "Watch blocked events and orchestrate system jobs",
-	"flag.system_kind":             "Job kind: unblock_assist / task_split / ops_run",
+	"flag.system_kind":             "Job kind: unblock_assist / task_split / ops_run / dispatch_ready",
 	"flag.system_job":              "System job id",
 	"flag.system_once":             "Poll once then exit",
 	"err.system_disabled":          "system agent disabled ([system_agent] enabled=true)",

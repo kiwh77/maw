@@ -605,6 +605,25 @@ func main() {
 	systemCmd.AddCommand(systemWatchCmd)
 	root.AddCommand(systemCmd)
 
+	// lead：显式发起的动作，不打开常驻循环、不改任何默认开关。
+	leadCmd := &cobra.Command{Use: "lead", Short: "lead 显式发起拆解与调度"}
+	leadCmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "查看系统 Agent 开关与作业队列（只读）",
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.LeadStatus(cwd)) },
+	})
+	leadDispatchCmd := &cobra.Command{
+		Use:   "dispatch",
+		Short: "显式入队并消费一次 dispatch_ready",
+		Run: func(cmd *cobra.Command, args []string) {
+			msg, _ := cmd.Flags().GetString("message")
+			printRes(app.LeadDispatch(cwd, msg))
+		},
+	}
+	leadDispatchCmd.Flags().StringP("message", "m", "", "调度说明（写入审计）")
+	leadCmd.AddCommand(leadDispatchCmd)
+	root.AddCommand(leadCmd)
+
 	// 同一二进制的内部 Runner：参数白名单，隐藏于帮助。
 	runnerCmd := &cobra.Command{
 		Use:    "__runner",

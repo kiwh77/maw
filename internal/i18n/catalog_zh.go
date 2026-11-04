@@ -81,7 +81,7 @@ var catalogZh = map[string]string{
 	"cmd.system.trigger.short":     "显式入队系统作业",
 	"cmd.system.run.short":         "执行一条或一批系统作业",
 	"cmd.system.watch.short":       "常驻监视 blocked 并编排系统作业",
-	"flag.system_kind":             "作业类型：unblock_assist / task_split / ops_run",
+	"flag.system_kind":             "作业类型：unblock_assist / task_split / ops_run / dispatch_ready",
 	"flag.system_job":              "系统作业 ID",
 	"flag.system_once":             "只轮询一次后退出",
 	"err.system_disabled":          "系统 Agent 未启用（config [system_agent] enabled=true）",
