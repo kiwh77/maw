@@ -368,6 +368,27 @@ func main() {
 	waitCmd.Flags().Int("timeout", 300, i18n.T("flag.wait_timeout"))
 	waitCmd.Flags().Int("poll", 2, i18n.T("flag.wait_poll"))
 	root.AddCommand(waitCmd)
+
+	// reassign：中枢把任务改派给另一个已注册 Agent；必须带期望版本。
+	reassignCmd := &cobra.Command{
+		Use:   "reassign",
+		Short: i18n.T("cmd.reassign.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			task, _ := cmd.Flags().GetString("task")
+			to, _ := cmd.Flags().GetString("to")
+			rev, _ := cmd.Flags().GetInt("revision")
+			if !cmd.Flags().Changed("revision") {
+				rev = -1
+			}
+			printRes(app.Reassign(cwd, app.ReassignInput{
+				TaskID: task, To: to, ExpectedRevision: rev,
+			}))
+		},
+	}
+	reassignCmd.Flags().String("task", "", i18n.T("flag.reassign_task"))
+	reassignCmd.Flags().String("to", "", i18n.T("flag.reassign_to"))
+	reassignCmd.Flags().Int("revision", -1, i18n.T("flag.revision"))
+	root.AddCommand(reassignCmd)
 	root.AddCommand(&cobra.Command{Use: "doctor", Run: func(cmd *cobra.Command, args []string) { printRes(app.Doctor(cwd)) }})
 
 	blockCmd := &cobra.Command{
