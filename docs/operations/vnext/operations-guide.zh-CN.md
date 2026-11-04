@@ -232,6 +232,24 @@ maw status report -m "coding" --phase code --pct 40
 | 门禁 `go test ./...` 红了且报 `operation not permitted` | 沙箱拦了 `/bin/ps`，不是代码失败 | 换一个能起进程的终端跑门禁；别反复 submit 硬撞，`attempts` 会涨 |
 | 看板空白/样式错乱 | 前端 bundle 未重建，页面脚本与视图版本不匹配 | `npm --prefix internal/board/web run build` 重建 `assets/dist/board-web.js` |
 
+## 改派与中断的权限分层
+
+`maw reassign` 与 `maw interrupt` 是**受控动作**，只有本机 lead 或中枢能发起：
+
+- lead 是「同一个 worker 多一项授权」的本机标记，写在工程 `config.toml` 的 `[identity]` 段：
+
+  ```toml
+  [identity]
+  leads = ["cursor-demo-1"]
+  ```
+
+  它不是新角色：`integrator` / `reviewer` 不会因为角色自动成为 lead，必须显式登记。
+- 中枢/编排侧（actor 为 `system` 或 `orchestrator`）无需登记。
+- 普通成员执行受控动作会得到稳定的 `not_lead` 错误（CLI 退出码 1、HTTP 403），
+  成员仍可正常 `next --claim`、`status report`、`submit`、`block`。
+- 两个动作都要求带 `--revision`（读到的任务版本），版本过期返回 `revision_mismatch`；
+  中断只把任务转 `blocked`（可 `maw task unblock` 恢复），不删 worktree、不杀进程。
+
 ## 安全边界
 
 - 中枢默认只听 `127.0.0.1`，且写操作要求本地鉴权；不要把它暴露到公网或 `0.0.0.0`。

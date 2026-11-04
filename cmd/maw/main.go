@@ -389,6 +389,27 @@ func main() {
 	reassignCmd.Flags().String("to", "", i18n.T("flag.reassign_to"))
 	reassignCmd.Flags().Int("revision", -1, i18n.T("flag.revision"))
 	root.AddCommand(reassignCmd)
+
+	// interrupt：只有 Lead/中枢能喊停别人的执行；普通成员越权会被 not_lead 拒绝。
+	interruptCmd := &cobra.Command{
+		Use:   "interrupt",
+		Short: i18n.T("cmd.interrupt.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			task, _ := cmd.Flags().GetString("task")
+			reason, _ := cmd.Flags().GetString("reason")
+			rev, _ := cmd.Flags().GetInt("revision")
+			if !cmd.Flags().Changed("revision") {
+				rev = -1
+			}
+			printRes(app.Interrupt(cwd, app.InterruptInput{
+				TaskID: task, ExpectedRevision: rev, Reason: reason,
+			}))
+		},
+	}
+	interruptCmd.Flags().String("task", "", i18n.T("flag.reassign_task"))
+	interruptCmd.Flags().String("reason", "", i18n.T("flag.interrupt_reason"))
+	interruptCmd.Flags().Int("revision", -1, i18n.T("flag.revision"))
+	root.AddCommand(interruptCmd)
 	root.AddCommand(&cobra.Command{Use: "doctor", Run: func(cmd *cobra.Command, args []string) { printRes(app.Doctor(cwd)) }})
 
 	blockCmd := &cobra.Command{

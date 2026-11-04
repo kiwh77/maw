@@ -40,3 +40,39 @@ func RequireLead(agent string, cfg *config.Config) error {
 	}
 	return fmt.Errorf("agent %q 不是 lead：需在 [identity] leads 中显式登记（lead 是本机能力标记，integrator/reviewer 不会自动成为 lead）", agent)
 }
+
+// 系统 actor：中枢/编排侧。它们不是「人」，不需要在 leads 名单里登记。
+var systemActors = map[string]bool{
+	"system":       true,
+	"orchestrator": true,
+}
+
+// LeadViolation 是权限分层的稳定错误形状（契约 §5.2/§7：code=not_lead）。
+//
+// 与 errx.Error 分开的原因：identity 不依赖 app 的错误装配，调用方按 Code()
+// 决定 HTTP 403 / CLI 退出码，错误文本可以随语言变，码不变。
+type LeadViolation struct {
+	Agent  string
+	Action string
+}
+
+func (e *LeadViolation) Error() string {
+	return "not_lead: agent " + e.Agent + " 无权执行 " + e.Action +
+		"（需在本机 [identity] leads 登记，或由中枢 system 发起）"
+}
+
+// Code 是稳定错误码。
+func (e *LeadViolation) Code() string { return "not_lead" }
+
+// RequireLeadAction 校验 agent 是否有权执行受控动作（reassign / interrupt / archive …）。
+//
+//   - leads 名单中的本机 Agent：可以；
+//   - system / orchestrator：可以（中枢自己）；
+//   - 其它：返回 *LeadViolation。
+func RequireLeadAction(agent string, cfg *config.Config, action string) error {
+	a := strings.TrimSpace(agent)
+	if systemActors[strings.ToLower(a)] || IsLead(a, cfg) {
+		return nil
+	}
+	return &LeadViolation{Agent: a, Action: action}
+}

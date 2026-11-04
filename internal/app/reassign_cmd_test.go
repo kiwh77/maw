@@ -59,6 +59,8 @@ func TestReassignUpdatesOwnerAndRevision(t *testing.T) {
 	repo, gdb := newStatusRepo(t)
 	seedWaitTask(t, gdb, "R-1", "ready", nil)
 	seedAgent(t, gdb, "peer-1")
+	addLeads(t, repo, "lead-1")
+	t.Setenv("MAW_AGENT", "lead-1")
 
 	res, err := app.Reassign(repo, app.ReassignInput{
 		TaskID: "R-1", To: "peer-1", ExpectedRevision: 0,
@@ -106,6 +108,8 @@ func TestReassignRevisionMismatchKeepsOwner(t *testing.T) {
 	seedWaitTask(t, gdb, "R-2", "ready", nil)
 	seedAgent(t, gdb, "peer-1")
 	seedAgent(t, gdb, "peer-2")
+	addLeads(t, repo, "lead-1")
+	t.Setenv("MAW_AGENT", "lead-1")
 
 	if _, err := app.Reassign(repo, app.ReassignInput{
 		TaskID: "R-2", To: "peer-1", ExpectedRevision: 0,
