@@ -21,6 +21,54 @@
   max-width: 560px;
 }
 
+/* 分区（EV-002）：标题、说明、字段、说明链四层，靠间距分开，不靠分割线堆叠。 */
+.settings-section {
+  margin: 0 0 var(--space-block, 16px);
+  padding: 0;
+  max-width: 560px;
+}
+
+.settings-section__title {
+  margin: 0 0 var(--space-tight, 4px);
+  font-size: var(--font-label, 14px);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-section__desc {
+  margin: 0 0 var(--space-tight, 8px);
+}
+
+/* 说明链：入口／归属／边界。两列用 minmax(0,1fr)，窄屏下长句换行而不是撑破页面。 */
+.settings-facts {
+  display: grid;
+  gap: var(--space-tight, 4px);
+  margin: var(--space-tight, 8px) 0 0;
+}
+
+.settings-fact {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-tight, 8px);
+  align-items: baseline;
+}
+
+.settings-fact dt {
+  font-size: var(--font-small, 12px);
+  color: var(--text-dim);
+}
+
+.settings-fact dd {
+  margin: 0;
+  font-size: var(--font-small, 12px);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.settings-agents {
+  margin-top: var(--space-tight, 8px);
+}
+
 .settings-fieldset {
   margin: 0 0 var(--space-block, 16px);
   padding: 0;
@@ -44,13 +92,19 @@
   margin-top: var(--space-block, 16px);
 }
 
-/* 窄屏：输入框铺满，动作按钮不断字。 */
+/* 窄屏：输入框铺满，动作按钮不断字，说明链改成上下两行。 */
 @media (max-width: 720px) {
-  .settings-form {
+  .settings-form,
+  .settings-section {
     max-width: none;
   }
 
   .settings-actions .button {
     flex: 1 1 auto;
+  }
+
+  .settings-fact {
+    grid-template-columns: 1fr;
+    gap: 0;
   }
 }

@@ -260,3 +260,148 @@ test("E2E-101 四个输入框回填服务端当前值", async () => {
   // 概念表里的上限来自 /api/runtime 的 managed_execution_limit。
   assert.match(html, /data-concept="limit"[^]*?<td class="num">1<\/td>/);
 });
+
+// ---------------------------------------------------------------------------
+// EV-002：设置页收敛入口声明。
+//
+// 需求要「节点与容量、主题、语言收进设置页」，收的是入口声明而不是控件：
+// 主题／语言仍归顶栏，节点清单仍归 ?view=nodes。所以这里验的是三件事——
+// 分区齐全、每个分区都说清入口／归属／边界、只读声明区不复制控件。
+// ---------------------------------------------------------------------------
+
+/** 按 data-section 取出单个分区的 HTML，避免跨分区串断言。 */
+function sectionHtml(html, id) {
+  const at = html.indexOf('data-section="' + id + '"');
+  if (at < 0) return "";
+  const from = html.lastIndexOf("<section", at);
+  const to = html.indexOf("</section>", at);
+  return from < 0 || to < 0 ? "" : html.slice(from, to + "</section>".length);
+}
+
+test("EV-002 分区齐全且顺序固定，每个分区都有可访问名", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const html = view.renderSettings(state({ policy, platformSupported: true }), { lang: "zh" });
+
+  assert.deepEqual([...view.SETTINGS_SECTIONS], ["managed", "nodes", "retention", "appearance", "agents"]);
+  const order = view.SETTINGS_SECTIONS.map(id => html.indexOf('data-section="' + id + '"'));
+  assert.ok(order.every(index => index >= 0), "分区必须全部渲染");
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), "渲染顺序必须与 SETTINGS_SECTIONS 一致");
+
+  // 验收点名的四块：节点／外观／受管／系统 Agent 状态。
+  for (const title of ["受管执行", "节点接入与容量", "外观", "系统 Agent 状态"]) {
+    assert.ok(html.includes(title), "缺少分区标题：" + title);
+  }
+  for (const id of view.SETTINGS_SECTIONS) {
+    assert.ok(
+      html.includes('aria-labelledby="settings-section-' + id + '"'),
+      id + " 分区缺少可访问名",
+    );
+  }
+});
+
+test("EV-002 每个分区都带入口／归属／边界三行说明链", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const html = view.renderSettings(state({ policy }), { lang: "zh" });
+
+  for (const id of view.SETTINGS_SECTIONS) {
+    const block = sectionHtml(html, id);
+    assert.ok(block, id + " 分区未渲染");
+    for (const fact of ["entry", "owner", "boundary"]) {
+      assert.ok(block.includes('data-fact="' + fact + '"'), id + " 缺少说明链：" + fact);
+    }
+  }
+  // 说明链要指向真实入口，不能是空话。
+  const appearance = sectionHtml(html, "appearance");
+  assert.ok(appearance.includes("#theme-select"), "外观分区要指明主题控件在顶栏");
+  assert.ok(appearance.includes("#lang-select"), "外观分区要指明语言控件在顶栏");
+  assert.ok(sectionHtml(html, "nodes").includes("?view=nodes"), "节点分区要指明节点清单的路由");
+});
+
+test("EV-002 外观分区只声明入口，不复制一套主题／语言开关", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const html = view.renderSettings(state({ policy }), { lang: "zh" });
+  const block = sectionHtml(html, "appearance");
+
+  // 复制控件就会出现两个真相：一处改了另一处不动。
+  assert.ok(!/<select/.test(block), "外观分区不得自建下拉");
+  assert.ok(!/<input/.test(block), "外观分区不得自建输入");
+  assert.ok(!/<button/.test(block), "外观分区不得自建按钮");
+  assert.ok(!/id="theme-select"/.test(html), "本页不重复定义主题控件");
+  assert.ok(!/id="lang-select"/.test(html), "本页不重复定义语言控件");
+});
+
+test("EV-002 节点分区声明登记走 CLI，不放存不下去的登记表单", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const block = sectionHtml(view.renderSettings(state({ policy }), { lang: "zh" }), "nodes");
+
+  assert.ok(block.includes("没有节点登记写接口"), "要说明本页不提供登记写接口");
+  // 只承载容量字段：名称／路径／版本这类登记输入一个都不许出现。
+  const names = (block.match(/<input[^>]*name="([^"]+)"/g) || [])
+    .map(tag => tag.replace(/.*name="([^"]+)".*/, "$1"));
+  assert.deepEqual(names, ["capacity"]);
+  assert.ok(!/type="text"/.test(block), "登记表单会是文本框，本卡不提供");
+  assert.ok(block.includes("节点是全机可调度的执行实例"), "节点与 Agent 要分开说清");
+});
+
+test("EV-002 系统 Agent 状态：没有快照就说未知，不编造状态", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+
+  assert.equal(view.systemAgentsOf({}), null);
+  assert.equal(view.systemAgentsOf({ systemAgents: null }), null);
+  assert.deepEqual(view.systemAgentsOf({ systemAgents: [] }), []);
+
+  const unknown = view.renderSettings(state({ policy }), { lang: "zh" });
+  assert.ok(unknown.includes('data-agents-unknown="1"'), "缺快照时要显式说明未知");
+  assert.ok(unknown.includes("状态未知不等于没有 Agent"), "未知不能写成「没有 Agent」");
+  assert.ok(!unknown.includes('data-agents="1"'), "没有快照时不得渲染状态表");
+
+  const known = view.renderSettings(
+    state({ policy, systemAgents: [{ id: "runner-a", state: "idle", last_heartbeat: "2026-11-04T02:00:00Z" }] }),
+    { lang: "zh" },
+  );
+  assert.ok(known.includes('data-agents="1"'));
+  assert.ok(known.includes("runner-a") && known.includes("idle"));
+  assert.ok(known.includes("2026-11-04T02:00:00Z"));
+  assert.ok(!known.includes('data-agents-unknown="1"'));
+});
+
+test("EV-002 受管只读策略展示不因分区重构而丢失", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const html = view.renderSettings(state({ policy }), { lang: "zh" });
+
+  // 原有展示一条不少：只读标记、四概念对照表、只读原因、禁用保存。
+  assert.ok(html.includes('data-editable="0"'));
+  assert.ok(html.includes("只读"));
+  assert.ok(html.includes("中枢当前没有策略写入口"));
+  assert.ok(/type="submit"[^>]*disabled/.test(html));
+  for (const concept of ["auto", "limit", "capacity", "ref"]) {
+    assert.ok(html.includes('data-concept="' + concept + '"'), "概念表缺行：" + concept);
+  }
+
+  // 四个输入仍在同一个表单内，且 DOM 顺序未变——键盘顺序靠它保证。
+  const form = html.slice(html.indexOf('<form class="settings-form"'), html.indexOf("</form>"));
+  const ids = (form.match(/id="settings-(\w+)"/g) || []).map(tag => tag.replace(/id="settings-(\w+)"/, "$1"));
+  assert.deepEqual(ids, ["limit", "capacity", "retentionDays", "retentionRuns"]);
+  // 只读声明区不产生可聚焦元素：否则 Tab 会先撞上它们，输入框就不再是第一个焦点。
+  for (const id of ["appearance", "agents"]) {
+    assert.ok(!/<input|<select|<button|<a\s/.test(sectionHtml(html, id)), id + " 分区不得含可聚焦元素");
+  }
+});
+
+test("EV-002 新增分区同样有中英两版，说明链也翻译", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const en = view.renderSettings(state({ policy }), { lang: "en" });
+
+  assert.ok(!/[\u4e00-\u9fa5]/.test(en), "英文界面不得残留中文");
+  assert.ok(en.includes("Nodes &amp; capacity") || en.includes("Nodes & capacity"));
+  assert.ok(en.includes("Appearance"));
+  assert.ok(en.includes("System agent status"));
+  assert.ok(en.includes("Entry") && en.includes("Owner") && en.includes("Boundary"));
+});

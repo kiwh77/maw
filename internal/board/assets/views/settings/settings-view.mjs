@@ -20,6 +20,12 @@
 //      不能静默覆盖别人刚改的设置。
 //   3. 本页不出现秘密字段。令牌、密钥这类东西只能在 CLI／本机凭据库管理，
 //      表单里出现一个 password 输入框就等于把凭据写进页面状态。
+//
+// 分区（EV-002 / F57）：受管执行 → 节点接入与容量 → 采集与保留 → 外观 → 系统 Agent 状态。
+// 前三个是可改的字段区，后两个是只读声明区。外观与 Agent 状态**故意没有控件**：
+// 主题／语言在顶栏（#theme-select / #lang-select），节点清单在 ?view=nodes，
+// 复制一份到本页只会多出第二个真相。每个分区都用「入口／归属／边界」三行说清
+// 这件事在哪儿改、谁说了算、本页不做什么。
 
 export const AUTO_MODE = Object.freeze({ off: "off", on: "on", not_ready: "not_ready" });
 
@@ -56,6 +62,28 @@ export const BOUNDS = Object.freeze({
 
 /** 秘密字段识别：键名命中即拒绝，值长什么样都不看。 */
 const SECRET_KEY = /(token|secret|password|passwd|pat|api[-_]?key|credential)/i;
+
+/**
+ * 设置页的分区（EV-002 / F57）。
+ *
+ * 需求要的是「节点接入与容量、主题、语言收进设置页」，但收的不是控件：
+ * 主题与语言仍由顶栏持有（`#theme-select` / `#lang-select`），节点清单仍由
+ * `?view=nodes` 持有。设置页收敛的是**入口声明**——每个分区说清三件事：
+ * 入口在哪、谁说了算、本页不做什么。照抄一套开关会让两处状态各走各的，
+ * 比入口分散更难查。
+ *
+ * 顺序即阅读顺序：先放改得到的策略与字段，再放只读声明。
+ */
+export const SETTINGS_SECTIONS = Object.freeze([
+  "managed",
+  "nodes",
+  "retention",
+  "appearance",
+  "agents",
+]);
+
+/** 每个分区固定三行说明链；缺一行就等于没说清归属。 */
+const FACT_ROWS = Object.freeze(["entry", "owner", "boundary"]);
 
 const I18N = {
   zh: {
@@ -103,6 +131,38 @@ const I18N = {
     "col.item": "项",
     "col.value": "当前值",
     "col.note": "说明",
+    "col.name": "名称",
+    "col.status": "状态",
+    "col.heartbeat": "最近心跳",
+    "fact.entry": "入口",
+    "fact.owner": "归属",
+    "fact.boundary": "边界",
+    "section.managed": "受管执行",
+    "section.managed.desc": "自动模式与并发上限：决定中枢能不能自己开跑、同时跑几道题。",
+    "section.managed.entry": "本页「受管执行」分区；数值由中枢 /api/runtime 回显",
+    "section.managed.owner": "中枢运行时配置（config.toml 的 auto_enabled 与受管上限）",
+    "section.managed.boundary": "改的是策略值，不代替节点就绪检查：节点没就绪时自动模式也派不出去。",
+    "section.nodes": "节点接入与容量",
+    "section.nodes.desc": "节点是全机可调度的执行实例；Agent 是工程内的工作者身份，两者不是一回事。",
+    "section.nodes.entry": "节点清单在侧栏「节点」（?view=nodes）；容量字段在本分区",
+    "section.nodes.owner": "节点登记与心跳由 CLI 和接入器负责，中枢只回显结果",
+    "section.nodes.boundary": "本页没有节点登记写接口，不放一个存不下去的登记表单。",
+    "section.retention": "采集与保留",
+    "section.retention.desc": "观测与事件明细保留多久、每个任务留几次运行记录。",
+    "section.retention.entry": "本页「采集与保留」分区",
+    "section.retention.owner": "中枢维护任务按天清理，不靠手工删库",
+    "section.retention.boundary": "清理不可回滚：调小之前先确认历史还要不要复盘。",
+    "section.appearance": "外观",
+    "section.appearance.desc": "主题与语言跟随机主界面走，本页只声明入口，不再摆一套重复的开关。",
+    "section.appearance.entry": "顶栏右侧：主题 #theme-select、语言 #lang-select",
+    "section.appearance.owner": "浏览器本机（主题存 localStorage 的 maw-theme）",
+    "section.appearance.boundary": "本页不复制控件：两处开关必然不同步，只留一处才没有第二个真相。",
+    "section.agents": "系统 Agent 状态",
+    "section.agents.desc": "系统 Agent 是中枢内置的执行者身份；状态由心跳上报，本页只读。",
+    "section.agents.entry": "侧栏 AGENTS 栏与「节点」视图；CLI 的 maw status 可核对",
+    "section.agents.owner": "接入器心跳上报",
+    "section.agents.boundary": "本页只读展示，不启停、不派发。",
+    "section.agents.unknown": "未收到系统 Agent 快照：状态未知不等于没有 Agent。",
     "err.limit_not_integer": "计算上限必须是整数。",
     "err.limit_below_min": "计算上限至少为 1；要关闭自动执行请关自动模式，而不是填 0。",
     "err.capacity_not_integer": "节点容量必须是整数。",
@@ -157,6 +217,38 @@ const I18N = {
     "col.item": "Item",
     "col.value": "Current",
     "col.note": "Note",
+    "col.name": "Name",
+    "col.status": "Status",
+    "col.heartbeat": "Last heartbeat",
+    "fact.entry": "Entry",
+    "fact.owner": "Owner",
+    "fact.boundary": "Boundary",
+    "section.managed": "Managed execution",
+    "section.managed.desc": "Auto mode and the concurrency cap: whether the hub may start runs on its own, and how many at once.",
+    "section.managed.entry": "The managed execution section on this page; values are echoed by the hub /api/runtime",
+    "section.managed.owner": "Hub runtime config (auto_enabled and the managed limit in config.toml)",
+    "section.managed.boundary": "This changes policy values only; it does not replace node readiness checks.",
+    "section.nodes": "Nodes & capacity",
+    "section.nodes.desc": "A node is a machine-wide execution instance; an agent is a project-scoped worker identity. They are not the same thing.",
+    "section.nodes.entry": "The node list lives under Nodes in the sidebar (?view=nodes); the capacity field is in this section",
+    "section.nodes.owner": "Registration and heartbeats belong to the CLI and the adapter; the hub only echoes them",
+    "section.nodes.boundary": "There is no node registration write endpoint here, so this page ships no form that cannot save.",
+    "section.retention": "Collection & retention",
+    "section.retention.desc": "How long observability and event detail is kept, and how many run records each task keeps.",
+    "section.retention.entry": "The collection and retention section on this page",
+    "section.retention.owner": "Hub maintenance prunes by day; nobody deletes rows by hand",
+    "section.retention.boundary": "Pruning is not reversible: confirm the history is still needed before lowering it.",
+    "section.appearance": "Appearance",
+    "section.appearance.desc": "Theme and language follow the main shell; this page only declares where they live.",
+    "section.appearance.entry": "Top bar, right side: theme #theme-select, language #lang-select",
+    "section.appearance.owner": "This browser (the theme is stored in localStorage as maw-theme)",
+    "section.appearance.boundary": "No duplicated controls: two switches would drift apart, so there is one source of truth.",
+    "section.agents": "System agent status",
+    "section.agents.desc": "System agents are the built-in executor identities; their status arrives by heartbeat and is read-only here.",
+    "section.agents.entry": "The AGENTS rail in the sidebar and the Nodes view; maw status in the CLI confirms it",
+    "section.agents.owner": "Heartbeats reported by adapters",
+    "section.agents.boundary": "Read-only: this page does not start, stop or dispatch anything.",
+    "section.agents.unknown": "No system agent snapshot received: unknown status is not the same as no agents.",
     "err.limit_not_integer": "Execution limit must be an integer.",
     "err.limit_below_min": "Execution limit is at least 1; turn auto mode off instead of entering 0.",
     "err.capacity_not_integer": "Node capacity must be an integer.",
@@ -406,6 +498,59 @@ function errorsBlock(lang, errors) {
 }
 
 /**
+ * 说明链：入口／归属／边界。
+ *
+ * 三行缺一不可——只说「入口在这」而不说归属，用户会以为改这里就等于改成了；
+ * 只说归属而不说边界，就会有人来找一个本页不打算提供的按钮。
+ */
+function factsBlock(lang, id) {
+  const rows = FACT_ROWS.map(row =>
+    '<div class="settings-fact" data-fact="' + row + '">' +
+    "<dt>" + esc(t("fact." + row, lang)) + "</dt>" +
+    "<dd>" + esc(t("section." + id + "." + row, lang)) + "</dd>" +
+    "</div>").join("");
+  return '<dl class="settings-facts">' + rows + "</dl>";
+}
+
+/** 分区外壳：标题与说明取自同一组键，分区 id 同时是锚点与测试钩子。 */
+function section(lang, id, body) {
+  const headId = "settings-section-" + id;
+  return '<section class="settings-section" data-section="' + esc(id) + '" aria-labelledby="' + headId + '">' +
+    '<h2 class="settings-section__title" id="' + headId + '">' + esc(t("section." + id, lang)) + "</h2>" +
+    '<p class="field-hint settings-section__desc">' + esc(t("section." + id + ".desc", lang)) + "</p>" +
+    (body || "") + factsBlock(lang, id) + "</section>";
+}
+
+/**
+ * 系统 Agent 快照归一化。
+ *
+ * 没给就返回 null：视图据此写「状态未知」，不拿空数组冒充「没有 Agent」——
+ * 那两件事对排障的意义完全相反。
+ */
+export function systemAgentsOf(state) {
+  if (!state || !Array.isArray(state.systemAgents)) return null;
+  return state.systemAgents.map(agent => ({
+    name: String(agent?.name || agent?.id || "agent"),
+    status: String(agent?.status || agent?.state || ""),
+    heartbeat: String(agent?.heartbeat || agent?.last_heartbeat || ""),
+  }));
+}
+
+function agentsTable(lang, agents) {
+  const body = agents.map(agent =>
+    '<tr data-agent="' + esc(agent.name) + '">' +
+    '<th scope="row">' + esc(agent.name) + "</th>" +
+    '<td class="num">' + esc(agent.status || "—") + "</td>" +
+    '<td class="note">' + esc(agent.heartbeat || "—") + "</td>" +
+    "</tr>").join("");
+  return '<table class="table settings-agents" data-agents="1"><thead><tr>' +
+    "<th>" + esc(t("col.name", lang)) + "</th>" +
+    "<th>" + esc(t("col.status", lang)) + "</th>" +
+    "<th>" + esc(t("col.heartbeat", lang)) + "</th>" +
+    "</tr></thead><tbody>" + body + "</tbody></table>";
+}
+
+/**
  * 渲染设置页。
  * state: {status, policy, draft, save, errors, platformSupported, configApplied}
  */
@@ -442,16 +587,26 @@ export function renderSettings(state = {}, options = {}) {
     badge(t("save." + save, lang), STATUS_BADGE[save] || "badge--self_check") +
     (editable ? "" : " " + badge(t("settings.readonly", lang), "badge--self_check")) + "</p>";
 
-  const form = '<form class="settings-form" data-revision="' + esc(policy.revision ?? "") +
-    '" data-editable="' + (editable ? "1" : "0") + '" onsubmit="return false" novalidate>' +
-    '<fieldset class="settings-fieldset"><legend class="field-label">' + esc(t("field.auto", lang)) + "</legend>" +
+  // 自动模式不是一个输入框，而是一段状态：开关在服务端，页面只能解释当前状态。
+  const autoFieldset = '<fieldset class="settings-fieldset"><legend class="field-label">' +
+    esc(t("field.auto", lang)) + "</legend>" +
     '<p class="field-hint">' + esc(t("field.auto.hint", lang)) + "</p>" +
     (reasonKey ? '<p class="field-hint" data-auto-reason="1">' + esc(t(reasonKey, lang)) + "</p>" : "") +
-    "</fieldset>" +
-    fieldRow(lang, "limit", "field.limit", "field.limit.hint", state.draft?.limit ?? policy.limit, { readonly: !editable }) +
-    fieldRow(lang, "capacity", "field.capacity", "field.capacity.hint", state.draft?.capacity ?? policy.capacity, { readonly: !editable }) +
+    "</fieldset>";
+
+  // 分区顺序即 Tab 顺序：上限 → 容量 → 保留天数 → 保留运行数 → 保存。
+  // 只读声明区（外观／系统 Agent）不产生可聚焦元素，排在其后不影响键盘路径。
+  const managedSection = section(lang, "managed", autoFieldset +
+    fieldRow(lang, "limit", "field.limit", "field.limit.hint", state.draft?.limit ?? policy.limit, { readonly: !editable }));
+  const nodesSection = section(lang, "nodes",
+    fieldRow(lang, "capacity", "field.capacity", "field.capacity.hint", state.draft?.capacity ?? policy.capacity, { readonly: !editable }));
+  const retentionSection = section(lang, "retention",
     fieldRow(lang, "retentionDays", "field.retention", "field.retention.hint", state.draft?.retentionDays ?? policy.retentionDays, { readonly: !editable }) +
-    fieldRow(lang, "retentionRuns", "field.retention_runs", "field.retention_runs.hint", state.draft?.retentionRuns ?? policy.retentionRuns, { readonly: !editable }) +
+    fieldRow(lang, "retentionRuns", "field.retention_runs", "field.retention_runs.hint", state.draft?.retentionRuns ?? policy.retentionRuns, { readonly: !editable }));
+
+  const form = '<form class="settings-form" data-revision="' + esc(policy.revision ?? "") +
+    '" data-editable="' + (editable ? "1" : "0") + '" onsubmit="return false" novalidate>' +
+    managedSection + nodesSection + retentionSection +
     '<p class="field-hint" data-no-secret="1">' + esc(t("notice.no_secret", lang)) + "</p>" +
     (editable ? "" : '<p class="field-hint" data-readonly-reason="1">' + esc(t("settings.readonly.hint", lang)) + "</p>") +
     errorsBlock(lang, errors) +
@@ -467,5 +622,12 @@ export function renderSettings(state = {}, options = {}) {
       : "") +
     "</div></form>";
 
-  return saveStatus + conceptTable(lang, policy, mode, reasonKey) + form;
+  // 外观与系统 Agent 只声明入口，不放控件：主题／语言在顶栏，Agent 状态由心跳上报。
+  const agents = systemAgentsOf(state);
+  const agentsBody = agents
+    ? agentsTable(lang, agents)
+    : '<p class="field-hint" data-agents-unknown="1">' + esc(t("section.agents.unknown", lang)) + "</p>";
+
+  return saveStatus + conceptTable(lang, policy, mode, reasonKey) + form +
+    section(lang, "appearance", "") + section(lang, "agents", agentsBody);
 }

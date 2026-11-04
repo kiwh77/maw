@@ -129,6 +129,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
       </button>
     </div>
     <div class="toolbar-right">
+      <!--
+        配置入口只留一个：主题／语言归顶栏，节点接入、容量、受管执行与保留归设置页。
+        流程视图不再各自摆开关，这里只给一个去设置页的跳转，免得同一件事有三个入口。
+      -->
+      <button
+        type="button"
+        id="settings-entry"
+        class="quiet-button"
+        data-settings-entry="1"
+        :aria-label="board.state.lang === 'zh' ? '打开设置' : 'Open settings'"
+        :title="board.state.lang === 'zh' ? '设置' : 'Settings'"
+        @click="board.navigate('settings')"
+      >
+        ⚙
+      </button>
       <div class="board-meta-left">
         <ViewToggle />
         <span id="board-count">{{ taskCountLabel }}</span>
