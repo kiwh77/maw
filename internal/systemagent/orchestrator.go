@@ -66,7 +66,9 @@ type Orchestrator struct {
 	Effects Effects
 	// Dispatch 处理 dispatch_ready：Match → Claim → launch_spec → Coordinator.Step。
 	// 为空时该 kind 的作业按「派发未接线」升级人工，不做空转。
-	Dispatch    DispatchPort
+	Dispatch DispatchPort
+	// 审计侧车与 op 日志目录按 <global>/runtime/<project> 推导（见 audit.go），
+	// 不要求宿主额外注入状态目录。
 	ResolvePath func(projectID string) (string, error)
 	WorkerID    string
 	Clock       func() time.Time
@@ -130,7 +132,7 @@ func (o *Orchestrator) Step(ctx context.Context) (int, error) {
 		ran++
 		if err := o.runJob(ctx, job); err != nil {
 			_ = o.Store.Write(func(tx *sql.Tx) error {
-				return db.RequeueSystemJob(tx, job.JobID, map[string]any{"error": err.Error()})
+				return db.RequeueSystemJob(tx, job.JobID, requeueResult(err))
 			})
 			continue
 		}
@@ -167,7 +169,7 @@ WHERE job_id=?`, db.SystemJobRunning, o.WorkerID, now, now, jobID)
 	}
 	if err := o.runJob(ctx, job); err != nil {
 		_ = o.Store.Write(func(tx *sql.Tx) error {
-			return db.RequeueSystemJob(tx, job.JobID, map[string]any{"error": err.Error()})
+			return db.RequeueSystemJob(tx, job.JobID, requeueResult(err))
 		})
 		return err
 	}
@@ -190,6 +192,8 @@ func (o *Orchestrator) runJob(ctx context.Context, job *db.SystemJob) error {
 	}
 
 	var decision Decision
+	rawPath := ""
+	rawFallback := ""
 	switch job.Kind {
 	case SystemKindOpsRun:
 		cmd, _ := job.Decision["ops_command"].(string)
@@ -203,28 +207,41 @@ func (o *Orchestrator) runJob(ctx context.Context, job *db.SystemJob) error {
 	default:
 		if o.Invoker == nil {
 			decision = Decision{Action: ActionEscalateHuman, Reason: "无 LLM Invoker"}
-		} else {
-			raw, err := o.Invoker.Diagnose(ctx, DiagnoseRequest{
-				ProjectPath: projectPath,
-				ProjectID:   job.ProjectID,
-				TaskID:      job.TaskID,
-				Reason:      job.Reason,
-				Kind:        job.Kind,
-				Message:     fmt.Sprintf("%v", job.Decision["message"]),
-			})
-			if err != nil {
-				return err
-			}
-			decision, err = ParseDecision(raw)
-			if err != nil {
-				return err
-			}
+			break
 		}
+		raw, err := o.Invoker.Diagnose(ctx, DiagnoseRequest{
+			ProjectPath: projectPath,
+			ProjectID:   job.ProjectID,
+			TaskID:      job.TaskID,
+			Reason:      job.Reason,
+			Kind:        job.Kind,
+			Message:     fmt.Sprintf("%v", job.Decision["message"]),
+		})
+		if err != nil {
+			return err
+		}
+		// LLM 原文先落盘再解析：解析失败时最能证明「它到底说了什么」。
+		sidecar := o.writeDecisionSidecar(job, raw)
+		if sidecar == "" && strings.TrimSpace(raw) != "" {
+			// 没配状态目录时退化为结果内联，至少不丢原文。
+			rawFallback = truncate(raw, 2000)
+		}
+		decision, err = ParseDecision(raw)
+		if err != nil {
+			return &decisionParseError{sidecar: sidecar, err: fmt.Errorf("解析决策失败: %w", err)}
+		}
+		rawPath = sidecar
 	}
 
 	result := map[string]any{}
 	status := db.SystemJobDone
 	eff := o.effects()
+	if rawPath != "" {
+		result["decision_raw_path"] = rawPath
+	}
+	if rawFallback != "" {
+		result["decision_raw"] = rawFallback
+	}
 
 	switch decision.Action {
 	case ActionEscalateHuman, ActionNotifyOnly:
@@ -303,11 +320,27 @@ func (o *Orchestrator) runDispatchJob(ctx context.Context, job *db.SystemJob, pr
 	if err != nil {
 		return err
 	}
+	if out.Matched && out.OperationID != "" {
+		// 端口没给日志目录时按 op 目录约定推导：<state>/ops/<op>/journal。
+		if out.JournalDir == "" {
+			out.JournalDir = opsJournalDir(job.ProjectID, out.OperationID)
+		}
+		// 先落「作业→Run／操作／日志目录」的反查链接，再写作业结果：
+		// 之后作业过了终态也还能从这边找到那次执行。
+		if err := o.Store.Write(func(tx *sql.Tx) error {
+			return db.SetSystemJobRun(tx, job.JobID, out.RunID, out.OperationID, out.JournalDir)
+		}); err != nil {
+			return err
+		}
+	}
 	result := map[string]any{
 		"matched":     out.Matched,
 		"progressed":  out.Progressed,
 		"step_action": out.Action,
 		"launch_spec": out.LaunchSpec,
+	}
+	if out.JournalDir != "" {
+		result["journal_dir"] = out.JournalDir
 	}
 	if out.Note != "" {
 		result["note"] = out.Note

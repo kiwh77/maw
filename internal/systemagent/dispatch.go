@@ -45,7 +45,9 @@ type DispatchStep struct {
 	Action      string
 	Progressed  bool
 	LaunchSpec  bool
-	Note        string
+	// JournalDir 是本次操作对应的日志目录；写方是 app 层的协调者装配。
+	JournalDir string
+	Note       string
 }
 
 // DispatchRequest 是系统 Agent 处理 dispatch_ready 时带上的上下文。
@@ -74,6 +76,7 @@ type DispatchOutcome struct {
 	Progressed bool
 	Action     string
 	LaunchSpec bool
+	JournalDir string
 	Note       string
 }
 
@@ -220,6 +223,7 @@ func (d *Dispatcher) DispatchReady(ctx context.Context, req DispatchRequest) (Di
 	out.Progressed = step.Progressed
 	out.Action = step.Action
 	out.LaunchSpec = step.LaunchSpec
+	out.JournalDir = step.JournalDir
 	out.Note = step.Note
 	return out, nil
 }

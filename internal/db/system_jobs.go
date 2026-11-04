@@ -8,6 +8,9 @@ import (
 )
 
 // SystemJob 是系统 Agent 队列中的一条作业。
+//
+// RunID／OperationID／JournalDir 是「作业到执行」的反查链接：作业领取到受管执行时
+// 立刻写进这三列，之后即使作业已结束，也能从作业找到对应的 Run、操作与日志目录。
 type SystemJob struct {
 	JobID          string
 	ProjectID      string
@@ -19,6 +22,9 @@ type SystemJob struct {
 	Reason         string
 	Decision       map[string]any
 	Result         map[string]any
+	RunID          string
+	OperationID    string
+	JournalDir     string
 	Attempts       int
 	MaxAttempts    int
 	LockedBy       string
@@ -26,6 +32,20 @@ type SystemJob struct {
 	CreatedAt      string
 	UpdatedAt      string
 	FinishedAt     string
+}
+
+// systemJobRunLinkDDL 是 v12：把系统作业与它触发的 Run／操作／日志目录对上。
+//
+// 只加列不重建表：SQLite 的 ALTER TABLE ADD COLUMN 不触碰既有 CHECK 约束与索引。
+// 迁移条目注册在本文件里，是因为这张表的写盘边界按文件划分（见 db/migrations.go 台账）。
+const systemJobRunLinkDDL = `
+ALTER TABLE system_jobs ADD COLUMN run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE system_jobs ADD COLUMN operation_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE system_jobs ADD COLUMN journal_dir TEXT NOT NULL DEFAULT '';
+`
+
+func init() {
+	migrations = append(migrations, Migration{Version: 12, Name: "system_job_run_link", SQL: systemJobRunLinkDDL})
 }
 
 // ProjectionSystemAgentEvents 是系统 Agent 事件游标在 projection_state 中的名字。
@@ -71,11 +91,13 @@ func InsertSystemJob(tx *sql.Tx, j *SystemJob) (*SystemJob, error) {
 	_, err := tx.Exec(`
 INSERT INTO system_jobs(
   job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
-  decision_json, result_json, attempts, max_attempts, locked_by, locked_at,
+  decision_json, result_json, run_id, operation_id, journal_dir,
+  attempts, max_attempts, locked_by, locked_at,
   created_at, updated_at, finished_at
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.JobID, j.ProjectID, j.Kind, j.Status, j.TaskID, j.InstanceID, j.TriggerEventID, j.Reason,
-		mustJSON(j.Decision), mustJSON(j.Result), j.Attempts, j.MaxAttempts, j.LockedBy, nullStr(j.LockedAt),
+		mustJSON(j.Decision), mustJSON(j.Result), j.RunID, j.OperationID, j.JournalDir,
+		j.Attempts, j.MaxAttempts, j.LockedBy, nullStr(j.LockedAt),
 		j.CreatedAt, j.UpdatedAt, nullStr(j.FinishedAt),
 	)
 	if err != nil {
@@ -91,7 +113,7 @@ INSERT INTO system_jobs(
 func GetSystemJob(tx *sql.Tx, jobID string) (*SystemJob, error) {
 	row := tx.QueryRow(`
 SELECT job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
-  decision_json, result_json, attempts, max_attempts, locked_by, COALESCE(locked_at,''),
+  decision_json, result_json, run_id, operation_id, journal_dir, attempts, max_attempts, locked_by, COALESCE(locked_at,''),
   created_at, updated_at, COALESCE(finished_at,'')
 FROM system_jobs WHERE job_id = ?`, jobID)
 	return scanSystemJob(row)
@@ -179,7 +201,7 @@ func ListSystemJobs(tx *sql.Tx, projectID, status string, limit int) ([]*SystemJ
 	}
 	q := `
 SELECT job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
-  decision_json, result_json, attempts, max_attempts, locked_by, COALESCE(locked_at,''),
+  decision_json, result_json, run_id, operation_id, journal_dir, attempts, max_attempts, locked_by, COALESCE(locked_at,''),
   created_at, updated_at, COALESCE(finished_at,'')
 FROM system_jobs WHERE 1=1`
 	args := []any{}
@@ -209,6 +231,17 @@ FROM system_jobs WHERE 1=1`
 	return out, rows.Err()
 }
 
+// SetSystemJobRun 记录作业触发的 Run／操作／日志目录，供事后反查。
+func SetSystemJobRun(tx *sql.Tx, jobID, runID, operationID, journalDir string) error {
+	now := UTCNow()
+	_, err := tx.Exec(`
+UPDATE system_jobs
+SET run_id = ?, operation_id = ?, journal_dir = ?, updated_at = ?
+WHERE job_id = ?`,
+		runID, operationID, journalDir, now, jobID)
+	return err
+}
+
 // CountRecentSystemJobs 统计冷却窗口内同 task+kind 的作业数（含终态）。
 func CountRecentSystemJobs(tx *sql.Tx, projectID, kind, taskID string, since time.Time) (int, error) {
 	var n int
@@ -224,7 +257,7 @@ func scanSystemJob(row interface{ Scan(dest ...any) error }) (*SystemJob, error)
 	var decision, result string
 	err := row.Scan(
 		&j.JobID, &j.ProjectID, &j.Kind, &j.Status, &j.TaskID, &j.InstanceID, &j.TriggerEventID, &j.Reason,
-		&decision, &result, &j.Attempts, &j.MaxAttempts, &j.LockedBy, &j.LockedAt,
+		&decision, &result, &j.RunID, &j.OperationID, &j.JournalDir, &j.Attempts, &j.MaxAttempts, &j.LockedBy, &j.LockedAt,
 		&j.CreatedAt, &j.UpdatedAt, &j.FinishedAt,
 	)
 	if err == sql.ErrNoRows {

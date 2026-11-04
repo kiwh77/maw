@@ -308,8 +308,11 @@ func InternalRunner(opts RunnerOpts) (Result, error) {
 	if opts.Once || os.Getenv("MAW_RUNNER_ONCE") == "1" {
 		out["once"] = true
 		// 测试 once 路径仍尝试接线 session（有 launch_spec 时）。
-		if rep, wired, err := maybeRunSession(opDir, opID); wired {
+		if rep, wired, reportPath, err := maybeRunSession(opDir, opID); wired {
 			out["session_wired"] = true
+			if reportPath != "" {
+				out["report_path"] = reportPath
+			}
 			if err != nil {
 				out["session_error"] = err.Error()
 			} else {
@@ -319,8 +322,11 @@ func InternalRunner(opts RunnerOpts) (Result, error) {
 		return out, nil
 	}
 	// RUNNER-WIRE：若 ops 目录有 launch_spec.json，接入 session.Runner 起真子进程。
-	if rep, wired, err := maybeRunSession(opDir, opID); wired {
+	if rep, wired, reportPath, err := maybeRunSession(opDir, opID); wired {
 		out["session_wired"] = true
+		if reportPath != "" {
+			out["report_path"] = reportPath
+		}
 		if err != nil {
 			out["session_error"] = err.Error()
 			out["ok"] = false
@@ -342,16 +348,17 @@ func InternalRunner(opts RunnerOpts) (Result, error) {
 // 写入方见 Runtime.PrepareRunnerArtifacts：显式来源缺失时不写，Runner 保持驻留。
 const launchSpecFile = "launch_spec.json"
 
-// maybeRunSession 若存在 launch_spec.json 则用 session.Runner + passthrough Source 执行。
-func maybeRunSession(opDir, opID string) (session.Report, bool, error) {
+// maybeRunSession 若存在 launch_spec.json 则用 session.Runner + passthrough Source 执行；
+// wired 表示是否接线，reportPath 是执行后 report.json 的位置（写失败时为空）。
+func maybeRunSession(opDir, opID string) (session.Report, bool, string, error) {
 	specPath := filepath.Join(opDir, launchSpecFile)
 	b, err := os.ReadFile(specPath)
 	if err != nil {
-		return session.Report{}, false, nil
+		return session.Report{}, false, "", nil
 	}
 	var spec model.LaunchSpec
 	if err := json.Unmarshal(b, &spec); err != nil {
-		return session.Report{}, true, err
+		return session.Report{}, true, "", err
 	}
 	// 与 Launch 侧写出的形状共用同一个结构：读的一侧跟着写的一侧变，不会再漂移。
 	metaPath := filepath.Join(opDir, runMetaFile)
@@ -368,9 +375,10 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, error) {
 	if meta.Generation < 1 {
 		meta.Generation = 1
 	}
-	jr, err := journal.Open(filepath.Join(opDir, "journal"), journal.Options{RunID: meta.RunID, Sync: true})
+	jr, err := journal.Open(filepath.Join(opDir, "journal"),
+		journal.Options{RunID: meta.RunID, MaxBytes: journal.DefaultMaxBytes, Sync: true})
 	if err != nil {
-		return session.Report{}, true, err
+		return session.Report{}, true, "", err
 	}
 	defer jr.Close()
 
@@ -385,7 +393,7 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, error) {
 	// 其余协议回退 passthrough（只按退出码判定）。
 	source, err := session.SourceFor(spec)
 	if err != nil {
-		return session.Report{}, true, err
+		return session.Report{}, true, "", err
 	}
 	// 观测落库：store 实现了观测端口就接上——来源给不出的事实不会硬凑。
 	var opts []session.Option
@@ -394,7 +402,7 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, error) {
 	}
 	r, err := session.New(store, source, jr, opts...)
 	if err != nil {
-		return session.Report{}, true, err
+		return session.Report{}, true, "", err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -406,7 +414,48 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, error) {
 		Protocol:   spec.ExpectedProtocol,
 		Heartbeat:  2 * time.Second,
 	})
-	return rep, true, err
+	// 执行结束（无论成败）都把事实快照落盘，op 目录因此自解释。
+	return rep, true, writeSessionReport(opDir, opID, meta, rep, err), err
+}
+
+// writeSessionReport 把一次执行的事实快照写到 op 目录的 report.json。
+//
+// 报告只描述已发生的事实；写盘失败不影响执行结论，返回空路径表示没写成。
+func writeSessionReport(opDir, opID string, meta RunMeta, rep session.Report, runErr error) string {
+	report := journal.Report{
+		RunID:               meta.RunID,
+		OperationID:         opID,
+		Outcome:             string(rep.Outcome),
+		Phase:               string(rep.Phase),
+		Finished:            rep.Finished,
+		ExitCode:            rep.ExitCode,
+		Appended:            rep.Appended,
+		Decoded:             rep.Decoded,
+		Submitted:           rep.Submitted,
+		Pending:             rep.Pending,
+		ObservationFailures: rep.ObservationFailures,
+		Stderr:              clipText(rep.Stderr, 2000),
+		InterpretError:      rep.InterpretError,
+	}
+	if rep.Stop != nil {
+		report.Stop = rep.Stop.Method
+	}
+	if runErr != nil {
+		report.Error = runErr.Error()
+	}
+	path, _, err := journal.WriteReport(opDir, report)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+// clipText 截断报告里的长文本字段（例如 stderr），保留尾部信息。
+func clipText(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return "…" + s[len(s)-max:]
 }
 
 // recordingNopStore 在无全局库时吞掉 Apply（仍允许进程跑完）。
