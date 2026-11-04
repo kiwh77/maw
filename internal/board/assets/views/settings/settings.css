@@ -69,6 +69,34 @@
   margin-top: var(--space-tight, 8px);
 }
 
+/* 系统 Agent 开关状态：徽标与一句话并排，窄屏换行不挤压。 */
+.settings-agents__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-tight, 8px);
+  margin: 0 0 var(--space-tight, 8px);
+}
+
+.settings-agents__state .field-hint {
+  margin: 0;
+}
+
+.settings-agents__does {
+  margin: 0 0 var(--space-tight, 8px);
+}
+
+.settings-agents__list {
+  margin: var(--space-tight, 4px) 0 0;
+  padding-left: 18px;
+  font-size: var(--font-small, 12px);
+  color: var(--text-dim);
+}
+
+.settings-agents__list li {
+  margin: 2px 0;
+}
+
 .settings-fieldset {
   margin: 0 0 var(--space-block, 16px);
   padding: 0;

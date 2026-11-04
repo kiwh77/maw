@@ -32,12 +32,16 @@ type Managed struct {
 	// ConfigVersion 是本段配置的版本号，便于迁移与看板展示。
 	ConfigVersion int `toml:"config_version"`
 	// AutoEnabled 为真时才允许自动派发循环；默认 false。
+	// 它只管派发，不控制系统 Agent 的阻塞自愈（见 SystemAgent.Enabled）。
 	AutoEnabled bool `toml:"auto_enabled"`
 	// Limit 是受管执行的全局硬上限；auto_enabled=true 时必须 ≥1。
 	Limit int `toml:"limit"`
 }
 
 // SystemAgent 控制系统 Agent 反应总线。默认关闭。
+//
+// 它负责阻塞自愈 / 拆题 / 运维编排，**不负责**把任务自动派发出去——
+// 那件事只看 Managed.AutoEnabled。两个开关互不推导，可各自单独打开。
 type SystemAgent struct {
 	ConfigVersion     int      `toml:"config_version"`
 	Enabled           bool     `toml:"enabled"`
@@ -158,6 +162,51 @@ func (c *Config) AutoExecution() (enabled bool, limit int) {
 		return false, 1
 	}
 	return c.Managed.AutoEnabled, c.Managed.Limit
+}
+
+// ---- 两个开关的分工（SA-004）----
+//
+// 配置里有两处看起来都像「要不要自动干活」的开关，它们驱动的是**两条不同的循环**，
+// 谁也推导不出谁：
+//
+//	managed.auto_enabled    管「自动选题派发」：只有它为真，serve 里的 leader 才推进
+//	                        派发队列，把可领取的任务自动派给受管执行；它不决定系统
+//	                        Agent 是否工作。
+//	system_agent.enabled    管「阻塞自愈 / 拆题 / 运维编排」：只有它为真，leader 才按
+//	                        poll_interval_sec 轮询系统 Agent；它不推进派发队列。
+//
+// 两者共用同一个 leader 与同一把 coordinator.lock（一个状态目录只允许一个 leader），
+// 但开关互不影响：只开自愈＝任务卡住会被处理、但不会被自动派出去；只开派发＝
+// 任务会被自动派出去、但卡住不会自愈；两个都关＝完全不自动跑（默认）。
+//
+// 名字里带 Dispatch / SystemAgent 的两个方法就是这两句话的唯一实现处：循环与视图
+// 都从这里取值，别再各自去读 c.Managed.AutoEnabled / c.SystemAgent.Enabled——
+// 那样一改语义就要全仓库找一遍，而漏掉的那一处正是事故来源。
+
+// DispatchEnabled 报告自动选题派发是否应当推进，以及它受哪个硬上限约束。
+//
+// 它只回答「派发循环开不开」，不回答「受管执行在这台机器上跑不跑得起来」：
+// 平台与上限的可用性由调用方（serve leader / matching）再判一次。
+func (c *Config) DispatchEnabled() (enabled bool, limit int) {
+	return c.AutoExecution()
+}
+
+// SystemAgentEnabled 报告系统 Agent 循环（阻塞自愈 / 拆题 / 运维编排）是否开启。
+//
+// 与 DispatchEnabled 无关：自愈开着不代表任务会被自动派发，反之亦然。
+func (c *Config) SystemAgentEnabled() bool {
+	if c == nil {
+		return false
+	}
+	return c.SystemAgent.Enabled
+}
+
+// AutomationSummary 一次给出两条循环的开关，供状态输出与看板解释「为什么没自动跑」。
+//
+// 返回顺序固定为 (dispatch, system)：两个都为假时，任何自动行为都不该发生。
+func (c *Config) AutomationSummary() (dispatch bool, system bool) {
+	dispatch, _ = c.DispatchEnabled()
+	return dispatch, c.SystemAgentEnabled()
 }
 
 const managedSectionTOML = `

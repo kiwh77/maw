@@ -101,7 +101,7 @@ const I18N = {
     "settings.empty": "还没有可编辑的工程策略。",
     "settings.empty.hint": "先注册工程，再回来配置执行策略。",
     "field.auto": "自动模式",
-    "field.auto.hint": "默认关闭。开启后才会自动选题派发；关闭时仍可人工领取。",
+    "field.auto.hint": "默认关闭。开启后才会自动选题派发；关闭时仍可人工领取。系统 Agent 的阻塞自愈是另一个开关，见下方分区。",
     "field.limit": "计算上限",
     "field.limit.hint": "同时受管执行的硬上限；开启自动模式时必须至少 1。",
     "field.capacity": "节点容量",
@@ -163,6 +163,16 @@ const I18N = {
     "section.agents.owner": "接入器心跳上报",
     "section.agents.boundary": "本页只读展示，不启停、不派发。",
     "section.agents.unknown": "未收到系统 Agent 快照：状态未知不等于没有 Agent。",
+    "agents.state.on": "已开启",
+    "agents.state.off": "已关闭",
+    "agents.state.unknown": "未知",
+    "agents.state.hint.on": "阻塞自愈循环在跑：卡住的任务会被自动诊断与编排。",
+    "agents.state.hint.off": "阻塞自愈循环没开：blocked 任务不会被自动处理。",
+    "agents.state.hint.unknown": "服务端没回显系统 Agent 开关，这里不替你判断开还是关。",
+    "agents.does.title": "它管什么",
+    "agents.does.1": "管：任务 blocked 时自动入队，并编排诊断／拆题／运维。",
+    "agents.does.2": "不管：自动选题派发——那是「受管执行」分区里的自动模式。",
+    "agents.does.3": "两个开关互不推导：只开自愈不会派任务，只开自动模式也不会自愈。",
     "err.limit_not_integer": "计算上限必须是整数。",
     "err.limit_below_min": "计算上限至少为 1；要关闭自动执行请关自动模式，而不是填 0。",
     "err.capacity_not_integer": "节点容量必须是整数。",
@@ -187,7 +197,7 @@ const I18N = {
     "settings.empty": "No editable project policy yet.",
     "settings.empty.hint": "Register a project first, then configure its execution policy.",
     "field.auto": "Auto mode",
-    "field.auto.hint": "Off by default. Dispatching only happens when on; manual claiming still works when off.",
+    "field.auto.hint": "Off by default. Dispatching only happens when on; manual claiming still works when off. Blocked-task self-healing is a separate switch, see the section below.",
     "field.limit": "Execution limit",
     "field.limit.hint": "Hard cap on concurrent managed runs; at least 1 when auto mode is on.",
     "field.capacity": "Node capacity",
@@ -249,6 +259,16 @@ const I18N = {
     "section.agents.owner": "Heartbeats reported by adapters",
     "section.agents.boundary": "Read-only: this page does not start, stop or dispatch anything.",
     "section.agents.unknown": "No system agent snapshot received: unknown status is not the same as no agents.",
+    "agents.state.on": "On",
+    "agents.state.off": "Off",
+    "agents.state.unknown": "Unknown",
+    "agents.state.hint.on": "The self-healing loop is running: blocked tasks get diagnosed and orchestrated automatically.",
+    "agents.state.hint.off": "The self-healing loop is off: blocked tasks are not processed automatically.",
+    "agents.state.hint.unknown": "The server did not report the system agent switch, so this page will not guess.",
+    "agents.does.title": "What it governs",
+    "agents.does.1": "Governs: enqueuing blocked tasks and orchestrating diagnosis, splitting and ops.",
+    "agents.does.2": "Does not govern: auto dispatch, which is the auto mode in the managed execution section.",
+    "agents.does.3": "The two switches are independent: self-healing alone never dispatches, auto mode alone never heals.",
     "err.limit_not_integer": "Execution limit must be an integer.",
     "err.limit_below_min": "Execution limit is at least 1; turn auto mode off instead of entering 0.",
     "err.capacity_not_integer": "Node capacity must be an integer.",
@@ -317,10 +337,18 @@ export function autoReasonOf(options = {}) {
 
 /**
  * 归一化服务端策略。缺失字段保持 null，不填默认值冒充「服务端这么说」。
+ *
+ * `systemAgentEnabled` 来自 /api/runtime 的 `system_agent_enabled`（或
+ * `system_agent.enabled`）：它与 auto_enabled 是两条不同循环的开关，
+ * 缺失时保持 null，页面写「未知」而不是「关闭」。
  */
 export function normalizePolicy(payload) {
   const p = payload || {};
   const retention = p.retention || {};
+  const rawAgent = p.system_agent && typeof p.system_agent === "object" ? p.system_agent : null;
+  const agentFlag = p.system_agent_enabled !== undefined
+    ? p.system_agent_enabled
+    : rawAgent?.enabled;
   return {
     autoEnabled: p.auto_enabled === true ? true : p.auto_enabled === false ? false : null,
     limit: toInt(p.managed_execution_limit),
@@ -328,8 +356,21 @@ export function normalizePolicy(payload) {
     ref: toInt(p.max_parallel_reference),
     retentionDays: toInt(retention.days),
     retentionRuns: toInt(retention.runs),
+    systemAgentEnabled: agentFlag === true ? true : agentFlag === false ? false : null,
     revision: p.revision === undefined || p.revision === null ? null : toInt(p.revision),
   };
+}
+
+/**
+ * 系统 Agent 开关的三态：开 / 关 / 未知。
+ *
+ * 缺失不等于关闭：把「服务端没说」显示成「关闭」，用户会去翻一个本来没错的配置。
+ */
+export function systemAgentStateOf(policy) {
+  const flag = policy?.systemAgentEnabled;
+  if (flag === true) return "on";
+  if (flag === false) return "off";
+  return "unknown";
 }
 
 /**
@@ -550,6 +591,25 @@ function agentsTable(lang, agents) {
     "</tr></thead><tbody>" + body + "</tbody></table>";
 }
 
+const AGENT_BADGE = { on: "badge--done", off: "badge--self_check", unknown: "badge--blocked" };
+
+/**
+ * 系统 Agent 开关状态块（SA-004）。
+ *
+ * 这里必须同时说三件事，否则读者会把它和「自动模式」混成一个开关：
+ * 现在开没开、它管什么、它**不管**什么。未知时给「未知」，不给「关闭」。
+ */
+function systemAgentBlock(lang, policy) {
+  const state = systemAgentStateOf(policy);
+  const does = ["agents.does.1", "agents.does.2", "agents.does.3"]
+    .map(key => "<li>" + esc(t(key, lang)) + "</li>").join("");
+  return '<p class="settings-agents__state" data-system-agent="' + esc(state) + '">' +
+    badge(t("agents.state." + state, lang), AGENT_BADGE[state] || "badge--self_check") +
+    '<span class="field-hint">' + esc(t("agents.state.hint." + state, lang)) + "</span></p>" +
+    '<div class="settings-agents__does"><p class="field-hint">' + esc(t("agents.does.title", lang)) + "</p>" +
+    '<ul class="settings-agents__list">' + does + "</ul></div>";
+}
+
 /**
  * 渲染设置页。
  * state: {status, policy, draft, save, errors, platformSupported, configApplied}
@@ -624,9 +684,9 @@ export function renderSettings(state = {}, options = {}) {
 
   // 外观与系统 Agent 只声明入口，不放控件：主题／语言在顶栏，Agent 状态由心跳上报。
   const agents = systemAgentsOf(state);
-  const agentsBody = agents
+  const agentsBody = systemAgentBlock(lang, policy) + (agents
     ? agentsTable(lang, agents)
-    : '<p class="field-hint" data-agents-unknown="1">' + esc(t("section.agents.unknown", lang)) + "</p>";
+    : '<p class="field-hint" data-agents-unknown="1">' + esc(t("section.agents.unknown", lang)) + "</p>");
 
   return saveStatus + conceptTable(lang, policy, mode, reasonKey) + form +
     section(lang, "appearance", "") + section(lang, "agents", agentsBody);

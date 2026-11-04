@@ -100,14 +100,29 @@ func (rt *Runtime) OpDir(operationID string) string {
 }
 
 // ManagedView 返回配置中的受管执行视图（供命令与看板）。
+//
+// 这里同时回显系统 Agent 开关（SA-004）：两个开关驱动两条不同的循环，
+// 只看 auto_enabled 会让人以为「自动模式关着＝什么都不自动跑」，而系统 Agent
+// 的自愈其实可能正在工作。视图给出的是**事实**，解释由调用方按需组织。
 func (rt *Runtime) ManagedView() map[string]any {
 	enabled, limit := false, 1
 	ver := 1
+	systemEnabled := false
+	pollSec, maxConcurrent := 5, 1
 	if rt != nil && rt.pc != nil && rt.pc.Config != nil {
-		enabled, limit = rt.pc.Config.AutoExecution()
+		enabled, limit = rt.pc.Config.DispatchEnabled()
 		ver = rt.pc.Config.Managed.ConfigVersion
 		if ver == 0 {
 			ver = 1
+		}
+		systemEnabled = rt.pc.Config.SystemAgentEnabled()
+		pollSec = rt.pc.Config.SystemAgent.PollIntervalSec
+		if pollSec <= 0 {
+			pollSec = 5
+		}
+		maxConcurrent = rt.pc.Config.SystemAgent.MaxConcurrent
+		if maxConcurrent <= 0 {
+			maxConcurrent = 1
 		}
 	}
 	return map[string]any{
@@ -116,6 +131,13 @@ func (rt *Runtime) ManagedView() map[string]any {
 		"managed_execution_limit": limit,
 		"platform":                runtime.GOOS,
 		"platform_supported":      runtime.GOOS == "darwin",
+		// 系统 Agent 与自动派发是两个开关：这里的 enabled 只代表自愈循环开不开。
+		"system_agent_enabled": systemEnabled,
+		"system_agent": map[string]any{
+			"enabled":           systemEnabled,
+			"poll_interval_sec": pollSec,
+			"max_concurrent":    maxConcurrent,
+		},
 	}
 }
 

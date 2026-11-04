@@ -405,3 +405,76 @@ test("EV-002 新增分区同样有中英两版，说明链也翻译", async () =
   assert.ok(en.includes("System agent status"));
   assert.ok(en.includes("Entry") && en.includes("Owner") && en.includes("Boundary"));
 });
+
+// ---------------------------------------------------------------------------
+// SA-004：auto_enabled 与 system_agent.enabled 是两个开关。
+//
+// 设置页只说「自动模式」，读者就会把「自动模式关着」读成「什么都不自动跑」，
+// 而系统 Agent 的阻塞自愈可能正在工作。所以页面必须同时给出两个开关的状态，
+// 并且说清各自管什么、互不推导；服务端没回显时写「未知」，不写「关闭」。
+// ---------------------------------------------------------------------------
+
+test("SA-004 系统 Agent 开关三态：开／关／未知，缺失不冒充关闭", async () => {
+  const view = await load();
+
+  // 顶层字段与嵌套对象两种形状都要认（/api/runtime 会随版本变化）。
+  assert.equal(view.normalizePolicy({ system_agent_enabled: true }).systemAgentEnabled, true);
+  assert.equal(view.normalizePolicy({ system_agent_enabled: false }).systemAgentEnabled, false);
+  assert.equal(view.normalizePolicy({ system_agent: { enabled: true } }).systemAgentEnabled, true);
+  assert.equal(view.normalizePolicy({}).systemAgentEnabled, null);
+  // 顶层优先于嵌套，避免两个形状打架时静默取错。
+  assert.equal(
+    view.normalizePolicy({ system_agent_enabled: false, system_agent: { enabled: true } }).systemAgentEnabled,
+    false,
+  );
+
+  assert.equal(view.systemAgentStateOf({ systemAgentEnabled: true }), "on");
+  assert.equal(view.systemAgentStateOf({ systemAgentEnabled: false }), "off");
+  assert.equal(view.systemAgentStateOf({}), "unknown");
+
+  const policy = view.normalizePolicy(POLICY);
+  const unknown = view.renderSettings(state({ policy }), { lang: "zh" });
+  assert.ok(unknown.includes('data-system-agent="unknown"'), "缺开关时必须显式标未知");
+  assert.ok(unknown.includes("服务端没回显系统 Agent 开关"), "未知要给原因");
+  assert.ok(!/data-system-agent="off"/.test(unknown), "未知不得渲染成关闭");
+});
+
+test("SA-004 两个开关各说各话：自愈管阻塞处理，自动模式管派发", async () => {
+  const view = await load();
+  const on = view.renderSettings(
+    state({ policy: { ...view.normalizePolicy(POLICY), systemAgentEnabled: true } }),
+    { lang: "zh" },
+  );
+  assert.ok(on.includes('data-system-agent="on"'));
+  assert.ok(on.includes(">已开启<"));
+  assert.ok(on.includes("阻塞自愈循环在跑"));
+
+  const off = view.renderSettings(
+    state({ policy: { ...view.normalizePolicy(POLICY), systemAgentEnabled: false } }),
+    { lang: "zh" },
+  );
+  assert.ok(off.includes('data-system-agent="off"'));
+  assert.ok(off.includes("阻塞自愈循环没开"));
+
+  // 分工写在分区里，而不是靠读者从两个开关名猜。
+  const agents = sectionHtml(off, "agents");
+  assert.ok(agents.includes("不管：自动选题派发"), "要明说系统 Agent 不负责派发");
+  assert.ok(agents.includes("两个开关互不推导"), "要明说两个开关互不推导");
+
+  const managed = sectionHtml(off, "managed");
+  assert.ok(managed.includes("系统 Agent 的阻塞自愈是另一个开关"), "自动模式要指向另一个开关");
+  // 两个开关都不是输入项：本卡不做可写保存 API。
+  assert.ok(!/<input/.test(agents), "系统 Agent 分区不得出现输入框");
+  assert.ok(!/data-system-agent="on"/.test(off), "关闭态不得同时显示已开启");
+});
+
+test("SA-004 英文界面同样区分两个开关", async () => {
+  const view = await load();
+  const policy = { ...view.normalizePolicy(POLICY), systemAgentEnabled: true };
+  const en = view.renderSettings(state({ policy }), { lang: "en" });
+
+  assert.ok(!/[\u4e00-\u9fa5]/.test(en), "英文界面不得残留中文");
+  assert.ok(en.includes("What it governs"));
+  assert.ok(en.includes("auto dispatch"), "英文也要说清它不管派发");
+  assert.ok(en.includes("independent"));
+});

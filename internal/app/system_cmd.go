@@ -23,10 +23,18 @@ import (
 )
 
 // SystemStatus 查看系统 Agent 配置与队列摘要。
+//
+// 输出里同时给出两个开关（SA-004）：`enabled` 是系统 Agent 自愈循环，
+// `dispatch_enabled` 是自动选题派发。它们互不推导，只看一个会误判
+// 「为什么没有自动跑」——两个都为 false 才是「什么都不自动做」。
 func SystemStatus(cwd string) (Result, error) {
 	pc, cfg, err := loadSystemAgentConfig(cwd)
 	if err != nil {
 		return nil, err
+	}
+	dispatchEnabled, dispatchLimit := false, 1
+	if pc != nil && pc.Config != nil {
+		dispatchEnabled, dispatchLimit = pc.Config.DispatchEnabled()
 	}
 	store, err := db.OpenStore(pc.GlobalDB)
 	if err != nil {
@@ -53,13 +61,15 @@ func SystemStatus(cwd string) (Result, error) {
 		return nil
 	})
 	return Result{
-		"ok":                true,
-		"enabled":           cfg.Enabled,
-		"config_version":    cfg.ConfigVersion,
-		"poll_interval_sec": cfg.PollIntervalSec,
-		"auto_kinds":        cfg.AutoKinds,
-		"llm_node":          cfg.LLMNode,
-		"worker_node":       cfg.WorkerNode,
+		"ok":                      true,
+		"enabled":                 cfg.Enabled,
+		"dispatch_enabled":        dispatchEnabled,
+		"managed_execution_limit": dispatchLimit,
+		"config_version":          cfg.ConfigVersion,
+		"poll_interval_sec":       cfg.PollIntervalSec,
+		"auto_kinds":              cfg.AutoKinds,
+		"llm_node":                cfg.LLMNode,
+		"worker_node":             cfg.WorkerNode,
 		"queue": map[string]any{
 			"queued": queued, "running": running, "done": done,
 			"failed": failed, "escalated": escalated, "recent": len(jobs),
@@ -299,6 +309,8 @@ type systemDispatchProjection struct {
 }
 
 func (p systemDispatchProjection) Policy(_ context.Context, projectID string) (matching.Policy, error) {
+	// auto_enabled 来自 config.DispatchEnabled（经 ManagedView）：系统 Agent 的
+	// 自愈循环不参与这里的判定——自愈负责把卡住的任务捞回来，不负责派发。
 	view := p.rt.ManagedView()
 	auto, _ := view["auto_enabled"].(bool)
 	limit, _ := view["managed_execution_limit"].(int)
@@ -599,10 +611,15 @@ func (e appSystemEffects) PlanApprovalAuto(projectPath string) bool {
 
 // startServeLoops 在 board serve 内启动唯一 leader 循环。
 //
-// 一个状态目录只允许一个 leader：auto_enabled 时推进派发队列，
-// system_agent.enabled 时按 poll_interval 轮询系统 Agent，两者共用同一把
-// <state>/dispatch/coordinator.lock。抢不到锁的第二个 serve 会直接退出循环，
-// 不把正在工作的 leader 挤掉，也不消费任何排队操作。
+// 一个状态目录只允许一个 leader，但**两条循环各有自己的开关**（SA-004）：
+//
+//	managed.auto_enabled   → leader.Dispatch，推进派发队列（自动选题派发）
+//	system_agent.enabled   → leader.System，按 poll_interval 轮询系统 Agent（阻塞自愈）
+//
+// 两个开关互不推导：只开自愈不会让任务被派出去，只开派发也不会让卡住的任务自愈；
+// 两个都关才彻底不自动跑。两者共用同一把 <state>/dispatch/coordinator.lock，
+// 抢不到锁的第二个 serve 会直接退出循环，不把正在工作的 leader 挤掉，
+// 也不消费任何排队操作。
 func startServeLoops(cwd string) {
 	pc, cfg, err := loadSystemAgentConfig(cwd)
 	if err != nil {
@@ -632,6 +649,11 @@ func startServeLoops(cwd string) {
 		// 受管执行在当前平台/上限下不可用：不推进排队操作，等人工或 CLI 处理。
 		auto = false
 	}
+	// 系统 Agent 开关与上面的派发开关无关：平台不支持受管启动，不影响阻塞自愈。
+	systemOn := cfg.Enabled
+	if pc != nil && pc.Config != nil {
+		systemOn = pc.Config.SystemAgentEnabled()
+	}
 
 	leader := &dispatch.Leader{
 		Coord:    coord,
@@ -640,7 +662,7 @@ func startServeLoops(cwd string) {
 			fmt.Fprintf(os.Stderr, "serve leader: %v\n", err)
 		},
 	}
-	if cfg.Enabled {
+	if systemOn {
 		// 复用 leader 已持锁的协调者，自动选题的 Step 不再自抢锁。
 		orch, err := buildOrchestratorWithCoord(pc, cfg, coord)
 		if err != nil {
@@ -662,10 +684,11 @@ func startServeLoops(cwd string) {
 		}
 	}
 	if !auto && leader.System == nil {
+		// 两个开关都关：一条循环都不该跑，别留下一个空转的 leader 占着锁。
 		return
 	}
 	go func() {
-		fmt.Fprintf(os.Stderr, "serve leader started (project=%s auto=%v system=%v)\n",
+		fmt.Fprintf(os.Stderr, "serve leader started (project=%s dispatch=%v system=%v)\n",
 			pc.ID(), auto, leader.System != nil)
 		if err := leader.Run(context.Background()); err != nil {
 			fmt.Fprintf(os.Stderr, "serve leader 退出（已有 leader 或锁不可用）: %v\n", err)

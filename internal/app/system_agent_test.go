@@ -112,3 +112,61 @@ max_attempts = 3
 		t.Fatal(err)
 	}
 }
+
+// SA-004：受管视图与 system status 同时给出两个开关。
+//
+// 页面（/api/runtime → auto_execution）与 CLI（maw system status）读的是同一份视图；
+// 只回显 auto_enabled 会让人把「自动模式关着」读成「什么都不自动跑」，
+// 而系统 Agent 的阻塞自愈其实可能正在工作。
+func TestManagedViewAndSystemStatusExposeBothSwitches(t *testing.T) {
+	f := newFixture(t)
+
+	rt, err := NewRuntime(f.pc, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := rt.ManagedView()
+	if on, _ := view["system_agent_enabled"].(bool); on {
+		t.Fatal("默认视图里系统 Agent 必须是关闭")
+	}
+	if on, _ := view["auto_enabled"].(bool); on {
+		t.Fatal("默认视图里自动派发必须是关闭")
+	}
+
+	// 打开自愈后重新装配：视图跟随，但自动派发仍为假。
+	enableSystemAgent(t, f.repo)
+	pc, err := resolveProject(f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err = NewRuntime(pc, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view = rt.ManagedView()
+	if on, _ := view["system_agent_enabled"].(bool); !on {
+		t.Fatal("system_agent.enabled=true 时视图应回显为开")
+	}
+	if on, _ := view["auto_enabled"].(bool); on {
+		t.Fatal("只开系统 Agent 不得让 auto_enabled 变真")
+	}
+	sub, _ := view["system_agent"].(map[string]any)
+	if sub == nil || sub["enabled"] != true {
+		t.Fatalf("视图缺少 system_agent.enabled 明细：%+v", view["system_agent"])
+	}
+
+	// CLI 状态与视图同源：两个开关并排给出，避免只看一个就下结论。
+	res, err := SystemStatus(f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if on, _ := res["enabled"].(bool); !on {
+		t.Fatal("system status 应报告系统 Agent 已开启")
+	}
+	if on, _ := res["dispatch_enabled"].(bool); on {
+		t.Fatal("system status 不得把自动派发报成开启")
+	}
+	if lim, _ := res["managed_execution_limit"].(int); lim != 1 {
+		t.Fatalf("system status 的上限=%v，期望 1", res["managed_execution_limit"])
+	}
+}

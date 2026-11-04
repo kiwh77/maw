@@ -113,6 +113,34 @@ maw doctor --json      # 库路径、协议版本、issues
 - 同一响应里的 `static_export_managed` 恒为 `false`、`managed_via` 为 `cli_or_api_v1`——静态页面不具备受管写入口。
 - 设置页（看板 → 设置）展示同一份数据；静态导出页面是**只读**的，只能看不能改。
 
+### 两个开关：自动派发与系统 Agent
+
+配置里有两处看起来都像「要不要自动干活」的开关，它们驱动的是**两条不同的循环**，
+谁也推导不出谁。只看其中一个，就会把「自动模式关着」误读成「什么都不自动跑」，
+而系统 Agent 的阻塞自愈其实可能正在工作。
+
+| 开关 | 驱动哪条循环 | 默认 | 关掉会怎样 | 打开也不代表 |
+| --- | --- | --- | --- | --- |
+| `[managed] auto_enabled` | 自动选题派发：leader 推进派发队列，把可领取任务派给受管执行 | `false` | 不会自动派题；人工领取、`maw next --claim` 照常可用 | 系统 Agent 会自愈 |
+| `[system_agent] enabled` | 阻塞自愈：按 `poll_interval_sec` 轮询系统 Agent，对 `blocked` 任务做诊断／拆题／运维编排 | `false` | `blocked` 任务不会被自动处理，只能人工 `maw task unblock` | 任务会被自动派发 |
+
+两条循环共用同一个 leader 与同一把 `<state>/dispatch/coordinator.lock`（一个状态目录只允许
+一个 leader），但开关互不影响：只开自愈＝任务卡住会被处理、但不会被自动派出去；只开派发＝
+任务会被自动派出去、但卡住不会自愈；两个都关＝完全不自动跑，这也是默认值。
+
+`maw system status --json` 把两个开关并排给出，别只看一个：
+
+```bash
+maw system status --json | jq '{enabled, dispatch_enabled, managed_execution_limit}'
+# { "enabled": false, "dispatch_enabled": false, "managed_execution_limit": 1 }
+```
+
+`enabled` 是系统 Agent 自愈循环，`dispatch_enabled` 是自动派发；`serve` 启动时也会在
+stderr 打出同一对值：`serve leader started (project=… dispatch=… system=…)`。
+系统 Agent 自身的配置项、决策 JSON 与运维动作见
+[系统 Agent 操作说明](system-agent.zh-CN.md)。
+
+
 ### `/api/v1` 写入口到底通到哪
 
 `managed_via=cli_or_api_v1` 是对调用方的承诺，所以中枢确实把 `/api/v1` 写树挂上了；

@@ -2,6 +2,20 @@
 
 默认关闭。打开后，maw 可在任务 `blocked` 时自动入队并编排诊断 / 拆题 / 运维，无需人工逐个通知 Cursor／WorkBuddy。
 
+## 它和「自动派发」不是同一个开关
+
+配置里还有 `[managed] auto_enabled`。两个开关驱动两条不同的循环，**互不推导**：
+
+| 你想解决的问题 | 该开哪个 | 另一个不因此生效 |
+| --- | --- | --- |
+| 任务卡住了要自动诊断／拆题／跑运维 | `[system_agent] enabled = true` | 不会让任务被自动派发出去 |
+| 可领取的任务要自动派给受管执行 | `[managed] auto_enabled = true`（另需 `limit >= 1` 与 macOS） | 不会让卡住的任务自愈 |
+
+两个都关（默认）时完全不自动跑。两条循环共用同一个 leader 与同一把
+`coordinator.lock`，但开关互不影响。完整表格、`maw system status` 的字段与
+`serve` 启动日志见[操作指南的「两个开关」](operations-guide.zh-CN.md#两个开关自动派发与系统-agent)，
+那里是唯一权威口径；看板设置页只读展示同一份状态。
+
 ## 配置
 
 `.multiagent/config.toml`：
