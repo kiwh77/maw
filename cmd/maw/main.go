@@ -319,6 +319,7 @@ func main() {
 			project, _ := cmd.Flags().GetString("project")
 			st, _ := cmd.Flags().GetString("status")
 			logPath, _ := cmd.Flags().GetString("log-path")
+			kind, _ := cmd.Flags().GetString("kind")
 			var pctPtr *int
 			if cmd.Flags().Changed("pct") {
 				p, _ := cmd.Flags().GetInt("pct")
@@ -327,7 +328,7 @@ func main() {
 			printRes(app.StatusReport(cwd, app.StatusReportInput{
 				ProjectID: project, Actor: agent, TaskID: task,
 				Message: msg, Phase: phase, Pct: pctPtr, Client: client, Status: st,
-				LogPath: logPath,
+				LogPath: logPath, Kind: kind,
 			}))
 		},
 	}
@@ -340,6 +341,7 @@ func main() {
 	statusReportCmd.Flags().String("project", "", i18n.T("flag.project"))
 	statusReportCmd.Flags().String("status", "", i18n.T("flag.agent_status"))
 	statusReportCmd.Flags().String("log-path", "", i18n.T("flag.log_path"))
+	statusReportCmd.Flags().String("kind", "", i18n.T("flag.kind"))
 	statusCmd.AddCommand(statusReportCmd)
 	root.AddCommand(statusCmd)
 	root.AddCommand(&cobra.Command{Use: "doctor", Run: func(cmd *cobra.Command, args []string) { printRes(app.Doctor(cwd)) }})

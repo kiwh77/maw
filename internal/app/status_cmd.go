@@ -22,6 +22,8 @@ type StatusReportInput struct {
 	Client    string
 	Status    string // agent status: idle|working (default working when message set)
 	LogPath   string // optional absolute session log path (Cursor/Codex/WorkBuddy, …)
+	// Kind 是协作消息分型 progress|question|blocker|final；省略时按契约默认 progress。
+	Kind string
 }
 
 // StatusReport upserts agent presence and appends an event into the global DB.
@@ -61,6 +63,11 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 		}
 	}
 
+	kind, kindErr := board.NormalizeKind(in.Kind)
+	if kindErr != nil {
+		return nil, i18n.EW("err.invalid_kind", "next.use_kind_enum", kindErr)
+	}
+
 	logPath := strings.TrimSpace(in.LogPath)
 	if logPath != "" {
 		abs, verr := board.ValidateLogPath(logPath)
@@ -90,6 +97,10 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 	}
 	if logPath != "" {
 		data["log_path"] = logPath
+	}
+	// 只有真的产生了协作消息（带了说明）才写 kind：纯心跳不发明分型（契约 §2.2）。
+	if in.Message != "" {
+		data["kind"] = kind
 	}
 
 	now := db.UTCNow()
@@ -171,6 +182,9 @@ func StatusReport(cwd string, in StatusReportInput) (Result, error) {
 		"ok": true, "project_id": projectID, "agent": actor,
 		"task_id": in.TaskID, "event_id": eventID, "event_type": eventType,
 		"next": i18n.T("next.status_visible"),
+	}
+	if in.Message != "" {
+		res["kind"] = kind
 	}
 	if logPath != "" {
 		res["log_path"] = logPath

@@ -2,6 +2,7 @@ package board
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
@@ -14,6 +15,37 @@ import (
 	"github.com/kiwh77/maw/internal/localauth"
 )
 
+// 协作消息分型（契约 maw.collaboration.primitives/v1 §2）：把「提问」与「阻塞」
+// 从自由文本里分出来，编排侧才不用人读消息判断该不该介入。
+const (
+	KindProgress = "progress"
+	KindQuestion = "question"
+	KindBlocker  = "blocker"
+	KindFinal    = "final"
+)
+
+// NormalizeKind 归一化 kind：空值映射为 contract 默认值 progress，
+// 枚举外的值返回 invalid_kind 错误（调用方按 400/非零退出处理）。
+func NormalizeKind(raw string) (string, error) {
+	k := strings.ToLower(strings.TrimSpace(raw))
+	switch k {
+	case "":
+		return KindProgress, nil
+	case KindProgress, KindQuestion, KindBlocker, KindFinal:
+		return k, nil
+	}
+	return "", fmt.Errorf("invalid_kind: %q 不是 progress|question|blocker|final", raw)
+}
+
+// IsCollaborationKind 判断该值是否属于协作消息枚举（供测试与筛选复用）。
+func IsCollaborationKind(k string) bool {
+	switch strings.ToLower(strings.TrimSpace(k)) {
+	case KindProgress, KindQuestion, KindBlocker, KindFinal:
+		return true
+	}
+	return false
+}
+
 // StatusReport is the write payload for POST /api/status.
 type StatusReport struct {
 	ProjectID string `json:"project_id"`
@@ -25,6 +57,8 @@ type StatusReport struct {
 	Client    string `json:"client"`
 	Status    string `json:"status"`
 	LogPath   string `json:"log_path"`
+	// Kind 是协作消息分型；省略时按 progress 处理（旧客户端零改动）。
+	Kind string `json:"kind"`
 }
 
 // StatusFunc applies an injected status report. Returns a JSON-serializable result map.
@@ -214,6 +248,14 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		}
 		rep.Actor = strings.TrimSpace(rep.Actor)
 		rep.ProjectID = strings.TrimSpace(rep.ProjectID)
+		// 分型在入口处就校验：非法值不该走到写库才失败（契约 §2.4 要求 400 invalid_kind）。
+		kind, kerr := NormalizeKind(rep.Kind)
+		if kerr != nil {
+			localauth.WriteJSONError(w, http.StatusBadRequest, "invalid_kind",
+				"kind 必须是 progress|question|blocker|final", nil)
+			return
+		}
+		rep.Kind = kind
 		if id, ok := localauth.IdentityFrom(r.Context()); ok {
 			if rep.Actor == "" {
 				rep.Actor = id.Actor

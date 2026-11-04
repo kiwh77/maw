@@ -176,3 +176,113 @@ func TestStatusReportLogPathMergesMeta(t *testing.T) {
 		t.Fatalf("AgentLog=%#v err=%v", chunk, err)
 	}
 }
+
+// newStatusRepo 建一个最小工程（真 git 仓 + 临时全局库），供 kind 用例复用。
+func newStatusRepo(t *testing.T) (repo, gdb string) {
+	t.Helper()
+	global := t.TempDir()
+	t.Setenv("MAW_GLOBAL", global)
+	repo = t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "t@t")
+	run("config", "user.name", "t")
+	_ = os.WriteFile(filepath.Join(repo, "README.md"), []byte("x\n"), 0o644)
+	run("add", ".")
+	run("commit", "-m", "init")
+	if _, err := app.Init(repo, false, false); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAW_AGENT", "cursor-demo-1")
+	return repo, filepath.Join(global, "maw.db")
+}
+
+// lastEventKind 读回最近一条事件里的 data.kind。
+func lastEventKind(t *testing.T, gdb string) (string, bool) {
+	t.Helper()
+	var kind string
+	var ok bool
+	if err := db.WithTx(gdb, func(tx *sql.Tx) error {
+		evs, e := db.ListEventsSince(tx, 0, "", "cursor-demo-1", 200)
+		if e != nil {
+			return e
+		}
+		if len(evs) == 0 {
+			return nil
+		}
+		raw, has := evs[len(evs)-1].Data["kind"]
+		if has {
+			kind, ok = raw.(string), true
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	return kind, ok
+}
+
+// TestStatusReportKindRecorded 覆盖四种 kind 各写一次且可读回（契约 §2.3）。
+func TestStatusReportKindRecorded(t *testing.T) {
+	repo, gdb := newStatusRepo(t)
+	for _, want := range []string{"progress", "question", "blocker", "final"} {
+		res, err := app.StatusReport(repo, app.StatusReportInput{
+			Message: "kind=" + want, Kind: want, Client: "test",
+		})
+		if err != nil {
+			t.Fatalf("kind=%s: %v", want, err)
+		}
+		if got, _ := res["kind"].(string); got != want {
+			t.Fatalf("kind=%s 时结果里 kind=%q", want, got)
+		}
+		if got, ok := lastEventKind(t, gdb); !ok || got != want {
+			t.Fatalf("事件里读回的 kind=%q ok=%v，期望 %q", got, ok, want)
+		}
+	}
+}
+
+// TestStatusReportKindDefaultsToProgress 覆盖旧客户端：不传 kind 时按 progress，
+// 纯心跳（没 message）不发明分型（契约 §2.2）。
+func TestStatusReportKindDefaultsToProgress(t *testing.T) {
+	repo, gdb := newStatusRepo(t)
+	res, err := app.StatusReport(repo, app.StatusReportInput{Message: "老客户端只说进度"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := res["kind"].(string); got != "progress" {
+		t.Fatalf("省略 kind 应回落 progress，得到 %q", got)
+	}
+	if got, ok := lastEventKind(t, gdb); !ok || got != "progress" {
+		t.Fatalf("事件 kind=%q ok=%v", got, ok)
+	}
+
+	if _, err := app.StatusReport(repo, app.StatusReportInput{Actor: "cursor-demo-1"}); err != nil {
+		t.Fatalf("纯心跳: %v", err)
+	}
+	if got, ok := lastEventKind(t, gdb); ok {
+		t.Fatalf("纯心跳不应写 kind，得到 %q", got)
+	}
+}
+
+// TestStatusReportRejectsInvalidKind 覆盖非法值：拒绝且不写事件。
+func TestStatusReportRejectsInvalidKind(t *testing.T) {
+	repo, gdb := newStatusRepo(t)
+	before, _ := lastEventKind(t, gdb)
+	if _, err := app.StatusReport(repo, app.StatusReportInput{
+		Message: "乱填", Kind: "urgent",
+	}); err == nil {
+		t.Fatal("非法 kind 必须被拒绝")
+	} else if !strings.Contains(err.Error(), "kind") {
+		t.Fatalf("错误信息应提到 kind: %v", err)
+	}
+	after, ok := lastEventKind(t, gdb)
+	if after != before || ok {
+		t.Fatalf("非法 kind 不应写事件：before=%q after=%q ok=%v", before, after, ok)
+	}
+}

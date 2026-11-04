@@ -275,6 +275,7 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 				Client:    rep.Client,
 				Status:    rep.Status,
 				LogPath:   rep.LogPath,
+				Kind:      rep.Kind,
 			})
 			if err != nil {
 				return nil, err
