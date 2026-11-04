@@ -298,6 +298,7 @@ func mergePlanFields(dst, src *db.Task) {
 	dst.WriteScope = src.WriteScope
 	dst.ReadScope = src.ReadScope
 	dst.Acceptance = src.Acceptance
+	dst.IterationID = src.IterationID
 	if src.Extra != nil {
 		if dst.Extra == nil {
 			dst.Extra = map[string]any{}

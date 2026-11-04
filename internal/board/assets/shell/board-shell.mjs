@@ -54,6 +54,8 @@ import { renderTimeline } from "../views/timeline/timeline-view.mjs";
 import { renderActivity } from "../views/activity/activity-view.mjs";
 import { renderSessions } from "../views/sessions/sessions-view.mjs";
 import { renderAnalytics } from "../views/analytics/analytics-view.mjs";
+import { renderProblems } from "../views/problems/problems-view.mjs";
+import { renderLogs } from "../views/logs/logs-view.mjs";
 import { renderProjectList } from "../views/projects/projects-view.mjs";
 import { renderSettings, normalizePolicy } from "../views/settings/settings-view.mjs";
 import { renderExecution } from "../views/execution/execution-view.mjs";
@@ -68,6 +70,8 @@ const LIST_RENDERERS = Object.freeze({
   activity: renderActivity,
   sessions: renderSessions,
   analytics: renderAnalytics,
+  problems: renderProblems,
+  logs: renderLogs,
   projects: renderProjectList,
   settings: renderSettings,
   // 执行视图是默认落地页：这条不登记，legacy 挂载层打开首页就会拿到 undefined。
@@ -275,11 +279,12 @@ export function createDefaultSources(win, fetchImpl = null) {
   }
 
   /** 看板快照（带当前筛选）。执行视图与任务视图共用同一个来源。 */
-  async function fetchTasks(route) {
+  async function fetchTasks(route = {}) {
     const params = new URLSearchParams();
     if (route.project) params.set("project", route.project);
     if (route.agent) params.set("agent", route.agent);
     if (route.status) params.set("status", route.status);
+    if (route.iteration) params.set("iteration", route.iteration);
     const query = params.toString();
     return getJSON(TASKS_SOURCE + (query ? "?" + query : ""));
   }
@@ -326,6 +331,51 @@ export function createDefaultSources(win, fetchImpl = null) {
     activity: projectSource("activity"),
     sessions: projectSource("sessions"),
     analytics: projectSource("analytics"),
+    async problems(route) {
+      const board = await fetchTasks(route || {});
+      if (!board || board.unavailable === true) return board || { unavailable: true, status: 0 };
+      const project = String((route && route.project) || "").trim();
+      const runsPayload = project ? await fetchControl("runs", project) : await fetchControlAll("runs");
+      const tasks = listOf(board, "tasks") || [];
+      const runs = listOf(runsPayload, "runs") || [];
+      const agents = Array.isArray(board.agents) ? board.agents : [];
+      const items = [];
+      for (const task of tasks) {
+        if (String(task.status || "") !== "blocked") continue;
+        items.push({
+          kind: "blocked",
+          ref: String(task.id || task.display_id || ""),
+          detail: String(task.blocked_reason || task.title || ""),
+        });
+      }
+      for (const run of runs) {
+        const recon = String(run.reconciliation_state || run.reconciliation || "");
+        const phase = String(run.phase || "");
+        if (phase !== "failed" && phase !== "rejected" && (!recon || recon === "confirmed")) continue;
+        items.push({
+          kind: "run",
+          ref: String(run.run_id || run.id || ""),
+          detail: [phase, recon].filter(Boolean).join(" / "),
+        });
+      }
+      for (const agent of agents) {
+        if (String(agent.status || "") !== "offline") continue;
+        const taskId = String(agent.task_id || "").trim();
+        if (!taskId) continue;
+        items.push({ kind: "agent", ref: String(agent.id || ""), detail: "offline while holding " + taskId });
+      }
+      return { items, problems: items };
+    },
+    async logs(route) {
+      const params = new URLSearchParams();
+      params.set("limit", "100");
+      if (route && route.project) params.set("project_id", route.project);
+      const payload = await getJSON("/api/v1/events?" + params.toString(), { auth: true });
+      if (!payload || payload.unavailable === true) return payload || { unavailable: true, status: 0 };
+      const items = Array.isArray(payload.items) ? payload.items
+        : (Array.isArray(payload.events) ? payload.events : []);
+      return { ...payload, items, events: items };
+    },
     // 工程清单复用看板快照：工程是中枢级资源，不受工程筛选影响。
     async projects() { return getJSON(TASKS_SOURCE); },
     // 策略读的是中枢生效配置；没有写入端点，因此不提供 saveSettings。

@@ -33,24 +33,16 @@ export type BoardRoute = {
   project: string
   agent: string
   status: string
+  iteration: string
   search: string
-  /** null 表示不按迭代筛；空串表示只看未归属迭代的任务。 */
-  iteration: string | null
   detail: string
   fromHash?: boolean
-}
-
-export type Iteration = {
-  id: string
-  name?: string
-  project_id?: string
-  status?: string
 }
 
 export type Snapshot = {
   projects?: Array<{ id: string; name?: string; path?: string; main_branch?: string }>
   agents?: Array<Record<string, unknown>>
-  iterations?: Iteration[]
+  iterations?: Array<{ id: string; name?: string; status?: string }>
   tasks?: Array<Record<string, unknown>>
   counts?: Record<string, number>
   total?: number
@@ -64,6 +56,7 @@ export type Snapshot = {
   filter_project?: string
   filter_agent?: string
   filter_status?: string
+  filter_iteration?: string | null
 }
 
 export type TaskDrawerSel = { tid: string; pid: string }
@@ -164,7 +157,7 @@ export const boardStore = {
     Object.assign(state.route, next)
   },
 
-  patchFilters(patch: Partial<Pick<BoardRoute, 'project' | 'agent' | 'status' | 'search' | 'iteration'>>) {
+  patchFilters(patch: Partial<Pick<BoardRoute, 'project' | 'agent' | 'status' | 'iteration' | 'search'>>) {
     const next = withRoute(state.route, patch) as BoardRoute
     writeRoute(next, { history: window.history, location: window.location, replace: true })
     Object.assign(state.route, next)
@@ -239,17 +232,13 @@ export const boardStore = {
     await boardStore.loadView('projects')
   },
 
-  /**
-   * 编辑工程：名称／路径与几个策略字段。
-   *
-   * 用逐项 prompt 而不是整块表单：这一步只补「列表里能改」，
-   * 真正的策略编排仍以设置页为准；留空即不提交该字段，服务端保持原值。
-   */
+  /** 工程列表「编辑」：弹窗收集名称／路径／策略后 PATCH。 */
   async editProject(projectId: string) {
     const target = String(projectId || '').trim()
     if (!target) return
     const zh = state.lang === 'zh'
-    const row = (state.snapshot?.projects || []).find((p) => String(p.id || '') === target) as
+    const snap = state.snapshot
+    const row = (snap?.projects || []).find((p) => String(p.id || '') === target) as
       | { name?: string; path?: string; main_branch?: string }
       | undefined
     const name = window.prompt(zh ? '工程名称' : 'Project name', row?.name || '')
@@ -271,20 +260,23 @@ export const boardStore = {
       '',
     )
     if (worker === null) return
+    const patch: Record<string, unknown> = {
+      name: name.trim(),
+      path: path.trim(),
+    }
     const autoTrim = String(autoRaw || '').trim().toLowerCase()
-    const patch: Record<string, unknown> = {}
-    if (name.trim()) patch.name = name.trim()
-    if (path.trim()) patch.path = path.trim()
-    if (autoTrim === 'true' || autoTrim === 'false') patch.auto_enabled = autoTrim === 'true'
+    if (autoTrim === 'true' || autoTrim === 'false') {
+      patch.auto_enabled = autoTrim === 'true'
+    }
     if (String(nodesRaw || '').trim()) {
       patch.allowed_nodes = String(nodesRaw)
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
     }
-    if (String(worker || '').trim()) patch.worker_node = String(worker).trim()
-    if (!Object.keys(patch).length) return
-
+    if (String(worker || '').trim()) {
+      patch.worker_node = String(worker).trim()
+    }
     const outcome = await sources.updateProject(target, patch)
     if (!outcome.ok) {
       state.removeNotice = { kind: 'error', text: removalErrorText(outcome, state.lang) }
@@ -336,10 +328,7 @@ export const boardStore = {
     if (state.route.project) params.set('project', state.route.project)
     if (state.route.agent) params.set('agent', state.route.agent)
     if (state.route.status) params.set('status', state.route.status)
-    // 空串是合法筛选值：`?iteration=` 只要未归属迭代的任务。
-    if (state.route.iteration !== null && state.route.iteration !== undefined) {
-      params.set('iteration', state.route.iteration)
-    }
+    if (state.route.iteration) params.set('iteration', state.route.iteration)
     const q = params.toString()
     const urls = [`/api/board${q ? `?${q}` : ''}`, `./snapshot.json${q ? `?${q}` : ''}`]
     for (const url of urls) {

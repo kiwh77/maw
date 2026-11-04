@@ -29,9 +29,9 @@ func (h hubDBNodes) UpdateConfig(_ context.Context, req httpresources.NodeWriteR
 func (h hubDBNodes) upsert(req httpresources.NodeWriteRequest, createOnly bool) (httpresources.NodeWriteResult, error) {
 	reg := req.Registration
 	id := strings.TrimSpace(string(reg.Config.NodeID))
-	if id == "" || !model.NodeID(id).Valid() {
+	if id == "" {
 		return httpresources.NodeWriteResult{}, httpresources.ErrInvalid{
-			Code: "invalid_node_id", Message: "node_id 非法",
+			Code: "invalid_node_id", Message: "node_id 必填",
 		}
 	}
 	label := strings.TrimSpace(reg.Config.Name)
@@ -57,9 +57,11 @@ func (h hubDBNodes) upsert(req httpresources.NodeWriteRequest, createOnly bool) 
 		if e != nil {
 			return e
 		}
-		created = existing == nil
-		if !createOnly && existing == nil {
-			return nodes.ErrNotFound
+		if existing != nil && createOnly {
+			// 幂等：同 id 再登记视为更新就绪 meta。
+			created = false
+		} else {
+			created = existing == nil
 		}
 		return db.UpsertNode(tx, &db.Node{
 			ID: id, ProjectID: reg.ProjectID, Label: label, SlotLimit: slots,
@@ -83,7 +85,7 @@ func (h hubDBNodes) upsert(req httpresources.NodeWriteRequest, createOnly bool) 
 		cfg.SlotLimit = slots
 	}
 	if cfg.Adapter == "" {
-		cfg.Adapter = model.AdapterLocalCLI
+		cfg.Adapter = model.AdapterKind("local_cli")
 	}
 	snap := nodes.Snapshot{
 		NodeID: model.NodeID(id), ProjectID: reg.ProjectID, Config: cfg,

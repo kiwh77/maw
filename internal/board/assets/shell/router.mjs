@@ -16,16 +16,9 @@ export const PARAM_VIEW = "view";
 export const PARAM_PROJECT = "project";
 export const PARAM_AGENT = "agent";
 export const PARAM_STATUS = "status";
+export const PARAM_ITERATION = "iteration";
 export const PARAM_SEARCH = "q";
 export const PARAM_DETAIL = "id";
-/**
- * 迭代筛选参数。
- *
- * 与 agent/status 不同，空值是一个有意义的筛选条件：`?iteration=` 表示
- * 「只要未归属任何迭代的任务」。因此路由字段用 null 表示「不按迭代筛」，
- * 空字符串表示「筛未归属」，两者不能合并。
- */
-export const PARAM_ITERATION = "iteration";
 
 /**
  * 筛选参数的「参数名 → 路由字段」对照。
@@ -40,8 +33,8 @@ export const PARAM_ITERATION = "iteration";
 const FILTER_KEYS = [
   [PARAM_AGENT, "agent"],
   [PARAM_STATUS, "status"],
-  [PARAM_SEARCH, "search"],
   [PARAM_ITERATION, "iteration"],
+  [PARAM_SEARCH, "search"],
 ];
 
 /**
@@ -73,8 +66,7 @@ export function projectFromHash(hash = "") {
 
 /**
  * 解析路由。`isKnownView` 由注册表提供，避免路由器猜测视图清单。
- * `iteration` 为 null 表示 URL 没带迭代筛选；空串表示 `?iteration=`（未归属）。
- * @returns {{view:string, project:string, agent:string, status:string, search:string, detail:string, iteration:string|null, fromHash:boolean}}
+ * @returns {{view:string, project:string, agent:string, status:string, search:string, detail:string, fromHash:boolean}}
  */
 export function parseRoute(search = "", hash = "", isKnownView = null) {
   let params;
@@ -94,9 +86,8 @@ export function parseRoute(search = "", hash = "", isKnownView = null) {
     project,
     agent: params.get(PARAM_AGENT) || "",
     status: params.get(PARAM_STATUS) || "",
+    iteration: params.get(PARAM_ITERATION) || "",
     search: params.get(PARAM_SEARCH) || "",
-    // 按「参数是否出现」判定，才能把 `?iteration=` 与「不筛迭代」分开。
-    iteration: params.has(PARAM_ITERATION) ? (params.get(PARAM_ITERATION) || "") : null,
     detail: DETAIL_VIEWS.indexOf(view) >= 0 ? (params.get(PARAM_DETAIL) || "") : "",
     fromHash: Boolean(anchor) && !params.get(PARAM_PROJECT),
   };
@@ -114,12 +105,8 @@ export function serializeQuery(route = {}) {
   const view = route.view || DEFAULT_VIEW;
   if (view !== DEFAULT_VIEW) params.set(PARAM_VIEW, view);
   FILTER_KEYS.forEach(([param, field]) => {
-    const raw = route[field];
-    // null/undefined 是「没筛」，空串对 agent/status/search 也是「没筛」；
-    // 唯独 iteration 的空串表示「筛未归属」，必须原样写出去。
-    if (raw === null || raw === undefined) return;
-    const value = String(raw);
-    if (value || param === PARAM_ITERATION) params.set(param, value);
+    const value = route[field] || "";
+    if (value) params.set(param, value);
   });
   if (route.detail) params.set(PARAM_DETAIL, route.detail);
   const query = params.toString();
@@ -138,20 +125,14 @@ export function serializeRoute(route = {}, pathname = "/") {
   return base + serializeQuery(route) + serializeHash(route);
 }
 
-/** 迭代筛选的归一值：undefined 与 null 都表示「没筛」。 */
-function iterationOf(route) {
-  const value = route ? route.iteration : null;
-  return value === undefined ? null : value;
-}
-
 /** 路由等价判断：任一筛选、视图或详情不同即不相等。 */
 export function sameRoute(a = {}, b = {}) {
   return (a.view || DEFAULT_VIEW) === (b.view || DEFAULT_VIEW) &&
     (a.project || "") === (b.project || "") &&
     (a.agent || "") === (b.agent || "") &&
     (a.status || "") === (b.status || "") &&
+    (a.iteration || "") === (b.iteration || "") &&
     (a.search || "") === (b.search || "") &&
-    iterationOf(a) === iterationOf(b) &&
     (a.detail || "") === (b.detail || "");
 }
 
@@ -189,8 +170,8 @@ function parseDefaults(route = {}) {
     project: route.project || "",
     agent: route.agent || "",
     status: route.status || "",
+    iteration: route.iteration || "",
     search: route.search || "",
-    iteration: iterationOf(route),
     detail: route.detail || "",
   };
 }

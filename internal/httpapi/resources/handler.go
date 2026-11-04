@@ -64,10 +64,7 @@ func writeNotWired(w http.ResponseWriter, name string) {
 		name+" 写入口未在本中枢接线；受管执行请改用 CLI", map[string]any{"use": "cli"})
 }
 
-// handleProject 是工程写入口：DELETE 移除，PATCH 更新属性／策略。
-//
-// 同一路径按方法分派，让「方法不对」回 JSON 405 而不是落到别的语义；
-// DELETE 的幂等约束与 PATCH 的增量字段各自只在对应分支里判定。
+// handleProject 工程写入口：DELETE 移除，PATCH 更新属性／策略。
 func (a *API) handleProject(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodDelete:
@@ -93,15 +90,15 @@ func (a *API) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name         *string   `json:"name"`
-		Path         *string   `json:"path"`
-		MainBranch   *string   `json:"main_branch"`
-		MaxParallel  *int      `json:"max_parallel"`
-		AutoEnabled  *bool     `json:"auto_enabled"`
-		Limit        *int      `json:"limit"`
+		Name         *string  `json:"name"`
+		Path         *string  `json:"path"`
+		MainBranch   *string  `json:"main_branch"`
+		MaxParallel  *int     `json:"max_parallel"`
+		AutoEnabled  *bool    `json:"auto_enabled"`
+		Limit        *int     `json:"limit"`
 		AllowedNodes *[]string `json:"allowed_nodes"`
-		WorkerNode   *string   `json:"worker_node"`
-		LLMNode      *string   `json:"llm_node"`
+		WorkerNode   *string  `json:"worker_node"`
+		LLMNode      *string  `json:"llm_node"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return

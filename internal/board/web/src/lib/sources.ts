@@ -46,13 +46,7 @@ export function isStaticExport(win: Window | null | undefined) {
   return protocol === 'file:'
 }
 
-type RouteLike = {
-  project?: string
-  agent?: string
-  status?: string
-  /** null 表示不按迭代筛；空串表示只看未归属迭代的任务。 */
-  iteration?: string | null
-}
+type RouteLike = { project?: string; agent?: string; status?: string; iteration?: string }
 
 type JsonFail = { unavailable: true; status: number; unauthenticated?: boolean }
 
@@ -212,10 +206,7 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
     if (route.project) params.set('project', route.project)
     if (route.agent) params.set('agent', route.agent)
     if (route.status) params.set('status', route.status)
-    // 空串是合法筛选值；null/undefined 才是「不按迭代筛」。
-    if (route.iteration !== null && route.iteration !== undefined) {
-      params.set('iteration', route.iteration)
-    }
+    if (route.iteration) params.set('iteration', route.iteration)
     const query = params.toString()
     return getJSON(TASKS_SOURCE + (query ? `?${query}` : ''))
   }
@@ -268,6 +259,70 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
     activity: projectSource('activity'),
     sessions: projectSource('sessions'),
     analytics: projectSource('analytics'),
+    /** 问题页：从看板快照 + 运行列表提炼阻塞/异常信号。 */
+    async problems(route: RouteLike) {
+      const board = await fetchTasks(route)
+      if (!board || (board as JsonFail).unavailable === true) {
+        return board || { unavailable: true as const, status: 0 }
+      }
+      const project = String(route?.project || '').trim()
+      const runsPayload = project
+        ? await fetchControl('runs', project)
+        : await fetchControlAll('runs')
+      const tasks = listOf(board, 'tasks') || []
+      const runs = listOf(runsPayload, 'runs') || []
+      const agents = Array.isArray((board as { agents?: unknown[] }).agents)
+        ? ((board as { agents: Array<Record<string, unknown>> }).agents)
+        : []
+      const items: Array<Record<string, string>> = []
+      for (const task of tasks as Array<Record<string, unknown>>) {
+        if (String(task.status || '') !== 'blocked') continue
+        items.push({
+          kind: 'blocked',
+          ref: String(task.id || task.display_id || ''),
+          detail: String(task.blocked_reason || task.title || ''),
+        })
+      }
+      for (const run of runs as Array<Record<string, unknown>>) {
+        const recon = String(run.reconciliation_state || run.reconciliation || '')
+        const phase = String(run.phase || '')
+        if (!recon && phase !== 'failed' && phase !== 'rejected') continue
+        if (recon === 'confirmed' || recon === '') {
+          if (phase !== 'failed' && phase !== 'rejected') continue
+        }
+        items.push({
+          kind: 'run',
+          ref: String(run.run_id || run.id || ''),
+          detail: [phase, recon].filter(Boolean).join(' / '),
+        })
+      }
+      for (const agent of agents) {
+        if (String(agent.status || '') !== 'offline') continue
+        const taskId = String(agent.task_id || '').trim()
+        if (!taskId) continue
+        items.push({
+          kind: 'agent',
+          ref: String(agent.id || ''),
+          detail: 'offline while holding ' + taskId,
+        })
+      }
+      return { items, problems: items }
+    },
+    /** 日志页：拉 /api/v1/events 最近事件。 */
+    async logs(route: RouteLike) {
+      const params = new URLSearchParams()
+      params.set('limit', '100')
+      if (route?.project) params.set('project_id', route.project)
+      const payload = await getJSON('/api/v1/events?' + params.toString(), { auth: true })
+      if (!payload || (payload as JsonFail).unavailable === true) {
+        return payload || { unavailable: true as const, status: 0 }
+      }
+      const body = payload as Record<string, unknown>
+      const items = Array.isArray(body.items)
+        ? body.items
+        : (Array.isArray(body.events) ? body.events : [])
+      return { ...body, items, events: items }
+    },
     async projects() {
       return getJSON(TASKS_SOURCE)
     },
@@ -285,28 +340,33 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
      * 返回结构而不是抛异常：界面要按 code 分辨「现场还在」与「会话过期」，
      * 这两种都不能被渲染成同一句「删除了」。
      */
-    async removeProject(projectId: string, opts: { force?: boolean } = {}): Promise<RemovalOutcome> {
+    async updateProject(
+      projectId: string,
+      patch: Record<string, unknown>,
+    ): Promise<RemovalOutcome> {
       const id = String(projectId || '').trim()
       if (!id) return { ok: false, status: 0, code: 'invalid_project_id' }
       if (!doFetch) return { ok: false, status: 0, code: 'network_error' }
-
       const authed = await ensureSession()
       if (!authed) return { ok: false, status: 401, code: 'unauthenticated', unauthenticated: true }
       const csrf = readCookie(win, CSRF_COOKIE)
       if (!csrf) return { ok: false, status: 403, code: 'csrf_failed' }
-
-      const url = '/api/v1/projects/' + encodeURIComponent(id) + (opts.force ? '?force=1' : '')
+      const url = '/api/v1/projects/' + encodeURIComponent(id)
       let res: Response
       try {
         res = await doFetch(url, {
-          method: 'DELETE',
-          headers: { Accept: 'application/json', 'X-CSRF-Token': csrf },
+          method: 'PATCH',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrf,
+          },
           credentials: 'same-origin',
+          body: JSON.stringify(patch),
         })
       } catch {
         return { ok: false, status: 0, code: 'network_error' }
       }
-
       let body: Record<string, unknown> = {}
       try {
         body = (await res.json()) as Record<string, unknown>
@@ -326,13 +386,7 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
       return { ok: true, status: res.status }
     },
 
-    /**
-     * 更新工程名称／路径／执行策略（PATCH /api/v1/projects/{id}）。
-     *
-     * 只发送界面真正改过的字段；没有传的字段由服务端保持原值。
-     * 与移除一样返回结构而不是抛异常，失败要能按 code 说人话。
-     */
-    async updateProject(projectId: string, patch: Record<string, unknown>): Promise<RemovalOutcome> {
+    async removeProject(projectId: string, opts: { force?: boolean } = {}): Promise<RemovalOutcome> {
       const id = String(projectId || '').trim()
       if (!id) return { ok: false, status: 0, code: 'invalid_project_id' }
       if (!doFetch) return { ok: false, status: 0, code: 'network_error' }
@@ -342,18 +396,13 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
       const csrf = readCookie(win, CSRF_COOKIE)
       if (!csrf) return { ok: false, status: 403, code: 'csrf_failed' }
 
-      const url = '/api/v1/projects/' + encodeURIComponent(id)
+      const url = '/api/v1/projects/' + encodeURIComponent(id) + (opts.force ? '?force=1' : '')
       let res: Response
       try {
         res = await doFetch(url, {
-          method: 'PATCH',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrf,
-          },
+          method: 'DELETE',
+          headers: { Accept: 'application/json', 'X-CSRF-Token': csrf },
           credentials: 'same-origin',
-          body: JSON.stringify(patch || {}),
         })
       } catch {
         return { ok: false, status: 0, code: 'network_error' }

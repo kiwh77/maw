@@ -45,13 +45,14 @@ export const DEFAULT_VIEW = "execution";
  */
 export const DEFAULT_VIEW_NO_PROJECT = "execution";
 
+/** 侧栏不展示的分组：flow 只留置顶的工作台；archive 保留深链但不进菜单。 */
+export const SIDEBAR_HIDDEN_GROUPS = Object.freeze(["flow", "archive"]);
+
 /**
- * 侧栏不展示的分组。
- * - flow：只留置顶的工作台，工坊/拓扑改由选中工程后的 toolbar 进入；
- * - control：tasks/runs/deliveries 与执行视图重叠，仅保留深链入口，不再占侧栏。
- * 节点已迁入设置组，仍从侧栏进入。
+ * 侧栏不展示的视图 id（深链 `?view=` 仍可渲染）。
+ * tasks/runs/deliveries 已并入执行视图；不再占控制组菜单。
  */
-export const SIDEBAR_HIDDEN_GROUPS = Object.freeze(["flow", "control"]);
+export const SIDEBAR_HIDDEN_IDS = Object.freeze(["tasks", "runs", "deliveries"]);
 
 /**
  * 侧栏置顶项：不归属任何分组，直接排在导航最前，不带分组标题。
@@ -66,14 +67,13 @@ export const SIDEBAR_PINNED_IDS = Object.freeze(["board"]);
 /**
  * 导航分组。
  *
- * 分组顺序即导航顺序：先看流程（谁在干什么），再看控制（任务／运行／交付），
- * 然后是回顾统计，最后是设置（节点／工程／策略）。control 组不进侧栏，只支撑
- * 深链页的分组与面包屑。language 键统一为 `nav.<group>`，不再在 navModel 里
- * 用三元表达式逐个猜——新增一组就必须在语言簿里补齐中英两版。
+ * 分组顺序即导航顺序：流程 → 统计 → 设置。
+ * 旧「控制」组已拆除：节点迁入设置；任务/运行/交付进 archive（深链保留）。
+ * language 键统一为 `nav.<group>`。
  */
 export const VIEW_GROUPS = Object.freeze([
   Object.freeze({ id: "flow", labelKey: "nav.flow" }),
-  Object.freeze({ id: "control", labelKey: "nav.control" }),
+  Object.freeze({ id: "archive", labelKey: "nav.archive" }),
   Object.freeze({ id: "review", labelKey: "nav.review" }),
   Object.freeze({ id: "settings", labelKey: "nav.settings" }),
 ]);
@@ -83,28 +83,26 @@ export const VIEW_DEFS = Object.freeze([
   Object.freeze({ id: "board", group: "flow", legacy: true, titleKey: "view.board", navKey: "nav.workbench", headingKey: "heading.board", descKey: "desc.board", eyebrowKey: "eyebrow.board", symbol: "▦", dataKind: "", requiresProject: false }),
   Object.freeze({ id: "factory", group: "flow", legacy: true, titleKey: "view.factory", headingKey: "heading.factory", descKey: "desc.factory", eyebrowKey: "eyebrow.factory", symbol: "⚒", dataKind: "", requiresProject: false }),
   Object.freeze({ id: "topo", group: "flow", legacy: true, titleKey: "view.topo", headingKey: "heading.topo", descKey: "desc.topo", eyebrowKey: "eyebrow.topo", symbol: "⤳", dataKind: "", requiresProject: true }),
-  // 设置组：节点、工程清单与受管执行策略。不是筛选目标，而是配置入口。
-  // 节点从控制组迁来：侧栏不再有控制组，节点是唯一保留的常规入口。
-  Object.freeze({ id: "nodes", group: "settings", legacy: false, titleKey: "view.nodes", headingKey: "heading.nodes", descKey: "desc.nodes", eyebrowKey: "eyebrow.nodes", symbol: "▤", dataKind: "nodes", requiresProject: false }),
-  // 控制组：任务／运行／交付与执行视图重叠，只保留深链入口，不进侧栏。
-  Object.freeze({ id: "tasks", group: "control", legacy: false, titleKey: "view.tasks", headingKey: "heading.tasks", descKey: "desc.tasks", eyebrowKey: "eyebrow.tasks", symbol: "☰", dataKind: "tasks", requiresProject: false }),
-  Object.freeze({ id: "runs", group: "control", legacy: false, titleKey: "view.runs", headingKey: "heading.runs", descKey: "desc.runs", eyebrowKey: "eyebrow.runs", symbol: "⌁", dataKind: "runs", requiresProject: false }),
-  Object.freeze({ id: "deliveries", group: "control", legacy: false, titleKey: "view.deliveries", headingKey: "heading.deliveries", descKey: "desc.deliveries", eyebrowKey: "eyebrow.deliveries", symbol: "✓", dataKind: "deliveries", requiresProject: false }),
-  // 回顾：时间轴、活动热图、会话轮次（F34–F38）。全部只读，按工程物化。
+  // 深链保留：侧栏隐藏（SIDEBAR_HIDDEN_IDS / archive 组）。
+  Object.freeze({ id: "tasks", group: "archive", legacy: false, titleKey: "view.tasks", headingKey: "heading.tasks", descKey: "desc.tasks", eyebrowKey: "eyebrow.tasks", symbol: "☰", dataKind: "tasks", requiresProject: false }),
+  Object.freeze({ id: "runs", group: "archive", legacy: false, titleKey: "view.runs", headingKey: "heading.runs", descKey: "desc.runs", eyebrowKey: "eyebrow.runs", symbol: "⌁", dataKind: "runs", requiresProject: false }),
+  Object.freeze({ id: "deliveries", group: "archive", legacy: false, titleKey: "view.deliveries", headingKey: "heading.deliveries", descKey: "desc.deliveries", eyebrowKey: "eyebrow.deliveries", symbol: "✓", dataKind: "deliveries", requiresProject: false }),
+  // 统计：时间轴／热图／会话／用量（保留）+ 问题／日志（新增）。全部只读，按工程物化。
   Object.freeze({ id: "timeline", group: "review", legacy: false, titleKey: "view.timeline", headingKey: "heading.timeline", descKey: "desc.timeline", eyebrowKey: "eyebrow.timeline", symbol: "⌚", dataKind: "timeline", requiresProject: true }),
   Object.freeze({ id: "activity", group: "review", legacy: false, titleKey: "view.activity", headingKey: "heading.activity", descKey: "desc.activity", eyebrowKey: "eyebrow.activity", symbol: "▩", dataKind: "activity", requiresProject: true }),
   Object.freeze({ id: "sessions", group: "review", legacy: false, titleKey: "view.sessions", headingKey: "heading.sessions", descKey: "desc.sessions", eyebrowKey: "eyebrow.sessions", symbol: "↳", dataKind: "sessions", requiresProject: true }),
-  // 统计：工程与工具用量（F39–F43），单位与覆盖范围以响应回显为准。
   Object.freeze({ id: "analytics", group: "review", legacy: false, titleKey: "view.analytics", headingKey: "heading.analytics", descKey: "desc.analytics", eyebrowKey: "eyebrow.analytics", symbol: "◫", dataKind: "analytics", requiresProject: true }),
-  // 工程设置：工程清单 + 受管执行策略。不是筛选目标，而是配置入口。
+  Object.freeze({ id: "problems", group: "review", legacy: false, titleKey: "view.problems", headingKey: "heading.problems", descKey: "desc.problems", eyebrowKey: "eyebrow.problems", symbol: "!", dataKind: "problems", requiresProject: false }),
+  Object.freeze({ id: "logs", group: "review", legacy: false, titleKey: "view.logs", headingKey: "heading.logs", descKey: "desc.logs", eyebrowKey: "eyebrow.logs", symbol: "≡", dataKind: "logs", requiresProject: false }),
+  // 设置：工程清单 + 执行节点 + 受管执行策略。
   Object.freeze({ id: "projects", group: "settings", legacy: false, titleKey: "view.projects", headingKey: "heading.projects", descKey: "desc.projects", eyebrowKey: "eyebrow.projects", symbol: "❏", dataKind: "projects", requiresProject: false }),
+  Object.freeze({ id: "nodes", group: "settings", legacy: false, titleKey: "view.nodes", headingKey: "heading.nodes", descKey: "desc.nodes", eyebrowKey: "eyebrow.nodes", symbol: "▤", dataKind: "nodes", requiresProject: false }),
   Object.freeze({ id: "settings", group: "settings", legacy: false, titleKey: "view.settings", headingKey: "heading.settings", descKey: "desc.settings", eyebrowKey: "eyebrow.settings", symbol: "⚙", dataKind: "settings", requiresProject: false }),
   // 执行视图（EV-001）：按迭代聚合任务／运行／交付，是主视图而不是筛选目标。
   // 归入 flow 组：该组不进侧栏（侧栏只留置顶的工作台），所以它不占新的导航入口，
   // 用 `?view=execution` 进入；EV-003 会把默认落地页切到它。
   Object.freeze({ id: "execution", group: "flow", legacy: false, titleKey: "view.execution", headingKey: "heading.execution", descKey: "desc.execution", eyebrowKey: "eyebrow.execution", symbol: "◈", dataKind: "execution", requiresProject: false }),
 ]);
-
 /** 旧视图容器 id，切到 vnext 视图时整体隐藏。 */
 export const LEGACY_CONTAINERS = Object.freeze(["columns", "topology", "factory"]);
 
@@ -147,34 +145,33 @@ export function createRegistry(defs = VIEW_DEFS) {
       const def = byId.get(id);
       return Boolean(def && def.requiresProject);
     },
-    /** 导航模型：按 VIEW_GROUPS 分组顺序返回标题键与条目，组内保持定义顺序。 */
+    /** 导航模型：按分组返回标题键与条目，保持定义顺序。 */
     navModel() {
-      const groups = VIEW_GROUPS.map(group => ({ id: group.id, labelKey: group.labelKey, items: [] }));
-      const extras = new Map();
+      const groups = [];
       list.forEach(def => {
         let group = groups.find(item => item.id === def.group);
         if (!group) {
-          group = extras.get(def.group) || { id: def.group, labelKey: groupLabelKey(def.group), items: [] };
-          if (!extras.has(def.group)) {
-            extras.set(def.group, group);
-            groups.push(group);
-          }
+          group = { id: def.group, labelKey: groupLabelKey(def.group), items: [] };
+          groups.push(group);
         }
         group.items.push(def);
       });
-      return groups.filter(group => group.items.length > 0);
+      return groups;
     },
     /** 侧栏置顶项：按定义顺序，渲染时不套分组标题。 */
     sidebarPinned() {
       return list.filter(def => SIDEBAR_PINNED_IDS.indexOf(def.id) >= 0);
     },
-    /** 侧栏导航：只留可见分组，且把置顶项从分组里摘掉，避免同一个入口出现两次。 */
+    /** 侧栏导航：只留可见分组，且把置顶项与隐藏 id 从分组里摘掉，避免重复入口。 */
     sidebarNavModel() {
       return this.navModel()
         .filter(group => SIDEBAR_HIDDEN_GROUPS.indexOf(group.id) < 0)
         .map(group => ({
           ...group,
-          items: group.items.filter(def => SIDEBAR_PINNED_IDS.indexOf(def.id) < 0),
+          items: group.items.filter(def =>
+            SIDEBAR_PINNED_IDS.indexOf(def.id) < 0 &&
+            SIDEBAR_HIDDEN_IDS.indexOf(def.id) < 0
+          ),
         }))
         .filter(group => group.items.length > 0);
     },

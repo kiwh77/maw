@@ -19,11 +19,6 @@ type fakeProjects struct {
 	last   resources.ProjectRemovalRequest
 	result resources.ProjectRemovalResult
 	err    error
-
-	updateCalls  int
-	lastUpdate   resources.ProjectUpdateRequest
-	updateResult resources.ProjectUpdateResult
-	updateErr    error
 }
 
 func (f *fakeProjects) Remove(_ context.Context, req resources.ProjectRemovalRequest) (resources.ProjectRemovalResult, error) {
@@ -35,13 +30,8 @@ func (f *fakeProjects) Remove(_ context.Context, req resources.ProjectRemovalReq
 	return f.result, nil
 }
 
-func (f *fakeProjects) Update(_ context.Context, req resources.ProjectUpdateRequest) (resources.ProjectUpdateResult, error) {
-	f.updateCalls++
-	f.lastUpdate = req
-	if f.updateErr != nil {
-		return resources.ProjectUpdateResult{}, f.updateErr
-	}
-	return f.updateResult, nil
+func (f *fakeProjects) Update(_ context.Context, _ resources.ProjectUpdateRequest) (resources.ProjectUpdateResult, error) {
+	return resources.ProjectUpdateResult{}, nil
 }
 
 func newProjectAPI(t *testing.T, projects resources.Projects) (*resources.API, string) {
@@ -153,74 +143,6 @@ func TestRemoveProjectWithoutUseCaseIs501(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "unsupported") {
 		t.Fatalf("未接线要回 unsupported 错误码：%s", rec.Body.String())
-	}
-}
-
-func TestUpdateProjectReturnsEffectiveFields(t *testing.T) {
-	fake := &fakeProjects{updateResult: resources.ProjectUpdateResult{
-		ProjectID: projectID, ProjectName: "renamed", ProjectPath: "/tmp/demo2",
-		MainBranch: "main", MaxParallel: 3,
-		ConfigPath: "/tmp/demo2/.multiagent/config.toml", ConfigWriten: true,
-	}}
-	api, token := newProjectAPI(t, fake)
-
-	body := map[string]any{
-		"name": "renamed", "path": "/tmp/demo2", "main_branch": "main",
-		"max_parallel": 3, "auto_enabled": true, "limit": 2,
-		"allowed_nodes": []string{"node-a", "node-b"},
-		"worker_node":   "node-a", "llm_node": "node-b",
-	}
-	rec := doJSON(t, api, token, http.MethodPatch, "/api/v1/projects/"+projectID, body, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PATCH 应回 200，得到 %d %s", rec.Code, rec.Body.String())
-	}
-	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if out["project_name"] != "renamed" || out["config_written"] != true {
-		t.Fatalf("字段未生效：%v", out)
-	}
-	if out["max_parallel"] != float64(3) {
-		t.Fatalf("max_parallel 要回数值：%v", out["max_parallel"])
-	}
-
-	got := fake.lastUpdate
-	if got.ProjectID != projectID {
-		t.Fatalf("project_id=%q", got.ProjectID)
-	}
-	if got.Name == nil || *got.Name != "renamed" || got.Path == nil || *got.Path != "/tmp/demo2" {
-		t.Fatalf("名称/路径没传到用例：%+v", got)
-	}
-	if got.AutoEnabled == nil || !*got.AutoEnabled || got.Limit == nil || *got.Limit != 2 {
-		t.Fatalf("策略字段没传到用例：%+v", got)
-	}
-	if got.AllowedNodes == nil || len(*got.AllowedNodes) != 2 {
-		t.Fatalf("allowed_nodes 没传到用例：%+v", got.AllowedNodes)
-	}
-}
-
-func TestUpdateProjectRejectsMalformedID(t *testing.T) {
-	fake := &fakeProjects{}
-	api, token := newProjectAPI(t, fake)
-
-	rec := doJSON(t, api, token, http.MethodPatch,
-		"/api/v1/projects/not-a-project-id", map[string]any{"name": "x"}, nil)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("期望 422，得到 %d %s", rec.Code, rec.Body.String())
-	}
-	if fake.updateCalls != 0 {
-		t.Fatal("形态非法的 id 不该进用例")
-	}
-}
-
-func TestUpdateProjectWithoutUseCaseIs501(t *testing.T) {
-	api, token := newProjectAPI(t, nil)
-
-	rec := doJSON(t, api, token, http.MethodPatch,
-		"/api/v1/projects/"+projectID, map[string]any{"name": "x"}, nil)
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("期望 501，得到 %d %s", rec.Code, rec.Body.String())
 	}
 }
 

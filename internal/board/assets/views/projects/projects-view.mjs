@@ -43,8 +43,6 @@ const I18N = {
     "projects.workspace.unknown": "未识别",
     "projects.count": "个工程",
     "projects.not_ready_hint": "自动模式未就绪的原因：",
-    "projects.edit": "编辑",
-    "projects.edit.hint": "改名称、路径与执行策略",
     "projects.remove": "移除",
     "projects.remove.hint": "只从本机中枢注销登记，不动工程目录",
     "projects.remove.confirm": "确认移除？",
@@ -52,6 +50,8 @@ const I18N = {
     "projects.remove.cancel": "取消",
     "projects.remove.busy": "还有未完成任务或在线 Agent",
     "projects.remove.done": "已移除",
+    "projects.edit": "编辑",
+    "projects.edit.hint": "改名称、路径或执行策略（弹窗填写）",
   },
   en: {
     "projects.title": "Projects",
@@ -79,8 +79,6 @@ const I18N = {
     "projects.workspace.unknown": "Unknown",
     "projects.count": "projects",
     "projects.not_ready_hint": "Auto mode not ready because:",
-    "projects.edit": "Edit",
-    "projects.edit.hint": "Change name, path and execution policy",
     "projects.remove": "Remove",
     "projects.remove.hint": "Unregisters from the local hub only; the project directory stays untouched",
     "projects.remove.confirm": "Remove this project?",
@@ -88,6 +86,8 @@ const I18N = {
     "projects.remove.cancel": "Cancel",
     "projects.remove.busy": "Tasks or Agents are still live",
     "projects.remove.done": "Removed",
+    "projects.edit": "Edit",
+    "projects.edit.hint": "Change name, path or execution policy",
   },
 };
 

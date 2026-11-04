@@ -43,9 +43,8 @@ func NodeList(cwd string) (Result, error) {
 	items := make([]Result, 0, len(rows))
 	for _, n := range rows {
 		items = append(items, Result{
-			"node_id": n.ID, "name": n.Label, "label": n.Label,
-			"project_id": n.ProjectID, "slot_limit": n.SlotLimit,
-			"last_seen": n.LastSeen, "meta": n.Meta,
+			"node_id": n.ID, "label": n.Label, "project_id": n.ProjectID,
+			"slot_limit": n.SlotLimit, "last_seen": n.LastSeen, "meta": n.Meta,
 		})
 	}
 	return Result{"ok": true, "nodes": items, "count": len(items)}, nil
@@ -89,7 +88,7 @@ func NodeRegister(cwd string, in NodeRegisterInput) (Result, error) {
 	meta := localCLINodeMeta(argv, in.System)
 	if in.DryRun {
 		return Result{
-			"ok": true, "dry_run": true, "node_id": id, "name": label,
+			"ok": true, "dry_run": true, "node_id": id, "label": label,
 			"project_id": projectID, "slot_limit": slots, "meta": meta,
 		}, nil
 	}
@@ -107,7 +106,7 @@ func NodeRegister(cwd string, in NodeRegisterInput) (Result, error) {
 		return nil, err
 	}
 	return Result{
-		"ok": true, "node_id": id, "name": label, "project_id": projectID,
+		"ok": true, "node_id": id, "label": label, "project_id": projectID,
 		"slot_limit": slots, "adapter_kind": "local_cli",
 	}, nil
 }
@@ -138,7 +137,6 @@ func NodeRemove(cwd, nodeID string, dryRun bool) (Result, error) {
 	return Result{"ok": true, "node_id": id, "removed": true}, nil
 }
 
-// localCLINodeMeta 写出自动匹配所需的就绪信号；argv 为空时仍登记节点身份。
 func localCLINodeMeta(argv []string, system bool) map[string]any {
 	now := time.Now().UTC().Format(time.RFC3339)
 	meta := map[string]any{

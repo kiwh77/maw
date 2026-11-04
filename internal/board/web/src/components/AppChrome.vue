@@ -48,32 +48,22 @@ const statusOptions = computed(() => {
   const counts = snap.value?.counts || {}
   return Object.keys(counts).sort()
 })
-
-/**
- * 迭代下拉的两个哨兵值。
- *
- * 路由里 `iteration` 是三态：null＝不筛、空串＝只看未归属、其余＝具体迭代。
- * `<select>` 的 value 只能是字符串，所以「不筛」与「未归属」各用一个哨兵，
- * 提交时再翻回路由值——否则选「未归属」会被当成「不筛」而丢筛选。
- */
-const ALL_ITERATIONS = '__all__'
-const UNASSIGNED_ITERATION = '__unassigned__'
-
-const iterationOptions = computed(() =>
-  (snap.value?.iterations || []).filter((it) => it && String(it.id || '').trim()),
-)
-
-const iterationValue = computed(() => {
-  const value = board.state.route.iteration
-  if (value === null || value === undefined) return ALL_ITERATIONS
-  return value === '' ? UNASSIGNED_ITERATION : String(value)
+/** 迭代选项：快照列出的迭代 + 任务上出现过但未登记的 iteration_id。 */
+const iterationOptions = computed(() => {
+  const fromSnap = (snap.value?.iterations || []).map((it) => ({
+    id: String(it.id || '').trim(),
+    name: String(it.name || it.id || '').trim(),
+  })).filter((it) => it.id)
+  const seen = new Set(fromSnap.map((it) => it.id))
+  for (const task of snap.value?.tasks || []) {
+    const id = String((task as { iteration_id?: string }).iteration_id || '').trim()
+    if (id && !seen.has(id)) {
+      seen.add(id)
+      fromSnap.push({ id, name: id })
+    }
+  }
+  return fromSnap.sort((a, b) => a.id.localeCompare(b.id))
 })
-
-function onIterationChange(event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  const iteration = value === ALL_ITERATIONS ? null : value === UNASSIGNED_ITERATION ? '' : value
-  board.patchFilters({ iteration })
-}
 
 const taskCountLabel = computed(() => {
   const n = snap.value?.tasks?.length ?? 0
@@ -81,13 +71,13 @@ const taskCountLabel = computed(() => {
   return board.state.lang === 'zh' ? `${n} 个任务 · 共 ${total}` : `${n} tasks · ${total} total`
 })
 
-function onFilterChange(field: 'agent' | 'status', event: Event) {
+function onFilterChange(field: 'agent' | 'status' | 'iteration', event: Event) {
   const value = (event.target as HTMLSelectElement).value || ''
   board.patchFilters({ [field]: value })
 }
 
 function onReset() {
-  board.patchFilters({ agent: '', status: '', search: '', iteration: null })
+  board.patchFilters({ agent: '', status: '', iteration: '', search: '' })
   search.value = ''
 }
 
@@ -160,22 +150,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
       </select>
       <select
         id="f-iteration"
-        :value="iterationValue"
+        :value="board.state.route.iteration"
         aria-label="Iteration"
-        @change="onIterationChange"
+        @change="onFilterChange('iteration', $event)"
       >
-        <option :value="ALL_ITERATIONS">
-          {{ board.state.lang === 'zh' ? '全部迭代' : 'All iterations' }}
-        </option>
+        <option value="">{{ board.state.lang === 'zh' ? '全部迭代' : 'All iterations' }}</option>
         <option
           v-for="it in iterationOptions"
-          :key="String(it.project_id || '') + '/' + String(it.id)"
-          :value="String(it.id)"
+          :key="it.id"
+          :value="it.id"
         >
-          {{ it.name ? `${it.name} · ${it.id}` : it.id }}
-        </option>
-        <option :value="UNASSIGNED_ITERATION">
-          {{ board.state.lang === 'zh' ? '未归属迭代' : 'No iteration' }}
+          {{ it.name || it.id }}
         </option>
       </select>
       <button type="button" id="f-reset" class="quiet-button" @click="onReset">

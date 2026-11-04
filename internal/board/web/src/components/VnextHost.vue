@@ -15,6 +15,8 @@ import {
 import { renderActivity } from '../../../assets/views/activity/activity-view.mjs'
 import { renderSessions } from '../../../assets/views/sessions/sessions-view.mjs'
 import { renderAnalytics } from '../../../assets/views/analytics/analytics-view.mjs'
+import { renderProblems } from '../../../assets/views/problems/problems-view.mjs'
+import { renderLogs } from '../../../assets/views/logs/logs-view.mjs'
 import { renderProjectList } from '../../../assets/views/projects/projects-view.mjs'
 import { renderSettings, normalizePolicy } from '../../../assets/views/settings/settings-view.mjs'
 import { renderExecution } from '../../../assets/views/execution/execution-view.mjs'
@@ -41,6 +43,8 @@ const LIST: Record<string, (s: unknown, ctx: unknown) => string> = {
   activity: renderActivity as never,
   sessions: renderSessions as never,
   analytics: renderAnalytics as never,
+  problems: renderProblems as never,
+  logs: renderLogs as never,
   projects: renderProjectList as never,
   settings: renderSettings as never,
   execution: renderExecution as never,
@@ -90,8 +94,6 @@ const listHtml = computed(() => {
       agent: board.state.route.agent,
       status: board.state.route.status,
       search: board.state.route.search,
-      // null＝不筛；空串＝只看未归属迭代，视图不能把它当「没筛」。
-      iteration: board.state.route.iteration,
     },
   }
   return render(viewState || { status: 'loading' }, ctx)
@@ -166,17 +168,7 @@ function selectIteration(id: string) {
 }
 
 onMounted(reload)
-watch(
-  () => [
-    props.viewId,
-    board.state.route.project,
-    board.state.route.agent,
-    board.state.route.status,
-    board.state.route.search,
-    board.state.route.iteration,
-  ],
-  reload,
-)
+watch(() => [props.viewId, board.state.route.project, board.state.route.agent, board.state.route.status, board.state.route.search], reload)
 
 function onListClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null
@@ -190,7 +182,6 @@ function onListClick(event: MouseEvent) {
     return
   }
 
-  // 工程编辑：改名称／路径／策略，确认后提交并刷新列表。
   const edit = target?.closest?.('[data-project-edit]') as HTMLElement | null
   if (edit?.dataset.projectEdit) {
     void board.editProject(edit.dataset.projectEdit)

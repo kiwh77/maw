@@ -13,6 +13,7 @@
 export const DATA_KINDS = Object.freeze([
   "nodes", "tasks", "runs", "deliveries",
   "timeline", "activity", "sessions", "analytics",
+  "problems", "logs",
   "projects", "settings", "execution",
 ]);
 
@@ -103,6 +104,32 @@ export function nodesStateFrom(payload) {
   return { status: "ok", nodes: nodes.map(normalizeNodeRow) };
 }
 
+/** 问题列表响应 → 问题视图状态。 */
+export function problemsStateFrom(payload) {
+  if (!payload || typeof payload !== "object") return errorState("missing_payload");
+  if (payload.unauthenticated === true || payload.status === 401) {
+    return { status: "unauthenticated", reason: "unauthenticated" };
+  }
+  if (payload.unavailable) return errorState("unavailable");
+  const items = Array.isArray(payload.items) ? payload.items
+    : (Array.isArray(payload.problems) ? payload.problems : null);
+  if (!items) return errorState("invalid_payload");
+  return { status: "ok", items };
+}
+
+/** 日志列表响应 → 日志视图状态。 */
+export function logsStateFrom(payload) {
+  if (!payload || typeof payload !== "object") return errorState("missing_payload");
+  if (payload.unauthenticated === true || payload.status === 401) {
+    return { status: "unauthenticated", reason: "unauthenticated" };
+  }
+  if (payload.unavailable) return errorState("unavailable");
+  const items = Array.isArray(payload.items) ? payload.items
+    : (Array.isArray(payload.events) ? payload.events : null);
+  if (!items) return errorState("invalid_payload");
+  return { status: "ok", items };
+}
+
 /** 运行列表响应 → 运行视图状态；`reconciliation` 等字段原样保留。 */
 export function runsStateFrom(payload) {
   if (!payload || typeof payload !== "object") return errorState("missing_payload");
@@ -159,6 +186,8 @@ export function stateForKind(kind, payload, options = {}) {
     case "activity": return activityStateFrom(payload);
     case "sessions": return sessionsStateFrom(payload);
     case "analytics": return analyticsStateFrom(payload);
+    case "problems": return problemsStateFrom(payload);
+    case "logs": return logsStateFrom(payload);
     case "projects": return projectsStateFrom(payload);
     case "settings": return settingsStateFrom(payload, options);
     case "execution": return executionStateFrom(payload);

@@ -344,7 +344,6 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 		if e != nil {
 			return e
 		}
-		// 顶栏迭代下拉与「全部工程」共用这一份清单：空工程 id 时跨工程列出。
 		iterations, e = db.ListIterations(tx, projectID)
 		if e != nil {
 			return e
@@ -369,7 +368,6 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 	}
 	snap := board.BuildSnapshot(tasks, agents, maxP)
 	snap.EventID = eventID
-	snap.Iterations = board.IterationList(iterations)
 	// 没有任何事件时留空：让前端显示「尚无事件」，而不是编一个时间。
 	if ts, perr := time.Parse(time.RFC3339, strings.TrimSpace(lastEvent)); perr == nil {
 		snap.UpdatedAt = ts.Local().Format("2006-01-02 15:04:05")
@@ -379,6 +377,10 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 	snap.Projects = projects
 	if snap.Projects == nil {
 		snap.Projects = []*db.Project{}
+	}
+	snap.Iterations = iterations
+	if snap.Iterations == nil {
+		snap.Iterations = []*db.Iteration{}
 	}
 	snap.FilterProject = projectID
 	snap.FilterAgent = agent

@@ -27,25 +27,24 @@ type Snapshot struct {
 	UpdatedAt string `json:"updated_at"`
 	// GeneratedAt 是本次快照的生成时刻，仅供前端展示「刚刷新」，
 	// 不得用来判断数据新鲜度（同一份数据轮询多次，只有它变化）。
-	GeneratedAt string         `json:"generated_at"`
-	MaxParallel int            `json:"max_parallel"`
-	Total       int            `json:"total"`
-	Done        int            `json:"done"`
-	Active      int            `json:"active"`
-	Blocked     int            `json:"blocked"`
-	Percent     int            `json:"percent"`
-	NextHint    string         `json:"next_hint"`
-	Risks       RiskList       `json:"risks"`
-	Counts      map[string]int `json:"counts"`
-	Tasks       TaskList       `json:"tasks"`
-	Agents      AgentList      `json:"agents"`
-	Projects    ProjectList    `json:"projects"`
-	// Iterations 是当前筛选范围内的迭代清单，供顶栏下拉选择；
-	// 没有迭代时恒为 []，前端不必再区分 null 与空集合。
-	Iterations    IterationList `json:"iterations"`
-	FilterProject string        `json:"filter_project"`
-	FilterAgent   string        `json:"filter_agent"`
-	FilterStatus  string        `json:"filter_status"`
+	GeneratedAt   string         `json:"generated_at"`
+	MaxParallel   int            `json:"max_parallel"`
+	Total         int            `json:"total"`
+	Done          int            `json:"done"`
+	Active        int            `json:"active"`
+	Blocked       int            `json:"blocked"`
+	Percent       int            `json:"percent"`
+	NextHint      string         `json:"next_hint"`
+	Risks         RiskList       `json:"risks"`
+	Counts        map[string]int `json:"counts"`
+	Tasks         TaskList       `json:"tasks"`
+	Agents        AgentList      `json:"agents"`
+	Projects      ProjectList    `json:"projects"`
+	// Iterations 是筛选下拉里的候选迭代（工程内全部；与当前任务筛选无关）。
+	Iterations    IterationList  `json:"iterations"`
+	FilterProject string         `json:"filter_project"`
+	FilterAgent   string         `json:"filter_agent"`
+	FilterStatus  string         `json:"filter_status"`
 	// FilterIteration 是迭代筛选值：nil 表示没按迭代筛；指向空串表示只筛
 	// 「未归属任何迭代」的任务——两者是不同语义，所以不能用一个空字符串表示。
 	FilterIteration *string `json:"filter_iteration"`
@@ -223,7 +222,6 @@ func (s Snapshot) WithIteration(iterationID string) Snapshot {
 	out.UpdatedAt = s.UpdatedAt
 	out.GeneratedAt = s.GeneratedAt
 	out.Projects = s.Projects
-	out.Iterations = s.Iterations
 	out.FilterProject = s.FilterProject
 	out.FilterAgent = s.FilterAgent
 	out.FilterStatus = s.FilterStatus
@@ -256,9 +254,6 @@ func (s *Snapshot) Normalize() {
 	}
 	if s.Projects == nil {
 		s.Projects = []*db.Project{}
-	}
-	if s.Iterations == nil {
-		s.Iterations = []*db.Iteration{}
 	}
 	if s.Risks == nil {
 		s.Risks = []string{}

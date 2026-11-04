@@ -16,9 +16,6 @@ import (
 )
 
 // ProjectUpdateInput 是工程属性与策略的增量更新。
-//
-// 指针字段用于区分「没传」与「传了空值」：只有显式出现的 flag/JSON 字段
-// 才会写回，未出现的字段保持原值，避免一次编辑把没展示的策略清空。
 type ProjectUpdateInput struct {
 	Ref          string
 	Name         *string
@@ -34,9 +31,6 @@ type ProjectUpdateInput struct {
 }
 
 // ProjectUpdate 更新中枢工程行，并可选写回工程目录的 config.toml。
-//
-// 名称/路径/主分支/参考并行数落中枢 projects 表；auto_enabled、limit、
-// allowed_nodes、系统节点属于工程配置，写回 `<path>/.multiagent/config.toml`。
 func ProjectUpdate(cwd string, in ProjectUpdateInput) (Result, error) {
 	gdb, err := home.GlobalDBPath()
 	if err != nil {
@@ -140,8 +134,6 @@ func patchProjectConfig(path string, in ProjectUpdateInput) error {
 }
 
 // writeProjectConfig 用行级替换写回常用字段，避免全量重排整个 toml。
-//
-// 配置里还有注释与顺序信息；整份重写会把它们抹掉，所以只改目标键。
 func writeProjectConfig(path string, cfg *config.Config) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -178,8 +170,6 @@ func setTOMLStringArray(text, section, key string, values []string) string {
 	return replaceTOMLValue(text, section, key, "["+strings.Join(parts, ", ")+"]")
 }
 
-// replaceTOMLValue 在指定 section 内替换 key 的值；没有 key 就补一行，
-// 没有 section 就在文末追加整段。只动目标键，保留其余注释与顺序。
 func replaceTOMLValue(text, section, key, rendered string) string {
 	secRe := regexp.MustCompile(`(?m)^\s*\[` + regexp.QuoteMeta(section) + `\]\s*$`)
 	loc := secRe.FindStringIndex(text)

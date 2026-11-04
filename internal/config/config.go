@@ -34,10 +34,10 @@ type Managed struct {
 	// AutoEnabled 为真时才允许自动派发循环；默认 false。
 	// 它只管派发，不控制系统 Agent 的阻塞自愈（见 SystemAgent.Enabled）。
 	AutoEnabled bool `toml:"auto_enabled"`
-	// AllowedNodes 限定自动调度可用的节点集合；为空时回退 system_agent.worker_node 或不限制。
-	AllowedNodes []string `toml:"allowed_nodes"`
 	// Limit 是受管执行的全局硬上限；auto_enabled=true 时必须 ≥1。
 	Limit int `toml:"limit"`
+	// AllowedNodes 限制本工程自动派发可用的节点；空表示不限制。
+	AllowedNodes []string `toml:"allowed_nodes"`
 }
 
 // SystemAgent 控制系统 Agent 反应总线。默认关闭。
@@ -45,18 +45,18 @@ type Managed struct {
 // 它负责阻塞自愈 / 拆题 / 运维编排，**不负责**把任务自动派发出去——
 // 那件事只看 Managed.AutoEnabled。两个开关互不推导，可各自单独打开。
 type SystemAgent struct {
-	ConfigVersion    int      `toml:"config_version"`
-	Enabled          bool     `toml:"enabled"`
-	PollIntervalSec  int      `toml:"poll_interval_sec"`
-	MaxConcurrent    int      `toml:"max_concurrent"`
-	LLMNode          string   `toml:"llm_node"`
-	WorkerNode       string   `toml:"worker_node"`
-	LLMCommand       []string `toml:"llm_command"`
-	AutoKinds        []string `toml:"auto_kinds"`
-	EscalatePatterns []string `toml:"escalate_patterns"`
-	CooldownoutSec   int      `toml:"cooldown_sec"`
-	MaxAttempts      int      `toml:"max_attempts"`
-	OpsAllowlist     []string `toml:"ops_allowlist"`
+	ConfigVersion     int      `toml:"config_version"`
+	Enabled           bool     `toml:"enabled"`
+	PollIntervalSec   int      `toml:"poll_interval_sec"`
+	MaxConcurrent     int      `toml:"max_concurrent"`
+	LLMNode           string   `toml:"llm_node"`
+	WorkerNode        string   `toml:"worker_node"`
+	LLMCommand        []string `toml:"llm_command"`
+	AutoKinds         []string `toml:"auto_kinds"`
+	EscalatePatterns  []string `toml:"escalate_patterns"`
+	CooldownoutSec        int      `toml:"cooldown_sec"`
+	MaxAttempts       int      `toml:"max_attempts"`
+	OpsAllowlist      []string `toml:"ops_allowlist"`
 }
 
 type Project struct {
@@ -124,7 +124,6 @@ func Load(path string) (*Config, error) {
 	if c.Managed.ConfigVersion == 0 {
 		c.Managed.ConfigVersion = 1
 	}
-	c.Managed.AllowedNodes = normalizeNodeList(c.Managed.AllowedNodes)
 	// 默认关闭自动模式；显式开启时 Limit 至少为 1（E270）。
 	if c.Managed.Limit <= 0 {
 		c.Managed.Limit = 1
@@ -212,34 +211,14 @@ func (c *Config) AutomationSummary() (dispatch bool, system bool) {
 	return dispatch, c.SystemAgentEnabled()
 }
 
-// normalizeNodeList 去空白、去空项并保持首次出现顺序；nil 保持 nil，便于区分「未配置」。
-func normalizeNodeList(in []string) []string {
-	if in == nil {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, raw := range in {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	return out
-}
-
 const managedSectionTOML = `
 [managed]
 # 受管执行：默认关闭自动派发；硬上限 1（与 max_parallel 看板参考值分离）
 config_version = 1
 auto_enabled = false
-allowed_nodes = []
 limit = 1
+# 空数组 = 不限制节点；填写 node_id 后自动派发只打这些节点
+allowed_nodes = []
 `
 
 const systemAgentSectionTOML = `
@@ -414,7 +393,6 @@ mode = "manual"
 # 受管执行：默认关闭自动派发；硬上限 1（与 max_parallel 看板参考值分离）
 config_version = 1
 auto_enabled = false
-allowed_nodes = []
 limit = 1
 
 [system_agent]

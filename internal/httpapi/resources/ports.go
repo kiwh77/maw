@@ -116,8 +116,6 @@ type ProjectRemovalResult struct {
 }
 
 // ProjectUpdateRequest 是工程属性与策略的增量更新。
-//
-// 指针字段区分「没传」与「传了空值」：PATCH 只写显式出现的字段。
 type ProjectUpdateRequest struct {
 	ProjectID    string
 	Name         *string
@@ -165,5 +163,5 @@ type (
 )
 
 func (e ErrConflict) Error() string { return e.Code + ": " + e.Message }
-func (e ErrNotFound) Error() string { return e.Message }
-func (e ErrInvalid) Error() string  { return e.Code + ": " + e.Message }
+func (e ErrNotFound) Error() string  { return e.Message }
+func (e ErrInvalid) Error() string   { return e.Code + ": " + e.Message }

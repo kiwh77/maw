@@ -302,11 +302,8 @@ func (p projectRemovalPort) Remove(ctx context.Context, req httpresources.Projec
 	}, nil
 }
 
-// Update 把 PATCH 工程请求接到 ProjectUpdate 用例。
-//
-// 名称/路径/策略都在同一份增量输入里；未出现的字段保持原值，
-// 因此界面只改一个字段时不会把其他策略清空。
-func (p projectRemovalPort) Update(_ context.Context, req httpresources.ProjectUpdateRequest) (httpresources.ProjectUpdateResult, error) {
+func (p projectRemovalPort) Update(ctx context.Context, req httpresources.ProjectUpdateRequest) (httpresources.ProjectUpdateResult, error) {
+	_ = ctx
 	res, err := ProjectUpdate(p.cwd, ProjectUpdateInput{
 		Ref: req.ProjectID, Name: req.Name, Path: req.Path,
 		MainBranch: req.MainBranch, MaxParallel: req.MaxParallel,

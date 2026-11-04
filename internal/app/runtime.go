@@ -218,7 +218,7 @@ func (rt *Runtime) RunMetaFor(op dispatch.Operation) RunMeta {
 	return meta
 }
 
-// managedLaunchSpec 读显式来源并补默认值；第二个返回值表示「是否有来源」。
+// managedLaunchSpec 读显式来源（环境变量 → 占用节点 meta.argv）并补默认值。
 func (rt *Runtime) managedLaunchSpec(op dispatch.Operation) (model.LaunchSpec, bool, error) {
 	var spec model.LaunchSpec
 	if raw := strings.TrimSpace(os.Getenv(managedLaunchSpecEnv)); raw != "" {
@@ -227,38 +227,29 @@ func (rt *Runtime) managedLaunchSpec(op dispatch.Operation) (model.LaunchSpec, b
 				managedLaunchSpecEnv+" 不是合法的 LaunchSpec JSON: "+err.Error(),
 				"按 model.LaunchSpec 的字段传 JSON，或改用 "+managedLaunchCmdEnv)
 		}
-	} else {
-		raw := strings.TrimSpace(os.Getenv(managedLaunchCmdEnv))
-		if raw == "" {
-			// 环境没给命令时，回退到本次占用节点的 meta.argv；没有 argv 就不写空规格。
-			argv, found, err := rt.nodeArgvForOperation(op)
-			if err != nil {
-				return model.LaunchSpec{}, false, err
-			}
-			if !found || len(argv) == 0 {
-				return model.LaunchSpec{}, false, nil
-			}
-			if len(argv) < 2 {
-				return model.LaunchSpec{}, true, errx.New(
-					"节点 meta.argv 至少要有可执行文件与一个参数",
-					"给节点写入 argv，或改用 "+managedLaunchCmdEnv)
-			}
-			spec = model.LaunchSpec{Executable: argv[0], Argv: argv[1:]}
-		} else {
-			var argv []string
-			if err := json.Unmarshal([]byte(raw), &argv); err != nil {
-				return model.LaunchSpec{}, true, errx.New(
-					managedLaunchCmdEnv+" 必须是 JSON 数组: "+err.Error(),
-					`例如 ["/usr/bin/env","codebuddy","--headless"]`)
-			}
-			// 契约要求 argv 非空：只给可执行文件说明调用方少写了参数，宁可直接失败也别写坏文件。
-			if len(argv) < 2 {
-				return model.LaunchSpec{}, true, errx.New(
-					managedLaunchCmdEnv+" 至少要有可执行文件与一个参数",
-					`例如 ["/usr/bin/env","codebuddy","--headless"]`)
-			}
-			spec = model.LaunchSpec{Executable: argv[0], Argv: argv[1:]}
+	} else if raw := strings.TrimSpace(os.Getenv(managedLaunchCmdEnv)); raw != "" {
+		var argv []string
+		if err := json.Unmarshal([]byte(raw), &argv); err != nil {
+			return model.LaunchSpec{}, true, errx.New(
+				managedLaunchCmdEnv+" 必须是 JSON 数组: "+err.Error(),
+				`例如 ["/usr/bin/env","codebuddy","--headless"]`)
 		}
+		// 契约要求 argv 非空：只给可执行文件说明调用方少写了参数，宁可直接失败也别写坏文件。
+		if len(argv) < 2 {
+			return model.LaunchSpec{}, true, errx.New(
+				managedLaunchCmdEnv+" 至少要有可执行文件与一个参数",
+				`例如 ["/usr/bin/env","codebuddy","--headless"]`)
+		}
+		spec = model.LaunchSpec{Executable: argv[0], Argv: argv[1:]}
+	} else if argv, ok := rt.argvFromAssignedNode(op); ok {
+		if len(argv) < 2 {
+			return model.LaunchSpec{}, true, errx.New(
+				"节点 meta.argv 至少要有可执行文件与一个参数",
+				`maw node register --cmd '["/bin/echo","ok"]'`)
+		}
+		spec = model.LaunchSpec{Executable: argv[0], Argv: argv[1:]}
+	} else {
+		return model.LaunchSpec{}, false, nil
 	}
 	rt.fillLaunchDefaults(&spec)
 	if errs := spec.Validate(); len(errs) > 0 {
@@ -269,94 +260,66 @@ func (rt *Runtime) managedLaunchSpec(op dispatch.Operation) (model.LaunchSpec, b
 	return spec, true, nil
 }
 
-// nodeArgvForOperation 从本次 run 的有效 node_slot 占用反查节点 meta.argv。
-//
-// 只读本机中枢，不缓存；run 或节点不存在时返回 found=false，让调用方保持「不写规格」。
-func (rt *Runtime) nodeArgvForOperation(op dispatch.Operation) ([]string, bool, error) {
+// argvFromAssignedNode 从本 Run 的节点槽占用找到节点，再读 meta.argv。
+func (rt *Runtime) argvFromAssignedNode(op dispatch.Operation) ([]string, bool) {
 	if rt == nil || rt.pc == nil || strings.TrimSpace(rt.pc.GlobalDB) == "" {
-		return nil, false, nil
+		return nil, false
 	}
-	store, err := db.OpenStore(rt.pc.GlobalDB)
-	if err != nil {
-		return nil, false, errx.New("读取节点 argv 失败: "+err.Error(), "maw doctor")
-	}
-	defer func() { _ = store.Close() }()
 	runID := strings.TrimSpace(string(op.RunID))
 	if runID == "" {
-		runID = runIDForOperation(string(op.OperationID))
+		return nil, false
 	}
 	var argv []string
-	found := false
-	err = store.Read(func(tx *sql.Tx) error {
-		run, e := db.GetRun(tx, runID)
-		if e != nil || run == nil {
+	err := db.WithReadTx(rt.pc.GlobalDB, func(tx *sql.Tx) error {
+		leases, e := db.ListActiveLeases(tx, string(op.ProjectID))
+		if e != nil {
 			return e
 		}
-		for _, lease := range run.Leases {
-			if lease.Kind != model.LeaseNodeSlot || lease.Released {
+		var nodeID string
+		for _, lease := range leases {
+			if lease == nil || lease.RunID != runID {
 				continue
 			}
-			row, e := db.GetLease(tx, string(lease.LeaseID))
-			if e != nil {
-				return e
-			}
-			if row == nil {
+			if lease.Kind != model.LeaseNodeSlot {
 				continue
 			}
-			nodeID := nodeIDFromResourceKey(row.ResourceKey)
-			if nodeID == "" {
-				continue
-			}
-			node, e := db.GetNode(tx, nodeID)
-			if e != nil {
-				return e
-			}
-			if node == nil {
-				continue
-			}
-			argv = metaStringSlice(node.Meta["argv"])
-			found = true
+			nodeID = nodeIDFromLeaseKey(lease.ResourceKey)
+			break
+		}
+		if nodeID == "" {
 			return nil
 		}
-		return nil
+		n, e := db.GetNode(tx, nodeID)
+		if e != nil || n == nil || n.Meta == nil {
+			return e
+		}
+		raw, ok := n.Meta["argv"]
+		if !ok {
+			return nil
+		}
+		b, e := json.Marshal(raw)
+		if e != nil {
+			return e
+		}
+		return json.Unmarshal(b, &argv)
 	})
-	if err != nil {
-		return nil, false, errx.New("读取节点 argv 失败: "+err.Error(), "maw doctor")
+	if err != nil || len(argv) == 0 {
+		return nil, false
 	}
-	return argv, found, nil
+	return argv, true
 }
 
-func nodeIDFromResourceKey(key string) string {
-	key = strings.TrimPrefix(strings.TrimSpace(key), "node:")
-	if i := strings.Index(key, "#"); i >= 0 {
-		key = key[:i]
+// nodeIDFromLeaseKey 解析 node:<id>#<slot>。
+func nodeIDFromLeaseKey(key string) string {
+	key = strings.TrimSpace(key)
+	if !strings.HasPrefix(key, "node:") {
+		return ""
 	}
-	return strings.TrimSpace(key)
-}
-
-func metaStringSlice(raw any) []string {
-	switch v := raw.(type) {
-	case []string:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if item = strings.TrimSpace(item); item != "" {
-				out = append(out, item)
-			}
-		}
-		return out
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				if s = strings.TrimSpace(s); s != "" {
-					out = append(out, s)
-				}
-			}
-		}
-		return out
-	default:
-		return nil
+	rest := strings.TrimPrefix(key, "node:")
+	if i := strings.IndexByte(rest, '#'); i >= 0 {
+		rest = rest[:i]
 	}
+	return strings.TrimSpace(rest)
 }
 
 // fillLaunchDefaults 只填「调用方没写」的字段，绝不覆盖显式值。

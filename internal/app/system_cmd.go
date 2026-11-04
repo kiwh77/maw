@@ -325,28 +325,7 @@ func (p systemDispatchProjection) Policy(_ context.Context, projectID string) (m
 			ManagedExecutionLimit: limit,
 		},
 	}
-	// 节点白名单优先读 config [managed].allowed_nodes；为空时回退 system_agent.worker_node，
-	// 两者都没有就不写 ProjectRule（表示不限制）。
-	var allowed []model.NodeID
-	if p.rt != nil && p.rt.pc != nil && p.rt.pc.Config != nil {
-		seen := map[string]struct{}{}
-		for _, id := range p.rt.pc.Config.Managed.AllowedNodes {
-			id = strings.TrimSpace(id)
-			if id == "" {
-				continue
-			}
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			allowed = append(allowed, model.NodeID(id))
-		}
-	}
-	if len(allowed) == 0 {
-		if node := strings.TrimSpace(p.workerNode); node != "" {
-			allowed = []model.NodeID{model.NodeID(node)}
-		}
-	}
+	allowed := p.allowedNodes(projectID)
 	if len(allowed) > 0 {
 		policy.Projects = []matching.ProjectRule{{
 			ProjectID:    model.ProjectID(projectID),
@@ -354,6 +333,29 @@ func (p systemDispatchProjection) Policy(_ context.Context, projectID string) (m
 		}}
 	}
 	return policy, nil
+}
+
+// allowedNodes 优先用 config [managed].allowed_nodes；未配置时回退 worker_node 单值。
+func (p systemDispatchProjection) allowedNodes(projectID string) []model.NodeID {
+	_ = projectID
+	if p.rt != nil && p.rt.pc != nil && p.rt.pc.Config != nil {
+		raw := p.rt.pc.Config.Managed.AllowedNodes
+		out := make([]model.NodeID, 0, len(raw))
+		for _, id := range raw {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			out = append(out, model.NodeID(id))
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if node := strings.TrimSpace(p.workerNode); node != "" {
+		return []model.NodeID{model.NodeID(node)}
+	}
+	return nil
 }
 
 func (p systemDispatchProjection) Tasks(_ context.Context, projectID string) ([]matching.Task, error) {
