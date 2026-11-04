@@ -274,8 +274,7 @@ func promoteReady(tx *sql.Tx, projectID string) error {
 					return err
 				}
 				t.Status = "ready"
-				t.Revision++
-				if err := db.UpsertTask(tx, t); err != nil {
+				if err := db.UpsertTaskCAS(tx, t, t.Revision); err != nil {
 					return err
 				}
 				_ = db.AppendEvent(tx, projectID, "orchestrator", "status_changed", t.ID, map[string]any{
@@ -290,8 +289,7 @@ func promoteReady(tx *sql.Tx, projectID string) error {
 					return err
 				}
 				t.Status = "backlog"
-				t.Revision++
-				if err := db.UpsertTask(tx, t); err != nil {
+				if err := db.UpsertTaskCAS(tx, t, t.Revision); err != nil {
 					return err
 				}
 				_ = db.AppendEvent(tx, projectID, "orchestrator", "status_changed", t.ID, map[string]any{
