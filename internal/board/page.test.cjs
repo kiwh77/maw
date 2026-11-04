@@ -677,3 +677,51 @@ test('VN-705 页面骨架留出面包屑范围位，静态导出不引入绝对�
   assert.match(css, /\.vnext-notice/);
   assert.equal(/#[0-9a-fA-F]{3,6}/.test(css), false, '样式只消费共享 token，不写死色值');
 });
+
+// ---------- BP-STA-001：统计组的问题与日志 ----------
+
+test('BP-STA-001 问题与日志的适配层不把缺失当空成功', async () => {
+  const { context } = await loadReviewModules();
+
+  // 问题页：契约用 items，兼容旧载荷的 problems；两者都没有就是「没读全」。
+  assert.equal(context.problemsStateFrom({ items: [{ kind: 'blocked' }] }).status, 'ok');
+  assert.equal(context.problemsStateFrom({ problems: [{ kind: 'run' }] }).status, 'ok');
+  assert.equal(context.problemsStateFrom({ items: [] }).status, 'ok', '空列表是查过了没有');
+  assert.equal(context.problemsStateFrom({}).status, 'error');
+  assert.equal(context.problemsStateFrom({ unavailable: true }).status, 'error');
+  assert.equal(context.problemsStateFrom({ status: 401 }).status, 'unauthenticated');
+
+  // 日志页：契约用 items，兼容 events；缺两者判失败，不用空表冒充「最近没事件」。
+  assert.equal(context.logsStateFrom({ items: [{ kind: 'x' }] }).status, 'ok');
+  assert.equal(context.logsStateFrom({ events: [{ kind: 'x' }] }).status, 'ok');
+  assert.equal(context.logsStateFrom({ items: [] }).status, 'ok');
+  assert.equal(context.logsStateFrom({}).status, 'error');
+  assert.equal(context.logsStateFrom({ unavailable: true }).status, 'error');
+  assert.equal(context.logsStateFrom({ status: 401 }).status, 'unauthenticated');
+
+  // 两类都走自己的分支，不能被 default 的 unknown_kind 吃掉。
+  assert.equal(context.stateForKind('problems', { items: [] }).status, 'ok');
+  assert.equal(context.stateForKind('logs', { items: [] }).status, 'ok');
+  assert.equal(context.stateForKind('ghost', {}).status, 'error');
+  assert.equal(context.DATA_KINDS.includes('problems'), true);
+  assert.equal(context.DATA_KINDS.includes('logs'), true);
+});
+
+test('BP-STA-001 日志页从 /api/v1/events 取数，问题页从快照与运行提炼信号', async () => {
+  const sources = fs.readFileSync(__dirname + '/web/src/lib/sources.ts', 'utf8');
+  assert.match(sources, /'\/api\/v1\/events\?/, '日志页必须走事件补拉接口');
+  assert.match(sources, /async logs\(route: RouteLike\)/);
+  // 问题页复用看板快照并按当前筛选提炼，不再造第二个聚合接口。
+  assert.match(sources, /async problems\(route: RouteLike\)/);
+  ['blocked', 'run', 'agent'].forEach(kind => {
+    assert.match(sources, new RegExp("kind: '" + kind + "'"), '问题信号缺少类型：' + kind);
+  });
+
+  // 渲染器必须同时接进线上宿主与旧挂载层，否则注册表里多出两个点不开的入口。
+  const host = fs.readFileSync(__dirname + '/web/src/components/VnextHost.vue', 'utf8');
+  assert.match(host, /problems: renderProblems as never/);
+  assert.match(host, /logs: renderLogs as never/);
+  const shell = fs.readFileSync(__dirname + '/assets/shell/board-shell.mjs', 'utf8');
+  assert.match(shell, /problems: renderProblems/);
+  assert.match(shell, /logs: renderLogs/);
+});

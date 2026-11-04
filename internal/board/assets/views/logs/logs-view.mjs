@@ -44,6 +44,38 @@ function emptyState(lang, title, hint) {
     '<p class="empty-state__text">' + esc(hint) + "</p></div>";
 }
 
+/**
+ * 时间列：/api/v1/events 的行用 `occurred_at`（事实发生时刻）与 `received_at`（入库时刻），
+ * 旧旁路载荷用 `ts`／`created_at`。先取事实时刻，取不到再退回入库时刻，
+ * 都不写就不编时间——空单元格比一个假时间诚实。
+ */
+function timeOf(it) {
+  return String(it.occurred_at || it.received_at || it.ts || it.created_at || "");
+}
+
+/**
+ * 主体列：事件行没有 actor 字段，真正能定位「是谁」的是任务实例、运行与工程，
+ * 依次退回，全部缺失就留空。
+ */
+function subjectOf(it) {
+  return String(it.task_instance || it.instance_id || it.actor || it.agent || it.project_id || "");
+}
+
+/**
+ * 摘要列：优先取显式文案；事件行没有 message，就用「阶段 · 质量 · 运行」拼一句
+ * 可核对的事实，实在没有才退回载荷前 120 字符（没有载荷就留空，不显示 `{}`）。
+ */
+function summaryOf(it) {
+  const explicit = it.message || it.summary || it.payload_summary;
+  if (explicit) return String(explicit);
+  const facts = [it.phase, it.quality, it.run_id].filter(Boolean).map(String);
+  if (facts.length) return facts.join(" · ");
+  if (it.payload && typeof it.payload === "object" && Object.keys(it.payload).length) {
+    return JSON.stringify(it.payload).slice(0, 120);
+  }
+  return "";
+}
+
 /** @param {{status?:string, items?:Array}} state */
 export function renderLogs(state = {}, options = {}) {
   const lang = options.lang === "en" ? "en" : "zh";
@@ -55,10 +87,10 @@ export function renderLogs(state = {}, options = {}) {
   if (!items.length) return emptyState(lang, t("empty", lang), t("emptyHint", lang));
 
   const rows = items.map((it) => "<tr>" +
-    '<td class="id">' + esc(it.ts || it.created_at || "") + "</td>" +
+    '<td class="id">' + esc(timeOf(it)) + "</td>" +
     "<td>" + esc(it.kind || it.type || "") + "</td>" +
-    "<td>" + esc(it.actor || it.agent || "") + "</td>" +
-    "<td>" + esc(it.message || it.summary || it.payload_summary || JSON.stringify(it.payload || {}).slice(0, 120)) + "</td>" +
+    "<td>" + esc(subjectOf(it)) + "</td>" +
+    "<td>" + esc(summaryOf(it)) + "</td>" +
     "</tr>").join("");
 
   return '<p class="field-hint">' + esc(items.length + " " + t("count", lang)) + "</p>" +
