@@ -43,7 +43,10 @@ type Snapshot struct {
 	FilterProject string         `json:"filter_project"`
 	FilterAgent   string         `json:"filter_agent"`
 	FilterStatus  string         `json:"filter_status"`
-	Global        bool           `json:"global"`
+	// FilterIteration 是迭代筛选值：nil 表示没按迭代筛；指向空串表示只筛
+	// 「未归属任何迭代」的任务——两者是不同语义，所以不能用一个空字符串表示。
+	FilterIteration *string `json:"filter_iteration"`
+	Global          bool    `json:"global"`
 }
 
 // TaskList / AgentList / ProjectList / RiskList 把「nil 集合」固定映射成 JSON []。
@@ -101,6 +104,17 @@ func byStatus(tasks []*db.Task) map[string][]*db.Task {
 }
 
 func BuildSnapshot(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapshot {
+	snap := aggregate(tasks, agents, maxParallel)
+	snap.Projects = []*db.Project{}
+	snap.Global = true
+	snap.Normalize()
+	return snap
+}
+
+// aggregate 只负责「这批任务 + 这些 Agent」的聚合：total/done/percent/risks/next_hint
+// 都跟着传进来的任务集走，因此任何按维度收窄过的任务集都可以用它重算。
+// 装配层附加的字段（工程列表、筛选回显、数据水位、EventID）不在这里产生。
+func aggregate(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapshot {
 	by := byStatus(tasks)
 	done := len(by["done"])
 	total := len(tasks)
@@ -170,11 +184,47 @@ func BuildSnapshot(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapsh
 		Counts:      counts,
 		Tasks:       tasks,
 		Agents:      agents,
-		Projects:    []*db.Project{},
-		Global:      true,
 	}
 	snap.Normalize()
 	return snap
+}
+
+// WithIteration 返回只含指定迭代任务的快照副本，并按这批任务重算聚合。
+//
+// 迭代是任务的容器：筛到某个迭代后 total/done/percent/risks/next_hint 必须跟着
+// 这批任务走，否则卡片上的「3/10」会与列表里那 3 行对不上。
+// iterationID 为空串表示「未归属任何迭代」，这是一个合法筛选值，不是「不筛选」；
+// 不筛选时调用方根本不该调用本方法（FilterIteration 因此保持 nil）。
+//
+// 装配层的水位、工程列表、基础筛选与 EventID 来自同一份装配结果，重算不得覆盖它们。
+func (s Snapshot) WithIteration(iterationID string) Snapshot {
+	kept := make([]*db.Task, 0, len(s.Tasks))
+	for _, t := range s.Tasks {
+		if t != nil && t.IterationID == iterationID {
+			kept = append(kept, t)
+		}
+	}
+	out := aggregate(kept, s.Agents, s.MaxParallel)
+	out.EventID = s.EventID
+	out.UpdatedAt = s.UpdatedAt
+	out.GeneratedAt = s.GeneratedAt
+	out.Projects = s.Projects
+	out.FilterProject = s.FilterProject
+	out.FilterAgent = s.FilterAgent
+	out.FilterStatus = s.FilterStatus
+	out.Global = s.Global
+	id := iterationID
+	out.FilterIteration = &id
+	out.Normalize()
+	return out
+}
+
+// IterationFilter 回显当前的迭代筛选：ok=false 表示没按迭代筛（含「筛选空迭代」的区别）。
+func (s Snapshot) IterationFilter() (string, bool) {
+	if s.FilterIteration == nil {
+		return "", false
+	}
+	return *s.FilterIteration, true
 }
 
 // Normalize 把集合字段归一为非 nil 空切片，保证 JSON 恒为 [] 而不是 null。

@@ -118,25 +118,31 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// 迭代筛选按「参数是否出现」判定：?iteration= 表示只保留未归属任何迭代的任务，
+		// 与「不带 iteration 参数＝不按迭代筛」必须区分开。
+		if q.Has("iteration") {
+			snap = snap.WithIteration(strings.TrimSpace(q.Get("iteration")))
+		}
 		out := map[string]any{
-			"updated_at":     snap.UpdatedAt,
-			"generated_at":   snap.GeneratedAt,
-			"max_parallel":   snap.MaxParallel,
-			"total":          snap.Total,
-			"done":           snap.Done,
-			"active":         snap.Active,
-			"blocked":        snap.Blocked,
-			"percent":        snap.Percent,
-			"next_hint":      snap.NextHint,
-			"risks":          snap.Risks,
-			"counts":         snap.Counts,
-			"tasks":          snap.Tasks,
-			"agents":         snap.Agents,
-			"projects":       snap.Projects,
-			"filter_project": snap.FilterProject,
-			"filter_agent":   snap.FilterAgent,
-			"filter_status":  snap.FilterStatus,
-			"global":         snap.Global,
+			"updated_at":       snap.UpdatedAt,
+			"generated_at":     snap.GeneratedAt,
+			"max_parallel":     snap.MaxParallel,
+			"total":            snap.Total,
+			"done":             snap.Done,
+			"active":           snap.Active,
+			"blocked":          snap.Blocked,
+			"percent":          snap.Percent,
+			"next_hint":        snap.NextHint,
+			"risks":            snap.Risks,
+			"counts":           snap.Counts,
+			"tasks":            snap.Tasks,
+			"agents":           snap.Agents,
+			"projects":         snap.Projects,
+			"filter_project":   snap.FilterProject,
+			"filter_agent":     snap.FilterAgent,
+			"filter_status":    snap.FilterStatus,
+			"filter_iteration": snap.FilterIteration,
+			"global":           snap.Global,
 			// 旧只读响应保持字段兼容；附带契约视图（自动模式默认关闭）。
 			"auto_execution": defaultAutoExecution(opts),
 			"api_compat":     "board-v1",

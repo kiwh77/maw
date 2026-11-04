@@ -45,15 +45,16 @@ func (a *API) handleTaskByInstance(w http.ResponseWriter, r *http.Request) {
 		row := tx.QueryRow(`
 SELECT project_id, instance_id, id, title, status, priority, merge_order,
   COALESCE(owner, ''), revision, COALESCE(branch, ''), COALESCE(worktree, ''), attempts,
-  COALESCE(heartbeat, ''), COALESCE(blocked_reason, '')
+  COALESCE(heartbeat, ''), COALESCE(blocked_reason, ''), COALESCE(iteration_id, '')
 FROM tasks WHERE instance_id = ?`, instanceID)
 		var (
 			projectID, inst, display, title, status, owner, branch, wt, hb, blocked string
-			priority, mergeOrder, attempts                                         int
-			rev                                                                    int64
+			priority, mergeOrder, attempts                                          int
+			rev                                                                     int64
+			iterationID                                                             string
 		)
 		if err := row.Scan(&projectID, &inst, &display, &title, &status, &priority, &mergeOrder,
-			&owner, &rev, &branch, &wt, &attempts, &hb, &blocked); err != nil {
+			&owner, &rev, &branch, &wt, &attempts, &hb, &blocked, &iterationID); err != nil {
 			if err == sql.ErrNoRows {
 				writeErr(w, http.StatusNotFound, "not_found", "任务实例不存在", nil)
 				return errResponseSent{}
@@ -69,20 +70,21 @@ FROM tasks WHERE instance_id = ?`, instanceID)
 		}
 		revision = rev
 		item = map[string]any{
-			"project_id":    projectID,
-			"task_instance": inst,
-			"display_id":    display,
-			"title":         title,
-			"status":        status,
-			"priority":      priority,
-			"merge_order":   mergeOrder,
-			"owner":         owner,
-			"revision":      rev,
-			"branch":        branch,
-			"worktree":      wt,
-			"attempts":      attempts,
-			"heartbeat":     hb,
+			"project_id":     projectID,
+			"task_instance":  inst,
+			"display_id":     display,
+			"title":          title,
+			"status":         status,
+			"priority":       priority,
+			"merge_order":    mergeOrder,
+			"owner":          owner,
+			"revision":       rev,
+			"branch":         branch,
+			"worktree":       wt,
+			"attempts":       attempts,
+			"heartbeat":      hb,
 			"blocked_reason": blocked,
+			"iteration_id":   iterationID,
 		}
 		w.Header().Set("ETag", etag(rev))
 		return nil

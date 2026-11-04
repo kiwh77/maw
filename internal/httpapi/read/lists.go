@@ -67,8 +67,14 @@ func (a *API) handleBoard(w http.ResponseWriter, r *http.Request) {
 		page     query.Page[query.TaskRow]
 		revision int64
 		wm       query.Watermark
+		body     map[string]any
 	)
-	err = a.withReader(func(rd *query.Reader, _ *sql.Tx) error {
+	iteration, hasIteration := iterationFilter(r)
+	var iterationPtr *string
+	if hasIteration {
+		iterationPtr = &iteration
+	}
+	err = a.withReader(func(rd *query.Reader, tx *sql.Tx) error {
 		q := query.TaskQuery{
 			ProjectID: projectID, Owner: agent, Limit: limit,
 			Cursor: strings.TrimSpace(r.URL.Query().Get("cursor")),
@@ -83,13 +89,16 @@ func (a *API) handleBoard(w http.ResponseWriter, r *http.Request) {
 		}
 		wm = rd.Watermark()
 		revision, e = rd.ProjectRevision(projectID)
+		if e != nil {
+			return e
+		}
+		body, e = tasksPageBody(tx, projectID, page, iterationPtr, revision)
 		return e
 	})
 	if err != nil {
 		mapQueryErr(w, err)
 		return
 	}
-	body := pageBody(page, revision)
 	body["watermark"] = wm
 	writeOK(w, http.StatusOK, body)
 }
@@ -118,7 +127,7 @@ func (a *API) handleProjectInstances(w http.ResponseWriter, r *http.Request) {
 	a.listProject(w, r, listInstances)
 }
 
-type listFn func(rd *query.Reader, projectID string, r *http.Request) (map[string]any, error)
+type listFn func(rd *query.Reader, tx *sql.Tx, projectID string, r *http.Request) (map[string]any, error)
 
 func (a *API) listProject(w http.ResponseWriter, r *http.Request, fn listFn) {
 	if rejectLegacyPagination(w, r) {
@@ -131,9 +140,9 @@ func (a *API) listProject(w http.ResponseWriter, r *http.Request, fn listFn) {
 		return
 	}
 	var body map[string]any
-	err := a.withReader(func(rd *query.Reader, _ *sql.Tx) error {
+	err := a.withReader(func(rd *query.Reader, tx *sql.Tx) error {
 		var e error
-		body, e = fn(rd, projectID, r)
+		body, e = fn(rd, tx, projectID, r)
 		return e
 	})
 	if isSent(err) {
@@ -152,7 +161,7 @@ func (a *API) listProject(w http.ResponseWriter, r *http.Request, fn listFn) {
 	writeOK(w, http.StatusOK, body)
 }
 
-func listTasks(rd *query.Reader, projectID string, r *http.Request) (map[string]any, error) {
+func listTasks(rd *query.Reader, tx *sql.Tx, projectID string, r *http.Request) (map[string]any, error) {
 	limit, err := parseLimit(r)
 	if err != nil {
 		return nil, err
@@ -196,10 +205,15 @@ func listTasks(rd *query.Reader, projectID string, r *http.Request) (map[string]
 	if err != nil {
 		return nil, err
 	}
-	return pageBody(page, rev), nil
+	iteration, hasIteration := iterationFilter(r)
+	var iterationPtr *string
+	if hasIteration {
+		iterationPtr = &iteration
+	}
+	return tasksPageBody(tx, projectID, page, iterationPtr, rev)
 }
 
-func listNodes(rd *query.Reader, projectID string, r *http.Request) (map[string]any, error) {
+func listNodes(rd *query.Reader, _ *sql.Tx, projectID string, r *http.Request) (map[string]any, error) {
 	limit, err := parseLimit(r)
 	if err != nil {
 		return nil, err
@@ -219,7 +233,7 @@ func listNodes(rd *query.Reader, projectID string, r *http.Request) (map[string]
 	return pageBody(page, rev), nil
 }
 
-func listRuns(rd *query.Reader, projectID string, r *http.Request) (map[string]any, error) {
+func listRuns(rd *query.Reader, _ *sql.Tx, projectID string, r *http.Request) (map[string]any, error) {
 	limit, err := parseLimit(r)
 	if err != nil {
 		return nil, err
@@ -246,7 +260,7 @@ func listRuns(rd *query.Reader, projectID string, r *http.Request) (map[string]a
 	return pageBody(page, rev), nil
 }
 
-func listOperations(rd *query.Reader, projectID string, r *http.Request) (map[string]any, error) {
+func listOperations(rd *query.Reader, _ *sql.Tx, projectID string, r *http.Request) (map[string]any, error) {
 	limit, err := parseLimit(r)
 	if err != nil {
 		return nil, err
@@ -273,7 +287,7 @@ func listOperations(rd *query.Reader, projectID string, r *http.Request) (map[st
 	return pageBody(page, rev), nil
 }
 
-func listDeliveries(rd *query.Reader, projectID string, r *http.Request) (map[string]any, error) {
+func listDeliveries(rd *query.Reader, _ *sql.Tx, projectID string, r *http.Request) (map[string]any, error) {
 	limit, err := parseLimit(r)
 	if err != nil {
 		return nil, err
@@ -297,7 +311,7 @@ func listDeliveries(rd *query.Reader, projectID string, r *http.Request) (map[st
 	return pageBody(page, rev), nil
 }
 
-func listInstances(rd *query.Reader, projectID string, r *http.Request) (map[string]any, error) {
+func listInstances(rd *query.Reader, _ *sql.Tx, projectID string, r *http.Request) (map[string]any, error) {
 	limit, err := parseLimit(r)
 	if err != nil {
 		return nil, err

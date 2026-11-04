@@ -75,6 +75,12 @@ func parseLimit(r *http.Request) (int, error) {
 }
 
 func pageBody[T any](page query.Page[T], revision int64) map[string]any {
+	return pageBodyWith(page, revision, page.Items)
+}
+
+// pageBodyWith 与 pageBody 同形，但允许换掉 items：任务列表需要在行上补迭代归属，
+// 又不能把分页信封（next_cursor／revision／watermark）各写一遍。
+func pageBodyWith[T any](page query.Page[T], revision int64, items any) map[string]any {
 	var next any
 	if page.Next == "" {
 		next = nil
@@ -82,7 +88,7 @@ func pageBody[T any](page query.Page[T], revision int64) map[string]any {
 		next = page.Next
 	}
 	return map[string]any{
-		"items":       page.Items,
+		"items":       items,
 		"next_cursor": next,
 		"revision":    revision,
 		"watermark":   page.Watermark,
