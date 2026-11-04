@@ -80,6 +80,10 @@ export const VIEW_DEFS = Object.freeze([
   // 工程设置：工程清单 + 受管执行策略。不是筛选目标，而是配置入口。
   Object.freeze({ id: "projects", group: "settings", legacy: false, titleKey: "view.projects", headingKey: "heading.projects", descKey: "desc.projects", eyebrowKey: "eyebrow.projects", symbol: "❏", dataKind: "projects", requiresProject: false }),
   Object.freeze({ id: "settings", group: "settings", legacy: false, titleKey: "view.settings", headingKey: "heading.settings", descKey: "desc.settings", eyebrowKey: "eyebrow.settings", symbol: "⚙", dataKind: "settings", requiresProject: false }),
+  // 执行视图（EV-001）：按迭代聚合任务／运行／交付，是主视图而不是筛选目标。
+  // 归入 flow 组：该组不进侧栏（侧栏只留置顶的工作台），所以它不占新的导航入口，
+  // 用 `?view=execution` 进入；EV-003 会把默认落地页切到它。
+  Object.freeze({ id: "execution", group: "flow", legacy: false, titleKey: "view.execution", headingKey: "heading.execution", descKey: "desc.execution", eyebrowKey: "eyebrow.execution", symbol: "◈", dataKind: "execution", requiresProject: false }),
 ]);
 
 /** 旧视图容器 id，切到 vnext 视图时整体隐藏。 */

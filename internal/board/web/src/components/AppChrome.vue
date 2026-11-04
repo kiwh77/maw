@@ -6,10 +6,18 @@ import ViewToggle from './ViewToggle.vue'
 const board = useBoard()
 const snap = computed(() => board.state.snapshot)
 const project = computed(() => board.state.route.project || '')
-/** 工程筛选头仅服务流程视图（看板／工坊／拓朴）。 */
+/**
+ * 工程筛选头服务流程视图（看板／工坊／拓扑／执行）。
+ *
+ * 执行视图也在内：它按工程的迭代聚合，读的正是这份快照与这套 agent/status 筛选，
+ * 而且它是「流程」组的一员——把视图切换器藏起来，用户就只能靠侧栏回看板再切。
+ */
 const showChrome = computed(() => {
   const view = board.state.route.view
-  return Boolean(project.value && (view === 'board' || view === 'factory' || view === 'topo'))
+  return Boolean(
+    project.value &&
+      (view === 'board' || view === 'factory' || view === 'topo' || view === 'execution'),
+  )
 })
 const search = ref(board.state.route.search || '')
 let searchTimer: ReturnType<typeof setTimeout> | null = null

@@ -17,6 +17,7 @@ import { renderSessions } from '../../../assets/views/sessions/sessions-view.mjs
 import { renderAnalytics } from '../../../assets/views/analytics/analytics-view.mjs'
 import { renderProjectList } from '../../../assets/views/projects/projects-view.mjs'
 import { renderSettings, normalizePolicy } from '../../../assets/views/settings/settings-view.mjs'
+import { renderExecution } from '../../../assets/views/execution/execution-view.mjs'
 
 const props = defineProps<{ viewId: string }>()
 const board = useBoard()
@@ -42,6 +43,7 @@ const LIST: Record<string, (s: unknown, ctx: unknown) => string> = {
   analytics: renderAnalytics as never,
   projects: renderProjectList as never,
   settings: renderSettings as never,
+  execution: renderExecution as never,
 }
 
 const DETAIL: Record<string, (item: unknown, ctx: unknown) => string> = {
@@ -147,6 +149,20 @@ function handleTimelineAction(action: string) {
   else if (action === 'zoom-out') void applyTimelineCtx(zoomWindow(base, 1))
 }
 
+/**
+ * 执行视图：切换正在查看的迭代。
+ *
+ * 选中值只留在宿主层（localStates），不写路由也不回写服务端：迭代是浏览维度，
+ * 不是可分享的现场。视图本身是纯渲染，读 state.selectedIteration 决定哪一组展开。
+ */
+function selectIteration(id: string) {
+  const base = (localStates.value.execution ?? board.state.viewStates.execution) as
+    | Record<string, unknown>
+    | undefined
+  if (!base) return
+  localStates.value = { ...localStates.value, execution: { ...base, selectedIteration: id } }
+}
+
 onMounted(reload)
 watch(() => [props.viewId, board.state.route.project, board.state.route.agent, board.state.route.status, board.state.route.search], reload)
 
@@ -177,6 +193,21 @@ function onListClick(event: MouseEvent) {
   if (cancel) {
     board.cancelRemoveProject()
     return
+  }
+
+  // 执行视图：先看是不是点了迭代按钮，再看是不是点了任务行。
+  // 两件事都不改路由：迭代是浏览维度，任务详情走抽屉（与看板同一套）。
+  if (props.viewId === 'execution') {
+    const iterEl = target?.closest?.('[data-iteration]') as HTMLElement | null
+    if (iterEl) {
+      selectIteration(iterEl.dataset.iteration || '')
+      return
+    }
+    const taskEl = target?.closest?.('[data-task-id]') as HTMLElement | null
+    if (taskEl?.dataset.taskId) {
+      board.openTaskDrawer(taskEl.dataset.taskId, taskEl.dataset.projectId || '')
+      return
+    }
   }
 
   const row = target?.closest?.('tr[data-detail-id]') as HTMLElement | null

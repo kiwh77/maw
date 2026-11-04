@@ -6,10 +6,13 @@ const board = useBoard()
 const view = computed(() => board.state.route.view)
 const hasProject = computed(() => Boolean(board.state.route.project))
 
+// 流程视图的四个入口。执行视图（EV-001）与看板并列：一个看流水，一个按迭代聚合，
+// 两者读同一份快照与同一套筛选，切页不丢现场。
 const items = [
   { id: 'board', labelKey: 'view.board' },
   { id: 'factory', labelKey: 'view.factory' },
   { id: 'topo', labelKey: 'view.topo' },
+  { id: 'execution', labelKey: 'view.execution' },
 ]
 
 function go(id: string) {

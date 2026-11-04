@@ -200,14 +200,55 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
     }
   }
 
+  /** 看板快照（带当前筛选）。执行视图与任务视图共用同一个来源，抽屉才找得到行。 */
+  async function fetchTasks(route: RouteLike) {
+    const params = new URLSearchParams()
+    if (route.project) params.set('project', route.project)
+    if (route.agent) params.set('agent', route.agent)
+    if (route.status) params.set('status', route.status)
+    const query = params.toString()
+    return getJSON(TASKS_SOURCE + (query ? `?${query}` : ''))
+  }
+
+  /** 从列表载荷里取数组：契约用资源名，分页外壳用 `items`。 */
+  function listOf(payload: Record<string, unknown> | JsonFail, name: string) {
+    if (!payload || (payload as JsonFail).unavailable === true) return null
+    const body = payload as Record<string, unknown>
+    if (Array.isArray(body[name])) return body[name] as unknown[]
+    if (Array.isArray(body.items)) return body.items as unknown[]
+    return null
+  }
+
   return {
-    async tasks(route: RouteLike) {
-      const params = new URLSearchParams()
-      if (route.project) params.set('project', route.project)
-      if (route.agent) params.set('agent', route.agent)
-      if (route.status) params.set('status', route.status)
-      const query = params.toString()
-      return getJSON(TASKS_SOURCE + (query ? `?${query}` : ''))
+    tasks: fetchTasks,
+    /**
+     * 执行视图（EV-001）：任务、运行、交付三类一次取齐。
+     *
+     * 三类缺一类就整份判失败，不返回「有任务、零运行」这种半成品——
+     * 渲染层据此把整页标成加载失败，而不是显示成「这批题没跑过」。
+     * 迭代是工程内的容器，没有工程时连请求都不发，由挂载层给「先选工程」。
+     */
+    async execution(route: RouteLike) {
+      const project = String(route?.project || '').trim()
+      if (!project) return { unavailable: true as const, status: 0 }
+      const [taskPayload, runsPayload, deliveriesPayload] = await Promise.all([
+        fetchTasks(route),
+        fetchControl('runs', project),
+        fetchControl('deliveries', project),
+      ])
+      const parts = [taskPayload, runsPayload, deliveriesPayload]
+      if (parts.some((p) => p && (p as JsonFail).unauthenticated === true)) {
+        return { unavailable: true as const, status: 401, unauthenticated: true }
+      }
+      const failed = parts.find((p) => !p || (p as JsonFail).unavailable === true) as
+        | JsonFail
+        | undefined
+      if (failed) return { unavailable: true as const, status: failed.status || 0 }
+      const tasks = listOf(taskPayload, 'tasks')
+      const runs = listOf(runsPayload, 'runs')
+      const deliveries = listOf(deliveriesPayload, 'deliveries')
+      if (!tasks || !runs || !deliveries) return { unavailable: true as const, status: 0 }
+      return { tasks, runs, deliveries }
     },
     nodes: controlSource('nodes'),
     runs: controlSource('runs'),

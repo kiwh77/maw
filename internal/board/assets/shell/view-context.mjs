@@ -9,11 +9,11 @@
 //   - pending / unknown 原样透传，不在这里改写成 done / pass / completed；
 //   - 映射层不做业务推断，只做字段搬运与命名对齐。
 
-/** 视图需要的十类数据：四类执行资源 + 四类观测事实 + 工程与策略。 */
+/** 视图需要的十一类数据：四类执行资源 + 四类观测事实 + 工程、策略与迭代聚合。 */
 export const DATA_KINDS = Object.freeze([
   "nodes", "tasks", "runs", "deliveries",
   "timeline", "activity", "sessions", "analytics",
-  "projects", "settings",
+  "projects", "settings", "execution",
 ]);
 
 /**
@@ -21,8 +21,10 @@ export const DATA_KINDS = Object.freeze([
  *
  * 这四类事实的来源是投影，而投影按工程建。没有工程时「什么都没查到」与
  * 「没有查」是两件事：这里必须让调用方能区分，不能用空列表冒充空成功。
+ *
+ * 执行视图同样按工程物化：迭代是工程内的容器，没有工程就没有可聚合的迭代。
  */
-export const PROJECT_SCOPED_KINDS = Object.freeze(["timeline", "activity", "sessions", "analytics"]);
+export const PROJECT_SCOPED_KINDS = Object.freeze(["timeline", "activity", "sessions", "analytics", "execution"]);
 
 /** 缺少工程上下文时的显式状态（既不是空成功，也不是错误）。 */
 export const NO_PROJECT_STATE = Object.freeze({ status: "no_project", reason: "project_required" });
@@ -101,6 +103,27 @@ export function deliveriesStateFrom(payload) {
   return { status: "ok", deliveries };
 }
 
+/**
+ * 执行视图载荷 → 执行视图状态（EV-001）。
+ *
+ * 三类数据缺一类就不算成功：把「runs 没取到」渲染成「0 次运行」，
+ * 读者会据此以为这批题从没跑过，比直接报加载失败更糟。
+ * 载荷用 `ok` 而不是 `status` 表示成功：`status` 在这套接口里已经被
+ * 「HTTP 状态码 / unsupported」占用了。
+ */
+export function executionStateFrom(payload) {
+  if (!payload || typeof payload !== "object") return errorState("missing_payload");
+  if (payload.unauthenticated === true || payload.status === 401) {
+    return { status: "unauthenticated", reason: "unauthenticated" };
+  }
+  if (payload.unavailable === true) return errorState("unavailable");
+  const tasks = Array.isArray(payload.tasks) ? payload.tasks : null;
+  const runs = Array.isArray(payload.runs) ? payload.runs : null;
+  const deliveries = Array.isArray(payload.deliveries) ? payload.deliveries : null;
+  if (!tasks || !runs || !deliveries) return errorState("invalid_payload");
+  return { status: "ok", tasks, runs, deliveries };
+}
+
 /** 统一入口：视图 id → 对应状态；任务视图需要快照，其余需要列表载荷。 */
 export function stateForKind(kind, payload, options = {}) {
   switch (kind) {
@@ -114,6 +137,7 @@ export function stateForKind(kind, payload, options = {}) {
     case "analytics": return analyticsStateFrom(payload);
     case "projects": return projectsStateFrom(payload);
     case "settings": return settingsStateFrom(payload, options);
+    case "execution": return executionStateFrom(payload);
     default: return errorState("unknown_kind");
   }
 }

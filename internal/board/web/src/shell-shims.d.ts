@@ -104,4 +104,5 @@ declare module '*/assets/views/*/*-view.mjs' {
   export function renderAnalytics(state: unknown, ctx: unknown): string
   export function renderProjectList(state: unknown, ctx: unknown): string
   export function renderSettings(state: unknown, ctx: unknown): string
+  export function renderExecution(state: unknown, ctx: unknown): string
 }

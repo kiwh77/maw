@@ -16,6 +16,7 @@ import sessionsCSS from '../../assets/views/sessions/sessions.css?inline'
 import analyticsCSS from '../../assets/views/analytics/analytics.css?inline'
 import projectsCSS from '../../assets/views/projects/projects.css?inline'
 import settingsCSS from '../../assets/views/settings/settings.css?inline'
+import executionCSS from '../../assets/views/execution/execution.css?inline'
 import App from './App.vue'
 
 export { Graph } from '@antv/x6'
@@ -41,6 +42,7 @@ export const VNEXT_STYLES = [
   analyticsCSS,
   projectsCSS,
   settingsCSS,
+  executionCSS,
 ].join('\n')
 
 function injectStyles() {

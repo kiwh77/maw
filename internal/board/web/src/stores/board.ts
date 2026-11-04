@@ -99,6 +99,17 @@ const state = reactive({
 
 const sources = createDefaultSources(typeof window !== 'undefined' ? window : null)
 
+/**
+ * 搜索框是本地过滤：接口不认 q 参数，只认 project/agent/status。
+ * 看板与执行视图共用同一条匹配规则，免得同一个关键词在两个页面命中不同行。
+ */
+function matchesSearch(task: unknown, needle: string) {
+  const t = task as Record<string, unknown>
+  return ['display_id', 'instance_id', 'id', 'title', 'owner'].some((key) =>
+    String(t?.[key] ?? '').toLowerCase().includes(needle),
+  )
+}
+
 export const boardStore = {
   registry,
   state: readonly(state),
@@ -296,12 +307,15 @@ export const boardStore = {
         const all = Array.isArray(p.tasks) ? p.tasks : []
         const needle = String(route.search).trim().toLowerCase()
         p.allTasks = all
-        p.tasks = all.filter((task: unknown) => {
-          const t = task as Record<string, unknown>
-          return ['display_id', 'instance_id', 'id', 'title', 'owner'].some((key) =>
-            String(t?.[key] ?? '').toLowerCase().includes(needle),
-          )
-        })
+        p.tasks = all.filter((task: unknown) => matchesSearch(task, needle))
+      }
+      // 执行视图的搜索同样只在本地过滤任务行；运行与交付不参与匹配，
+      // 它们挂在任务上，任务被筛掉后自然不在这一屏。
+      if (kind === 'execution' && payload && typeof payload === 'object' && route.search) {
+        const p = payload as { tasks?: unknown[] }
+        const all = Array.isArray(p.tasks) ? p.tasks : []
+        const needle = String(route.search).trim().toLowerCase()
+        p.tasks = all.filter((task: unknown) => matchesSearch(task, needle))
       }
     } catch {
       payload = { unavailable: true }
