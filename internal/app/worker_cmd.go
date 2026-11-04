@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -775,6 +777,11 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	if err := gitops.AssertWorkingTreeClean(wt); err != nil {
 		return nil, err
 	}
+	// 结构化完成物是**可选**载荷：解析失败必须整次拒绝，不能带病提交。
+	result, err := loadSubmitResult(wt)
+	if err != nil {
+		return nil, err
+	}
 
 	auto := pc.Config.Approvals.Review == "auto"
 	out, err := applyDeliveryCase(pc, deliveryCaseInput{
@@ -788,15 +795,132 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if result != nil {
+		if err := db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+			return recordSubmitResult(tx, pc.ID(), who, taskID, out.DeliveryID, result)
+		}); err != nil {
+			return nil, err
+		}
+	}
 	_, _ = refreshBoard(pc)
 	next := "maw merge --yes"
 	if !auto {
 		next = "maw review --approve " + taskID
 	}
-	return Result{
+	res := Result{
 		"ok": true, "task_id": taskID, "agent": who, "files": out.Files, "status": out.Status,
 		"delivery_id": out.DeliveryID, "strategy": out.Strategy, "project_id": pc.ID(), "next": next,
-	}, nil
+	}
+	if result != nil {
+		res["result_summary"] = result.Summary
+		res["result_artifacts"] = len(result.Artifacts)
+	}
+	return res, nil
+}
+
+// —— 结构化完成物（契约 maw.collaboration.primitives/v1 §3）——
+//
+// 入口有两条，都不改 submit 的既有签名，也不动 CLI：
+//   - 环境变量 MAW_SUBMIT_RESULT：一段 result JSON；
+//   - 工作区文件 .maw/result.json：Agent 收工前写盘。
+//
+// 都没有 = 不带 result，行为与 v1 之前完全一致。
+
+// SubmitResultArtifact 是一条产物声明。
+type SubmitResultArtifact struct {
+	Path string `json:"path"`
+	Kind string `json:"kind,omitempty"`
+	Note string `json:"note,omitempty"`
+}
+
+// SubmitResultCheck 是一条验收勾选。
+type SubmitResultCheck struct {
+	Text     string `json:"text"`
+	OK       bool   `json:"ok"`
+	Evidence string `json:"evidence,omitempty"`
+}
+
+// SubmitResult 是 submit 的可选结构化完成物。
+type SubmitResult struct {
+	Summary          string                 `json:"summary"`
+	Artifacts        []SubmitResultArtifact `json:"artifacts,omitempty"`
+	AcceptanceChecks []SubmitResultCheck    `json:"acceptance_checks,omitempty"`
+}
+
+// MaxResultArtifacts 是产物条数上限（契约 §3：总数 ≤ 64）。
+const MaxResultArtifacts = 64
+
+// loadSubmitResult 读取并校验可选的 result；没有则返回 (nil, nil)。
+func loadSubmitResult(wt string) (*SubmitResult, error) {
+	raw := strings.TrimSpace(os.Getenv("MAW_SUBMIT_RESULT"))
+	source := "MAW_SUBMIT_RESULT"
+	if raw == "" {
+		path := filepath.Join(wt, ".maw", "result.json")
+		b, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, errx.Wrap("读取 result 失败", "检查 .maw/result.json 权限", err)
+		}
+		raw = strings.TrimSpace(string(b))
+		source = ".maw/result.json"
+		if raw == "" {
+			return nil, nil
+		}
+	}
+	var res SubmitResult
+	if err := json.Unmarshal([]byte(raw), &res); err != nil {
+		return nil, &errx.Error{
+			Msg:  "invalid_result: " + source + " 不是合法 JSON: " + err.Error(),
+			Next: "result 形如 {\"summary\":\"...\",\"artifacts\":[{\"path\":\"...\"}],\"acceptance_checks\":[{\"text\":\"...\",\"ok\":true}]}",
+			Code: 1,
+		}
+	}
+	if err := res.validate(); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// validate 按契约字段表逐条校验；不合法整次拒绝（不做部分写入）。
+func (r *SubmitResult) validate() error {
+	if strings.TrimSpace(r.Summary) == "" {
+		return invalidResult("summary 不能为空")
+	}
+	if len(r.Artifacts) > MaxResultArtifacts {
+		return invalidResult("artifacts 超过 " + strconv.Itoa(MaxResultArtifacts) + " 条")
+	}
+	for i, a := range r.Artifacts {
+		if strings.TrimSpace(a.Path) == "" {
+			return invalidResult("artifacts[" + strconv.Itoa(i) + "].path 不能为空")
+		}
+	}
+	for i, c := range r.AcceptanceChecks {
+		if strings.TrimSpace(c.Text) == "" {
+			return invalidResult("acceptance_checks[" + strconv.Itoa(i) + "].text 不能为空")
+		}
+	}
+	r.Summary = strings.TrimSpace(r.Summary)
+	return nil
+}
+
+func invalidResult(msg string) error {
+	return &errx.Error{
+		Msg:  "invalid_result: " + msg,
+		Next: "按契约 collaboration-primitives-contract-v1 §3 修正 result 后重试",
+		Code: 1,
+	}
+}
+
+// recordSubmitResult 把 result 落成一条可查询事件（不改交付与任务状态机）。
+func recordSubmitResult(tx *sql.Tx, projectID, actor, taskID, deliveryID string, res *SubmitResult) error {
+	return db.AppendEvent(tx, projectID, actor, "task_result", taskID, map[string]any{
+		"delivery_id":       deliveryID,
+		"summary":           res.Summary,
+		"artifacts":         res.Artifacts,
+		"acceptance_checks": res.AcceptanceChecks,
+	})
 }
 
 func Review(cwd, taskID string, approve bool, message string) (Result, error) {
