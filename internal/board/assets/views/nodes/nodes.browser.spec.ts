@@ -87,29 +87,30 @@ test.describe("VN-721 节点列表与能力详情", () => {
     const view = await loadView();
     await mount(page, view.renderNodeList({ nodes: [READY_NODE, BLOCKED_NODE] }, { lang: "zh", now: NOW }));
 
-    await expect(page.locator(".table")).toBeVisible();
+    await expect(page.locator(".nodes-grid")).toBeVisible();
+    await expect(page.locator(".nodes-card")).toHaveCount(2);
     // 用精确文案：'不可接任务' 包含 '可接任务'，模糊匹配会撞。
     await expect(page.locator(".badge").filter({ hasText: /^可接任务$/ })).toHaveCSS("color", DARK_OK);
-    // 四维表头都在，不把在线当成唯一判据
-    for (const label of ["在线", "认证", "能力", "容量", "接收"]) {
-      await expect(page.locator(".table th", { hasText: label })).toHaveCount(1);
+    // 卡片上仍展示在线／认证／接收等维度，不把在线当成唯一判据
+    for (const label of ["在线", "已就绪", "接任务", "需要登录"]) {
+      await expect(page.locator(".nodes-card .badge", { hasText: label }).first()).toBeVisible();
     }
     // 不可执行的节点必须写明卡点
-    await expect(page.locator(".table td", { hasText: "认证未就绪" })).toHaveCount(1);
+    await expect(page.locator(".nodes-card__reason", { hasText: "认证未就绪" })).toHaveCount(1);
   });
 
   test("VN-721 浅色主题换用另一套 token，结构不变", async ({ page }) => {
     const view = await loadView();
     await mount(page, view.renderNodeList({ nodes: [READY_NODE] }, { lang: "zh", now: NOW }), "light");
     await expect(page.locator(".badge").filter({ hasText: /^可接任务$/ })).toHaveCSS("color", LIGHT_OK);
-    await expect(page.locator(".table")).toBeVisible();
+    await expect(page.locator(".nodes-grid")).toBeVisible();
   });
 
   test("VN-721 英文界面不撑破布局且不残留中文", async ({ page }) => {
     const view = await loadView();
     await mount(page, view.renderNodeList({ nodes: [READY_NODE, BLOCKED_NODE] }, { lang: "en", now: NOW }));
-    await expect(page.locator(".table")).toBeVisible();
-    await expect(page.locator(".field-hint").first()).toContainText("nodes");
+    await expect(page.locator(".nodes-grid")).toBeVisible();
+    await expect(page.locator(".nodes-toolbar__meta").first()).toContainText("nodes");
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
@@ -117,16 +118,16 @@ test.describe("VN-721 节点列表与能力详情", () => {
     expect(bodyText.replace(/本机 CodeBuddy|备用节点 Trae/g, "")).not.toMatch(/[\u4e00-\u9fa5]/);
   });
 
-  test("VN-721 700px 窄屏无页面级横向滚动，表格在内容区滚动", async ({ page }) => {
+  test("VN-721 700px 窄屏无页面级横向滚动，网格自适应", async ({ page }) => {
     const view = await loadView();
     await page.setViewportSize({ width: 700, height: 900 });
     await mount(page, view.renderNodeList({ nodes: [READY_NODE, BLOCKED_NODE] }, { lang: "zh", now: NOW }));
     const state = await page.evaluate(() => ({
       doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      wrap: getComputedStyle(document.querySelector(".table-wrap")).overflowX,
+      cards: document.querySelectorAll(".nodes-card").length,
     }));
     expect(state.doc).toBeLessThanOrEqual(0);
-    expect(state.wrap).toBe("auto");
+    expect(state.cards).toBe(2);
   });
 
   test("VN-721 详情页不再自带标题头；内容区可键盘聚焦", async ({ page }) => {

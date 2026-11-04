@@ -301,9 +301,19 @@ func (a *API) handleRegisterNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
-	if !requireWriteMethod(w, r, http.MethodPatch) {
-		return
+	switch r.Method {
+	case http.MethodPatch:
+		a.handlePatchNode(w, r)
+	case http.MethodDelete:
+		a.handleRemoveNode(w, r)
+	default:
+		w.Header().Set("Allow", "PATCH, DELETE")
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed",
+			"该写入口只接受 PATCH 或 DELETE", map[string]any{"allow": "PATCH, DELETE"})
 	}
+}
+
+func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 	key, ok := requireIdempotencyKey(w, r)
 	if !ok {
 		return
@@ -336,6 +346,25 @@ func (a *API) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", etag(int64(out.Snapshot.Revision)))
 	writeOK(w, http.StatusOK, map[string]any{
 		"node": out.Snapshot, "idempotent_replay": out.Replay,
+	})
+}
+
+func (a *API) handleRemoveNode(w http.ResponseWriter, r *http.Request) {
+	nodeID := r.PathValue("node_id")
+	if !model.NodeID(nodeID).Valid() {
+		writeErr(w, http.StatusUnprocessableEntity, "invalid_node_id", "node_id 非法", nil)
+		return
+	}
+	if a.Nodes == nil {
+		writeNotWired(w, "节点删除")
+		return
+	}
+	if err := a.Nodes.Remove(r.Context(), model.NodeID(nodeID)); err != nil {
+		mapUseCaseErr(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, map[string]any{
+		"node_id": nodeID, "removed": true,
 	})
 }
 

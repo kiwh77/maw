@@ -732,13 +732,8 @@ export function createShell(options = {}) {
   function applyViewChrome(def, viewState) {
     if (!root) return;
     const kind = def.id;
-    // 快照没带策略时先说明「数值未知」，否则每一行都会被读成「自动模式关闭」。
-    if (kind === "projects" && viewState && viewState.policyKnown === false &&
-      typeof root.insertAdjacentHTML === "function" &&
-      typeof root.querySelector === "function" && !root.querySelector("[data-policy-missing]")) {
-      root.insertAdjacentHTML("afterbegin", noticeHtml("policy_missing",
-        "projects.policy_missing", "projects.policy_missing.hint", t, 'data-policy-missing="1"'));
-    }
+    // 工程清单不再逐行回显策略（快照不带，读不到就不占列），
+    // 策略入口改由视图自己在页首说明，挂载层不再追加「数值未知」提示。
     const wantNotice = REVIEW_KINDS.indexOf(kind) >= 0 || (kind === "settings" && readOnly);
     if (wantNotice && typeof root.insertAdjacentHTML === "function" &&
       typeof root.querySelector === "function" && !root.querySelector("[data-readonly-notice]")) {

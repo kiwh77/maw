@@ -26,6 +26,16 @@ func (h hubDBNodes) UpdateConfig(_ context.Context, req httpresources.NodeWriteR
 	return h.upsert(req, false)
 }
 
+func (h hubDBNodes) Remove(_ context.Context, nodeID model.NodeID) error {
+	id := strings.TrimSpace(string(nodeID))
+	if id == "" {
+		return httpresources.ErrInvalid{Code: "invalid_node_id", Message: "node_id 必填"}
+	}
+	return db.WithTx(h.gdb, func(tx *sql.Tx) error {
+		return db.DeleteNode(tx, id)
+	})
+}
+
 func (h hubDBNodes) upsert(req httpresources.NodeWriteRequest, createOnly bool) (httpresources.NodeWriteResult, error) {
 	reg := req.Registration
 	id := strings.TrimSpace(string(reg.Config.NodeID))
@@ -47,9 +57,17 @@ func (h hubDBNodes) upsert(req httpresources.NodeWriteRequest, createOnly bool) 
 	if reg.Config.EntryPath != "" {
 		meta["entry_path"] = reg.Config.EntryPath
 	}
-	if string(reg.Config.Adapter) != "" {
-		meta["adapter_kind"] = string(reg.Config.Adapter)
+	adapter := strings.TrimSpace(string(reg.Config.Adapter))
+	if adapter != "" {
+		meta["adapter_kind"] = adapter
+	} else {
+		meta["adapter_kind"] = string(model.AdapterLocalCLI)
 	}
+	// 预设 CLI 名写入 flavor，列表可区分 Claude / Codex / 自定义。
+	if flavor := cliFlavorFromID(id, label); flavor != "" {
+		meta["cli_flavor"] = flavor
+	}
+	applyNodeRuntimePrefs(meta, reg)
 	now := time.Now().UTC().Format(time.RFC3339)
 	var created bool
 	err := db.WithTx(h.gdb, func(tx *sql.Tx) error {
@@ -63,9 +81,16 @@ func (h hubDBNodes) upsert(req httpresources.NodeWriteRequest, createOnly bool) 
 		} else {
 			created = existing == nil
 		}
+		createdAt := now
+		if existing != nil && existing.CreatedAt != "" {
+			createdAt = existing.CreatedAt
+			// 更新时保留未在请求中覆盖的旧 meta 键（如 last_probe_at）。
+			meta = mergeNodeMeta(existing.Meta, meta)
+		}
+		ensureNodeRuntimeDefaults(meta)
 		return db.UpsertNode(tx, &db.Node{
 			ID: id, ProjectID: reg.ProjectID, Label: label, SlotLimit: slots,
-			CreatedAt: now, LastSeen: now, Meta: meta,
+			CreatedAt: createdAt, LastSeen: now, Meta: meta,
 		})
 	})
 	if err != nil {
@@ -110,4 +135,69 @@ func argvFromRegistration(reg nodes.Registration) []string {
 		return append(argv, extra...)
 	}
 	return append(argv, raw)
+}
+
+func cliFlavorFromID(id, label string) string {
+	blob := strings.ToLower(strings.TrimSpace(id) + " " + strings.TrimSpace(label))
+	switch {
+	case strings.Contains(blob, "claude"):
+		return "claude"
+	case strings.Contains(blob, "codex"):
+		return "codex"
+	default:
+		return ""
+	}
+}
+
+const (
+	defaultHeartbeatIntervalSec = 60
+	minHeartbeatIntervalSec     = 5
+	maxHeartbeatIntervalSec     = 3600
+)
+
+// applyNodeRuntimePrefs 把登记请求里的探测／模型偏好写入 meta。
+// AutoProbe / HeartbeatIntervalSec 为「零值」时不覆盖已有 meta（留给 merge 后补默认）。
+func applyNodeRuntimePrefs(meta map[string]any, reg nodes.Registration) {
+	if meta == nil {
+		return
+	}
+	if reg.AutoProbe != nil {
+		meta["auto_probe"] = *reg.AutoProbe
+	}
+	if reg.HeartbeatIntervalSec > 0 {
+		interval := reg.HeartbeatIntervalSec
+		if interval < minHeartbeatIntervalSec {
+			interval = minHeartbeatIntervalSec
+		}
+		if interval > maxHeartbeatIntervalSec {
+			interval = maxHeartbeatIntervalSec
+		}
+		meta["heartbeat_interval_sec"] = interval
+	}
+	// 前端登记／编辑都会带 default_model；空串表示未指定或清空。
+	meta["default_model"] = strings.TrimSpace(reg.DefaultModel)
+}
+
+// ensureNodeRuntimeDefaults 在 merge 之后补齐探测默认值。
+func ensureNodeRuntimeDefaults(meta map[string]any) {
+	if meta == nil {
+		return
+	}
+	if _, ok := meta["auto_probe"]; !ok {
+		meta["auto_probe"] = true
+	}
+	if metaInt(meta, "heartbeat_interval_sec") <= 0 {
+		meta["heartbeat_interval_sec"] = defaultHeartbeatIntervalSec
+	}
+}
+
+func mergeNodeMeta(old, next map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range old {
+		out[k] = v
+	}
+	for k, v := range next {
+		out[k] = v
+	}
+	return out
 }

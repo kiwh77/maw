@@ -340,6 +340,133 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
      * 返回结构而不是抛异常：界面要按 code 分辨「现场还在」与「会话过期」，
      * 这两种都不能被渲染成同一句「删除了」。
      */
+    /**
+     * 登记节点（POST /api/v1/projects/{id}/nodes）。
+     * body 走契约 Registration；argv 由 entry_path + profile_ref 拼出。
+     */
+    async registerNode(
+      projectId: string,
+      input: {
+        id: string
+        name?: string
+        entry: string
+        slots?: number
+        args?: string[]
+        auto_probe?: boolean
+        heartbeat_interval_sec?: number
+        default_model?: string
+      },
+    ): Promise<RemovalOutcome> {
+      const pid = String(projectId || '').trim()
+      const id = String(input?.id || '').trim()
+      const entry = String(input?.entry || '').trim()
+      if (!pid) return { ok: false, status: 0, code: 'invalid_project_id' }
+      if (!id) return { ok: false, status: 0, code: 'invalid_node_id' }
+      if (!entry) return { ok: false, status: 0, code: 'invalid_entry_path' }
+      if (!doFetch) return { ok: false, status: 0, code: 'network_error' }
+      const authed = await ensureSession()
+      if (!authed) return { ok: false, status: 401, code: 'unauthenticated', unauthenticated: true }
+      const csrf = readCookie(win, CSRF_COOKIE)
+      if (!csrf) return { ok: false, status: 403, code: 'csrf_failed' }
+      const slots = Number(input?.slots) > 0 ? Number(input.slots) : 1
+      const args = Array.isArray(input?.args) ? input.args.filter((s) => String(s || '').trim()) : []
+      const interval = Number(input?.heartbeat_interval_sec)
+      const platform =
+        typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '')
+          ? 'darwin'
+          : 'linux'
+      const body = {
+        project_id: pid,
+        auto_probe: input?.auto_probe !== false,
+        heartbeat_interval_sec: interval >= 5 ? Math.min(3600, Math.floor(interval)) : 60,
+        default_model: String(input?.default_model || '').trim(),
+        config: {
+          node_id: id,
+          name: String(input?.name || id).trim() || id,
+          adapter_kind: 'local_cli',
+          entry_path: entry,
+          profile_ref: JSON.stringify(args),
+          mode: 'managed_cli',
+          platform,
+          slot_limit: slots,
+          accept_new: true,
+        },
+      }
+      const idem =
+        'node-reg-' + id + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
+      let res: Response
+      try {
+        res = await doFetch('/api/v1/projects/' + encodeURIComponent(pid) + '/nodes', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrf,
+            'Idempotency-Key': idem.slice(0, 128),
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify(body),
+        })
+      } catch {
+        return { ok: false, status: 0, code: 'network_error' }
+      }
+      let payload: Record<string, unknown> = {}
+      try {
+        payload = (await res.json()) as Record<string, unknown>
+      } catch {
+        payload = {}
+      }
+      if (!res.ok) {
+        const detail = (payload?.error || null) as { code?: string; message?: string } | null
+        return {
+          ok: false,
+          status: res.status,
+          code: detail?.code,
+          message: detail?.message,
+          unauthenticated: res.status === 401,
+        }
+      }
+      return { ok: true, status: res.status }
+    },
+
+    /** 删除节点登记（DELETE /api/v1/nodes/{id}）。 */
+    async removeNode(nodeId: string): Promise<RemovalOutcome> {
+      const id = String(nodeId || '').trim()
+      if (!id) return { ok: false, status: 0, code: 'invalid_node_id' }
+      if (!doFetch) return { ok: false, status: 0, code: 'network_error' }
+      const authed = await ensureSession()
+      if (!authed) return { ok: false, status: 401, code: 'unauthenticated', unauthenticated: true }
+      const csrf = readCookie(win, CSRF_COOKIE)
+      if (!csrf) return { ok: false, status: 403, code: 'csrf_failed' }
+      let res: Response
+      try {
+        res = await doFetch('/api/v1/nodes/' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: { Accept: 'application/json', 'X-CSRF-Token': csrf },
+          credentials: 'same-origin',
+        })
+      } catch {
+        return { ok: false, status: 0, code: 'network_error' }
+      }
+      let payload: Record<string, unknown> = {}
+      try {
+        payload = (await res.json()) as Record<string, unknown>
+      } catch {
+        payload = {}
+      }
+      if (!res.ok) {
+        const detail = (payload?.error || null) as { code?: string; message?: string } | null
+        return {
+          ok: false,
+          status: res.status,
+          code: detail?.code,
+          message: detail?.message,
+          unauthenticated: res.status === 401,
+        }
+      }
+      return { ok: true, status: res.status }
+    },
+
     async updateProject(
       projectId: string,
       patch: Record<string, unknown>,

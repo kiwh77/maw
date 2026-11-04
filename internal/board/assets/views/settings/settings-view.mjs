@@ -21,9 +21,12 @@
 //   3. 本页不出现秘密字段。令牌、密钥这类东西只能在 CLI／本机凭据库管理，
 //      表单里出现一个 password 输入框就等于把凭据写进页面状态。
 //
-// 分区（EV-002 / F57）：受管执行 → 节点接入与容量 → 采集与保留 → 外观 → 系统 Agent 状态。
-// 前三个是可改的字段区，后两个是只读声明区。外观与 Agent 状态**故意没有控件**：
-// 主题／语言在顶栏（#theme-select / #lang-select），节点清单在 ?view=nodes，
+// 分区（EV-002 / F47 / F57）：F57 要求把「节点接入与容量、主题、语言、超时与重试、
+// 通知、采集与保留」收敛到单一设置页。这里按「能不能改」分成两段：
+//   字段区（managed / nodes / retention）：在表单内，有写入口时才是可编辑字段；
+//   声明区（retries / notifications / appearance / agents）：在表单外，只读。
+// 声明区**故意没有控件**：主题／语言在顶栏（#theme-select / #lang-select），
+// 节点清单在 ?view=nodes，超时与通知阈值在 config.toml 与服务端策略里。
 // 复制一份到本页只会多出第二个真相。每个分区都用「入口／归属／边界」三行说清
 // 这件事在哪儿改、谁说了算、本页不做什么。
 
@@ -64,20 +67,24 @@ export const BOUNDS = Object.freeze({
 const SECRET_KEY = /(token|secret|password|passwd|pat|api[-_]?key|credential)/i;
 
 /**
- * 设置页的分区（EV-002 / F57）。
+ * 设置页的分区（EV-002 / F47 / F57）。
  *
- * 需求要的是「节点接入与容量、主题、语言收进设置页」，但收的不是控件：
- * 主题与语言仍由顶栏持有（`#theme-select` / `#lang-select`），节点清单仍由
- * `?view=nodes` 持有。设置页收敛的是**入口声明**——每个分区说清三件事：
- * 入口在哪、谁说了算、本页不做什么。照抄一套开关会让两处状态各走各的，
- * 比入口分散更难查。
+ * F57 点名六类：节点接入与容量、主题、语言、超时与重试、通知、采集与保留。
+ * 收敛的是**入口声明**而不是控件：主题与语言仍由顶栏持有（`#theme-select` /
+ * `#lang-select`），节点清单仍由 `?view=nodes` 持有，超时与通知阈值在 config.toml
+ * 与服务端策略里。每个分区说清三件事：入口在哪、谁说了算、本页不做什么。
+ * 照抄一套开关会让两处状态各走各的，比入口分散更难查。
  *
- * 顺序即阅读顺序：先放改得到的策略与字段，再放只读声明。
+ * 顺序即阅读顺序：先放表单里的字段区，再放表单外的只读声明区。
+ * `retries` 与 `notifications` 是 F57 里此前一直没有落地的两块，
+ * 它们的文案入口必须指向真实位置（见各分区的 entry 行），不能只写「在别处配置」。
  */
 export const SETTINGS_SECTIONS = Object.freeze([
   "managed",
   "nodes",
   "retention",
+  "retries",
+  "notifications",
   "appearance",
   "agents",
 ]);
@@ -89,6 +96,9 @@ const I18N = {
   zh: {
     "settings.title": "工程策略与保留",
     "settings.subtitle": "自动模式、计算上限、节点容量、参考值分开看；它们不是同一个数。",
+    "settings.table.caption": "当前生效值（来自 /api/runtime 的只读快照）；下表与下方字段区读的是同一份服务端值。",
+    "settings.form.caption.readonly": "字段区：下面是服务端回显的当前值，只作展示，不提交。",
+    "settings.form.caption.editable": "字段区：改动后点保存，请求会带上当前 revision。",
     "settings.loading": "正在读取设置…",
     "settings.error": "设置加载失败。",
     "settings.error.hint": "确认本机中枢在运行，然后重试。",
@@ -144,14 +154,24 @@ const I18N = {
     "section.managed.boundary": "改的是策略值，不代替节点就绪检查：节点没就绪时自动模式也派不出去。",
     "section.nodes": "节点接入与容量",
     "section.nodes.desc": "节点是全机可调度的执行实例（含通用 local_cli）；Agent 是工程内工作者身份。系统节点（worker_node / llm_node）用于拆题与阻塞自愈。",
-    "section.nodes.entry": "节点清单在侧栏设置组「节点」（?view=nodes）；登记用 maw node register；系统节点用 maw project set --worker-node",
+    "section.nodes.entry": "节点清单在侧栏设置组「节点」（?view=nodes）；页内可加入 Claude／Codex 或自定义 CLI；也可用 maw node register；系统节点用 maw project set --worker-node",
     "section.nodes.owner": "节点登记写入本机 nodes 表；allowed_nodes 写在工程 config.toml [managed]",
-    "section.nodes.boundary": "本分区只声明入口与归属；具体登记/删除在节点页与 CLI。",
+    "section.nodes.boundary": "本设置页没有节点登记写接口：只声明入口与归属，具体登记／删除在节点页与 CLI。",
     "section.retention": "采集与保留",
     "section.retention.desc": "观测与事件明细保留多久、每个任务留几次运行记录。",
     "section.retention.entry": "本页「采集与保留」分区",
     "section.retention.owner": "中枢维护任务按天清理，不靠手工删库",
     "section.retention.boundary": "清理不可回滚：调小之前先确认历史还要不要复盘。",
+    "section.retries": "超时与重试",
+    "section.retries.desc": "门禁超时、锁心跳与失败重试是三件不同量级的事，不是一个「超时」开关。",
+    "section.retries.entry": "工程 config.toml 的 [gates] timeout_sec 与 [locks] heartbeat_ttl_sec；重试节奏由 reconcile.DefaultRetryPolicy 给出（最多 3 次，1 秒起、封顶 1 分钟）",
+    "section.retries.owner": "中枢运行时：门禁在 runner 执行，心跳由 worker 上报，重试由 reconcile 判定",
+    "section.retries.boundary": "本页不提供阈值写接口：改 config.toml 后要重启中枢，再用 maw status 核对当前值。",
+    "section.notifications": "通知与提醒",
+    "section.notifications.desc": "等待、阻塞、失败和关键交付变化会生成站内／桌面提醒；确认与去重由中枢记录。",
+    "section.notifications.entry": "提醒清单在 GET /api/v1/projects/{id}/notifications，确认走同一路径的 /acks；投递规则见 internal/notifications.DefaultPolicy",
+    "section.notifications.owner": "中枢 notifications 表；规则、去重窗口与保留期是服务端策略，不在浏览器",
+    "section.notifications.boundary": "本页不配置推送渠道，也不代你确认提醒；改规则要动服务端配置。",
     "section.appearance": "外观",
     "section.appearance.desc": "主题与语言跟随机主界面走，本页只声明入口，不再摆一套重复的开关。",
     "section.appearance.entry": "顶栏右侧：主题 #theme-select、语言 #lang-select",
@@ -185,6 +205,9 @@ const I18N = {
   en: {
     "settings.title": "Execution policy & retention",
     "settings.subtitle": "Auto mode, execution limit, node capacity and the reference value are different things.",
+    "settings.table.caption": "Effective values (a read-only snapshot from /api/runtime); the table and the field area below read the same server payload.",
+    "settings.form.caption.readonly": "Field area: values below are echoed by the server for display only; nothing is submitted.",
+    "settings.form.caption.editable": "Field area: saving sends the current revision with the request.",
     "settings.loading": "Loading settings…",
     "settings.error": "Failed to load settings.",
     "settings.error.hint": "Check that the local hub is running, then retry.",
@@ -240,14 +263,24 @@ const I18N = {
     "section.managed.boundary": "This changes policy values only; it does not replace node readiness checks.",
     "section.nodes": "Nodes & capacity",
     "section.nodes.desc": "A node is a machine-wide execution instance (including generic local_cli); an agent is a project-scoped worker. System nodes (worker_node / llm_node) handle splits and unblock assist.",
-    "section.nodes.entry": "Node list is under Settings → Nodes (?view=nodes); register with maw node register; set system nodes via maw project set --worker-node",
+    "section.nodes.entry": "Node list is under Settings → Nodes (?view=nodes); add Claude/Codex or a custom CLI on the page, or use maw node register; set system nodes via maw project set --worker-node",
     "section.nodes.owner": "Registration writes the hub nodes table; allowed_nodes lives in project config.toml [managed]",
-    "section.nodes.boundary": "This section only declares entry points; register/remove happens on the Nodes page and CLI.",
+    "section.nodes.boundary": "This settings page has no node registration write endpoint: it declares entry points only; register/remove happens on the Nodes page and through the CLI.",
     "section.retention": "Collection & retention",
     "section.retention.desc": "How long observability and event detail is kept, and how many run records each task keeps.",
     "section.retention.entry": "The collection and retention section on this page",
     "section.retention.owner": "Hub maintenance prunes by day; nobody deletes rows by hand",
     "section.retention.boundary": "Pruning is not reversible: confirm the history is still needed before lowering it.",
+    "section.retries": "Timeouts & retries",
+    "section.retries.desc": "Gate timeout, lock heartbeat and failed-run retries are three different scales, not one timeout switch.",
+    "section.retries.entry": "Project config.toml: [gates] timeout_sec and [locks] heartbeat_ttl_sec; retry pacing comes from reconcile.DefaultRetryPolicy (at most 3 attempts, 1s start, 1m cap)",
+    "section.retries.owner": "Hub runtime: gates run in the runner, heartbeats are reported by workers, retries are decided by reconcile",
+    "section.retries.boundary": "This page exposes no threshold write endpoint: edit config.toml, restart the hub, then confirm with maw status.",
+    "section.notifications": "Notifications & reminders",
+    "section.notifications.desc": "Waiting, blocked, failed and key delivery changes raise in-app / desktop reminders; the hub records acknowledgement and deduplication.",
+    "section.notifications.entry": "Reminders: GET /api/v1/projects/{id}/notifications, acknowledge via /acks on the same path; delivery rules live in internal/notifications.DefaultPolicy",
+    "section.notifications.owner": "The hub notifications table; rules, dedup window and retention are server-side policy, not browser settings",
+    "section.notifications.boundary": "This page configures no delivery channel and does not acknowledge reminders for you; changing rules is a server-side config edit.",
     "section.appearance": "Appearance",
     "section.appearance.desc": "Theme and language follow the main shell; this page only declares where they live.",
     "section.appearance.entry": "Top bar, right side: theme #theme-select, language #lang-select",
@@ -526,7 +559,10 @@ function conceptTable(lang, policy, mode, reasonKey) {
     '<td class="num">' + row.value + "</td>" +
     '<td class="note">' + esc(row.note) + "</td>" +
     "</tr>").join("");
-  return '<table class="table"><caption class="field-hint">' + esc(t("settings.subtitle", lang)) + "</caption>" +
+  // 概念表是「当前生效值」的只读快照，不是第二份可改的表单。caption 明说这一点，
+  // 免得读者把表里的值和下方字段区的值当成两个来源。
+  const caption = esc(t("settings.table.caption", lang)) + " " + esc(t("settings.subtitle", lang));
+  return '<table class="table settings-current"><caption class="field-hint">' + caption + "</caption>" +
     "<thead><tr><th>" + esc(t("col.item", lang)) + "</th><th>" + esc(t("col.value", lang)) +
     "</th><th>" + esc(t("col.note", lang)) + "</th></tr></thead><tbody>" + body + "</tbody></table>";
 }
@@ -655,7 +691,8 @@ export function renderSettings(state = {}, options = {}) {
     "</fieldset>";
 
   // 分区顺序即 Tab 顺序：上限 → 容量 → 保留天数 → 保留运行数 → 保存。
-  // 只读声明区（外观／系统 Agent）不产生可聚焦元素，排在其后不影响键盘路径。
+  // 表单外的四个只读声明区（超时与重试／通知／外观／系统 Agent）不产生可聚焦元素，
+  // 排在其后不影响键盘路径。
   const managedSection = section(lang, "managed", autoFieldset +
     fieldRow(lang, "limit", "field.limit", "field.limit.hint", state.draft?.limit ?? policy.limit, { readonly: !editable }));
   const nodesSection = section(lang, "nodes",
@@ -664,8 +701,14 @@ export function renderSettings(state = {}, options = {}) {
     fieldRow(lang, "retentionDays", "field.retention", "field.retention.hint", state.draft?.retentionDays ?? policy.retentionDays, { readonly: !editable }) +
     fieldRow(lang, "retentionRuns", "field.retention_runs", "field.retention_runs.hint", state.draft?.retentionRuns ?? policy.retentionRuns, { readonly: !editable }));
 
+  // 只读是一等状态，不是「把输入框灰掉」：表单自己声明 data-readonly，
+  // 顶部说明它会展示什么、会不会提交，样式再按契约用 --muted 呈现为值。
+  // 输入框仍带 readonly／disabled（浏览器用例 D-04 依赖），但不再是唯一的只读信号。
+  const formCaptionKey = editable ? "settings.form.caption.editable" : "settings.form.caption.readonly";
   const form = '<form class="settings-form" data-revision="' + esc(policy.revision ?? "") +
-    '" data-editable="' + (editable ? "1" : "0") + '" onsubmit="return false" novalidate>' +
+    '" data-editable="' + (editable ? "1" : "0") + '"' +
+    (editable ? "" : ' data-readonly="1"') + ' onsubmit="return false" novalidate>' +
+    '<p class="settings-form__caption field-hint" data-form-caption="1">' + esc(t(formCaptionKey, lang)) + "</p>" +
     managedSection + nodesSection + retentionSection +
     '<p class="field-hint" data-no-secret="1">' + esc(t("notice.no_secret", lang)) + "</p>" +
     (editable ? "" : '<p class="field-hint" data-readonly-reason="1">' + esc(t("settings.readonly.hint", lang)) + "</p>") +
@@ -682,12 +725,14 @@ export function renderSettings(state = {}, options = {}) {
       : "") +
     "</div></form>";
 
-  // 外观与系统 Agent 只声明入口，不放控件：主题／语言在顶栏，Agent 状态由心跳上报。
+  // 表单外的四个分区只声明入口，不放控件：阈值在 config.toml，提醒规则在服务端，
+  // 主题／语言在顶栏，Agent 状态由心跳上报。
   const agents = systemAgentsOf(state);
   const agentsBody = systemAgentBlock(lang, policy) + (agents
     ? agentsTable(lang, agents)
     : '<p class="field-hint" data-agents-unknown="1">' + esc(t("section.agents.unknown", lang)) + "</p>");
 
   return saveStatus + conceptTable(lang, policy, mode, reasonKey) + form +
+    section(lang, "retries", "") + section(lang, "notifications", "") +
     section(lang, "appearance", "") + section(lang, "agents", agentsBody);
 }

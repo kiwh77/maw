@@ -18,3 +18,5 @@
 - **No parallel slot block (0.3.6)**: `maw next` is not refused for `max_parallel`; write-scope overlap still serializes; `max_parallel` is board reference only
 
 Authoritative product spec is design doc v0.2; multi-project is the 0.3.x increment.
+
+External note (zh): transferable ideas from DeepSeek Harness Agent Teams — [maw_from_deepseek_agent_teams.zh-CN.md](maw_from_deepseek_agent_teams.zh-CN.md).

@@ -16,3 +16,5 @@
 - **派活不卡槽（0.3.6）**：`maw next` 不再因 `max_parallel` 拒绝领取；Agent 来拉且存在可激活 ready 即派活。写盘重叠仍串行；`max_parallel` 仅看板参考
 
 权威产品规格为设计文档 v0.2；多工程为 0.3.x 增量。
+
+外部对照：DeepSeek Harness「智能团队」可借鉴点与不采纳项见 [maw_from_deepseek_agent_teams.zh-CN.md](../maw_from_deepseek_agent_teams.zh-CN.md)。

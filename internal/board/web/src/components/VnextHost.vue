@@ -88,6 +88,9 @@ const listHtml = computed(() => {
     // 视图不猜自己有没有写通道：由宿主显式声明，静态导出页自然拿不到按钮。
     canRemove: !board.state.readOnly,
     pendingRemove: board.state.removePending,
+    pendingNodeRemove: board.state.pendingNodeRemove,
+    nodeFormPreset: board.state.nodeFormPreset,
+    nodeNotice: board.state.removeNotice,
     removeNotice: board.state.removeNotice,
     filters: {
       project: board.state.route.project,
@@ -182,6 +185,37 @@ function onListClick(event: MouseEvent) {
     return
   }
 
+  if (props.viewId === 'nodes') {
+    if (target?.closest?.('[data-node-open-create]')) {
+      board.openCreateNodeModal('custom')
+      return
+    }
+    const editNode = target?.closest?.('[data-node-edit]') as HTMLElement | null
+    if (editNode?.dataset.nodeEdit) {
+      const viewState = board.state.viewStates.nodes as { nodes?: Array<Record<string, unknown>> } | undefined
+      const payload = board.state.payloads.nodes as { nodes?: Array<Record<string, unknown>> } | undefined
+      const list = viewState?.nodes || payload?.nodes || []
+      const row = list.find((n) => String(n.id || n.node_id || '') === editNode.dataset.nodeEdit)
+      if (row) board.openEditNodeModal(row)
+      return
+    }
+    const askNode = target?.closest?.('[data-node-remove]') as HTMLElement | null
+    if (askNode?.dataset.nodeRemove) {
+      board.requestRemoveNode(askNode.dataset.nodeRemove)
+      return
+    }
+    const confirmNode = target?.closest?.('[data-node-remove-confirm]') as HTMLElement | null
+    if (confirmNode?.dataset.nodeRemoveConfirm) {
+      void board.removeNode(confirmNode.dataset.nodeRemoveConfirm)
+      return
+    }
+    const cancelNode = target?.closest?.('[data-node-remove-cancel]') as HTMLElement | null
+    if (cancelNode) {
+      board.cancelRemoveNode()
+      return
+    }
+  }
+
   const edit = target?.closest?.('[data-project-edit]') as HTMLElement | null
   if (edit?.dataset.projectEdit) {
     void board.editProject(edit.dataset.projectEdit)
@@ -223,6 +257,7 @@ function onListClick(event: MouseEvent) {
   const row = target?.closest?.('tr[data-detail-id]') as HTMLElement | null
   if (row?.dataset.detailId) board.openDetail(row.dataset.detailId)
 }
+
 </script>
 
 <template>

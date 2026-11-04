@@ -86,6 +86,9 @@ func NodeRegister(cwd string, in NodeRegisterInput) (Result, error) {
 		}
 	}
 	meta := localCLINodeMeta(argv, in.System)
+	if flavor := cliFlavorFromID(id, label); flavor != "" {
+		meta["cli_flavor"] = flavor
+	}
 	if in.DryRun {
 		return Result{
 			"ok": true, "dry_run": true, "node_id": id, "label": label,
@@ -143,7 +146,8 @@ func localCLINodeMeta(argv []string, system bool) map[string]any {
 		"adapter_kind":     "local_cli",
 		"accept_new":       true,
 		"entry_state":      "ready",
-		"auth_state":       "ok",
+		// 看板四维认证态认 ready／needs-*／unknown；ok 会被当成 unknown。
+		"auth_state":       "ready",
 		"connection_state": "fresh",
 		"capacity_state":   "available",
 		"observed_at":      now,

@@ -7,6 +7,7 @@ import AppChrome from './components/AppChrome.vue'
 import ProjectSelect from './components/ProjectSelect.vue'
 import VnextHost from './components/VnextHost.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
+import NodeEditorModal from './components/NodeEditorModal.vue'
 import JoinPromptButton from './components/JoinPromptButton.vue'
 import BoardView from './views/BoardView.vue'
 import FactoryView from './views/FactoryView.vue'
@@ -142,5 +143,6 @@ const themeValue = readTheme()
       </div>
     </main>
     <TaskDrawer />
+    <NodeEditorModal />
   </div>
 </template>

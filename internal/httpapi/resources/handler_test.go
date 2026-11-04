@@ -98,6 +98,16 @@ func (f *fakeNodes) Register(_ context.Context, req resources.NodeWriteRequest) 
 	return out, nil
 }
 
+func (f *fakeNodes) Remove(_ context.Context, nodeID model.NodeID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.nodes[nodeID]; !ok {
+		return nodes.ErrNotFound
+	}
+	delete(f.nodes, nodeID)
+	return nil
+}
+
 func (f *fakeNodes) UpdateConfig(_ context.Context, req resources.NodeWriteRequest) (resources.NodeWriteResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -1,0 +1,240 @@
+/* 执行节点：工具栏 + 卡片网格；编辑走模态框，不在列表内嵌表单。 */
+
+.nodes-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-block, 16px);
+  margin-bottom: var(--space-block, 16px);
+  flex-wrap: wrap;
+}
+
+.nodes-toolbar__copy h2 {
+  margin: 0 0 4px;
+  font-size: var(--font-title, 20px);
+  color: var(--text);
+}
+
+.nodes-toolbar__meta {
+  margin: 0;
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+}
+
+.nodes-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-block, 16px);
+}
+
+.nodes-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  min-height: 148px;
+}
+
+.nodes-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nodes-card__title {
+  margin: 0;
+  font-size: var(--font-body, 14px);
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.nodes-card__id {
+  margin: 2px 0 0;
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.nodes-card__dims {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.nodes-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.nodes-card__prefs {
+  margin: 0;
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.nodes-card__reason {
+  margin: 0;
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.nodes-modal__check {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.nodes-modal__check input[type="checkbox"] {
+  margin-top: 3px;
+}
+
+.nodes-modal__check .field-hint {
+  display: block;
+  margin-top: 2px;
+}
+
+.nodes-card__actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.nodes-card__btn {
+  padding: 2px 8px;
+  font-size: var(--font-meta, 12px);
+  font-family: var(--sans, sans-serif);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  cursor: pointer;
+}
+
+.nodes-card__btn:hover,
+.nodes-card__btn:focus-visible {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+.nodes-card__btn--danger:hover,
+.nodes-card__btn--danger:focus-visible {
+  color: var(--danger, #c44);
+  border-color: var(--danger, #c44);
+}
+
+.nodes-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ---------- 模态框 ---------- */
+
+.nodes-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: color-mix(in srgb, var(--bg, #0b0d10) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.nodes-modal {
+  position: fixed;
+  z-index: 81;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 0;
+  background: var(--panel, #14181e);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius, 6px) + 2px);
+  box-shadow: 0 16px 48px color-mix(in srgb, #000 35%, transparent);
+}
+
+.nodes-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.nodes-modal__head h2 {
+  margin: 0;
+  font-size: var(--font-title, 18px);
+  color: var(--text);
+}
+
+.nodes-modal__close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: var(--radius, 6px);
+}
+
+.nodes-modal__close:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.nodes-modal__body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nodes-modal__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nodes-modal__presets .button.is-active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.nodes-modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.nodes-modal .field {
+  margin-bottom: 0;
+}
+
+.nodes-modal .input {
+  width: 100%;
+  box-sizing: border-box;
+}

@@ -29,7 +29,12 @@ Package the same board as `maw board --serve` into a desktop shell with tray not
 
 Distinct copy and sounds per event type (progress / blocked / merged); multi-display window memory.
 
+### Collaboration primitives (borrowed from DeepSeek Agent Teams)
+
+Adopt trusted multi-agent collaboration primitives from session-local Agent Teams — **not** a Harness task-board bridge, and do **not** weaken worktrees / enforced `write_scope`. Priority: task-update CAS, typed status messages, structured submit results, stalled vs idle with occupancy expiry. Decision note (zh): [maw_from_deepseek_agent_teams.zh-CN.md](maw_from_deepseek_agent_teams.zh-CN.md).
+
 ## Non-goals (near term)
 
 - Cloud multi-machine collaboration and accounts
 - Replacing each IDE’s built-in agent runtime
+- Natively ingesting DeepSeek Harness Agent Teams task boards (no cross-process coordination protocol)

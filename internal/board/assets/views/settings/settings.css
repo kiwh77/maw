@@ -120,6 +120,41 @@
   margin-top: var(--space-block, 16px);
 }
 
+/* 概念表是「当前生效值」快照，字段区是「可改／当前只读」的字段。
+   两块读同一份服务端值，靠标题与分隔把职责分开，不让人读成两份配置。 */
+.settings-current caption {
+  text-align: left;
+  margin-bottom: var(--space-tight, 8px);
+}
+
+.settings-form__caption {
+  margin: 0 0 var(--space-block, 16px);
+  padding-bottom: var(--space-tight, 8px);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 只读是一等状态（WORKBENCH_UI_CONTRACT §7）：共享组件已把 readonly 输入
+   的文字／底色改成 muted，这里再去掉边框与控件高度，让它读起来是「一段带标签的
+   当前值」，而不是一个被灰掉、看着还能点的输入框。值仍留在 input 里（浏览器
+   用例要核对回填），保存按钮与只读说明负责讲清「不能写」。 */
+.settings-form[data-readonly="1"] .input[readonly] {
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+  opacity: 1;
+  cursor: default;
+}
+
+.settings-form[data-readonly="1"] .input[readonly]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* 窄屏：输入框铺满，动作按钮不断字，说明链改成上下两行。 */
 @media (max-width: 720px) {
   .settings-form,

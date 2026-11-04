@@ -29,7 +29,12 @@ maw 定位为本机多 Agent **任务中枢**。下列为已交付与规划能�
 
 按事件类型（progress / blocked / merged）区分通知文案与声音；多显示器窗口记忆。
 
+### 协作原语（借鉴 DeepSeek Agent Teams）
+
+吸收会话内 Team 的可信协作原语，**不**对接 Harness 任务板、不弱化 worktree/`write_scope`。优先：任务变更 CAS、分型消息、结构化 submit 结果、stalled/idle 与超时释放。决议与拆包草案见 [maw_from_deepseek_agent_teams.zh-CN.md](maw_from_deepseek_agent_teams.zh-CN.md)。
+
 ## 非目标（近期）
 
 - 云端多机协作与账号体系
 - 替代各 IDE 内置 Agent 运行时
+- 原生接收 DeepSeek Harness「智能团队」任务（无跨进程协调协议）

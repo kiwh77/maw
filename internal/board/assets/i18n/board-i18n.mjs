@@ -67,7 +67,7 @@ export const DICTIONARY = Object.freeze({
     "desc.analytics": "Every figure carries its unit and coverage; unknown components are never counted as zero.",
     "desc.problems": "Blocked tasks, expired agents, reconciliation issues and failed system jobs — signals for improving maw.",
     "desc.logs": "Recent hub events and run phase history for diagnosing and tuning the runtime.",
-    "desc.projects": "Registered projects in this hub; auto execution and capacity are shown separately.",
+    "desc.projects": "Projects registered in this hub: tasks, main branch, last activity and path. Execution policy lives in each project's config.toml.",
     "desc.settings": "Managed execution policy comes from hub config; the hub build decides whether this page can write.",
     "desc.execution": "Tasks, runs and deliveries grouped by iteration; click a task row for the drawer.",
     "eyebrow.board": "OPERATIONS / BOARD",
@@ -108,8 +108,6 @@ export const DICTIONARY = Object.freeze({
     "settings.readonly": "This hub build exposes no write path for policy.",
     "settings.readonly.hint": "Values below are the effective config read from the hub; change them through the CLI or /api/v1, and reload this page afterwards.",
     "settings.source.hub": "Policy source: hub config (unaffected by the project filter).",
-    "projects.policy_missing": "This snapshot carries no per-project execution policy.",
-    "projects.policy_missing.hint": "Values stay blank rather than defaulting to off; open the policy page or query /api/runtime for the effective config.",
   }),
   zh: Object.freeze({
     "nav.workbench": "工作台",
@@ -164,7 +162,7 @@ export const DICTIONARY = Object.freeze({
     "desc.analytics": "每个数字都带单位与覆盖范围；未知分量不会被算成零。",
     "desc.problems": "阻塞任务、过期 Agent、对账异常与失败的系统作业——便于后续优化 maw。",
     "desc.logs": "中枢近期事件与运行阶段历史，用于诊断与调优。",
-    "desc.projects": "本机中枢已登记的工程；自动执行与容量分开呈现。",
+    "desc.projects": "本机中枢已登记的工程：任务、主分支、最近活动与路径；执行策略写在各自 config.toml。",
     "desc.settings": "受管执行策略来自中枢配置；本页能否写入由中枢版本决定。",
     "desc.execution": "按迭代看任务、运行与交付；点任务行打开抽屉。",
     "eyebrow.board": "OPERATIONS / BOARD",
@@ -205,8 +203,6 @@ export const DICTIONARY = Object.freeze({
     "settings.readonly": "当前中枢版本没有开放策略写入入口。",
     "settings.readonly.hint": "下面是中枢回显的生效配置；改动请走 CLI 或 /api/v1，改完刷新本页即可。",
     "settings.source.hub": "策略来源：中枢配置（不受工程筛选影响）。",
-    "projects.policy_missing": "当前快照没有带各工程的执行策略。",
-    "projects.policy_missing.hint": "数值保持为空，不会默认成「关闭」；有效配置请看执行策略页或查询 /api/runtime。",
   }),
 });
 

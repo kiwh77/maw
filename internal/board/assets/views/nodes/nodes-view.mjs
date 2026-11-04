@@ -33,7 +33,7 @@ const I18N = {
     "nodes.title": "执行节点",
     "nodes.subtitle": "在线、认证、能力、容量分开看，四项都成立才接任务。",
     "nodes.empty": "还没有登记任何节点。",
-    "nodes.empty.hint": "先在节点所在机器上完成注册，再回来查看就绪度。",
+    "nodes.empty.hint": "点右上角「新增节点」，或用 maw node register。",
     "nodes.error": "节点列表加载失败。",
     "nodes.error.hint": "确认本机中枢在运行，然后重试。",
     "nodes.expired": "数据已过期。",
@@ -43,6 +43,13 @@ const I18N = {
     "nodes.unauthenticated.hint": "使用本机会话或令牌后重试。",
     "nodes.count": "个节点",
     "nodes.executable": "个可接任务",
+    "nodes.add.open": "新增节点",
+    "nodes.add.readonly": "静态导出页不能登记节点。",
+    "nodes.edit": "编辑",
+    "nodes.remove": "删除",
+    "nodes.remove.confirm": "确认删除？",
+    "nodes.remove.confirm_yes": "确认删除",
+    "nodes.remove.cancel": "取消",
     "dim.presence": "在线",
     "dim.auth": "认证",
     "dim.capability": "能力",
@@ -88,7 +95,7 @@ const I18N = {
     "nodes.title": "Execution nodes",
     "nodes.subtitle": "Presence, auth, capability and capacity are independent; a task needs all four.",
     "nodes.empty": "No nodes registered yet.",
-    "nodes.empty.hint": "Register on the node's machine, then come back for readiness.",
+    "nodes.empty.hint": "Use Add node, or maw node register.",
     "nodes.error": "Failed to load nodes.",
     "nodes.error.hint": "Check that the local hub is running, then retry.",
     "nodes.expired": "Data is out of date.",
@@ -98,6 +105,13 @@ const I18N = {
     "nodes.unauthenticated.hint": "Use a local session or token and retry.",
     "nodes.count": "nodes",
     "nodes.executable": "can take work",
+    "nodes.add.open": "Add node",
+    "nodes.add.readonly": "Static export cannot register nodes.",
+    "nodes.edit": "Edit",
+    "nodes.remove": "Remove",
+    "nodes.remove.confirm": "Remove this node?",
+    "nodes.remove.confirm_yes": "Confirm remove",
+    "nodes.remove.cancel": "Cancel",
     "dim.presence": "Presence",
     "dim.auth": "Auth",
     "dim.capability": "Capability",
@@ -264,58 +278,135 @@ function emptyState(lang, keys) {
     '<p class="empty-state__text">' + esc(t(keys[1], lang)) + "</p></div>";
 }
 
-/** 列表页：加载／空／错误／过期／未认证各走一种明确状态，不互相冒充。 */
+/** Claude / Codex / 自定义登记预设（模态框内选用）。 */
+export const NODE_PRESETS = Object.freeze({
+  claude: { id: "claude", name: "Claude Code", entry: "claude", slots: 1 },
+  codex: { id: "codex", name: "Codex CLI", entry: "codex", slots: 1 },
+  custom: { id: "", name: "", entry: "", slots: 1 },
+});
+
+/** 从节点行推断可编辑草稿（入口路径优先 meta.argv / entry_path）。 */
+export function draftFromNode(node = {}) {
+  const meta = node.meta && typeof node.meta === "object" ? node.meta : {};
+  const argv = Array.isArray(meta.argv) ? meta.argv : [];
+  const entry = String(meta.entry_path || argv[0] || node.entry_path || "").trim();
+  const slots = Number(node.slots?.total ?? node.slot_limit ?? meta.slot_limit ?? 1) || 1;
+  return {
+    id: String(node.id || node.node_id || "").trim(),
+    name: String(node.name || node.label || "").trim(),
+    entry,
+    slots,
+  };
+}
+
+function renderToolbar(lang, options = {}, summary = "") {
+  const readOnly = options.readOnly === true || options.canRemove === false;
+  const notice = options.nodeNotice
+    ? '<p class="nodes-toolbar__meta" data-node-notice="' + esc(options.nodeNotice.kind || "") + '">' +
+      esc(options.nodeNotice.text || "") + "</p>"
+    : "";
+  const addBtn = readOnly
+    ? '<span class="field-hint">' + esc(t("nodes.add.readonly", lang)) + "</span>"
+    : '<button type="button" class="button button--primary" data-node-open-create>' +
+      esc(t("nodes.add.open", lang)) + "</button>";
+  return '<header class="nodes-toolbar">' +
+    '<div class="nodes-toolbar__copy">' +
+    "<h2>" + esc(t("nodes.title", lang)) + "</h2>" +
+    '<p class="nodes-toolbar__meta">' + esc(t("nodes.subtitle", lang)) +
+    (summary ? " · " + esc(summary) : "") + "</p>" +
+    notice +
+    "</div>" +
+    '<div class="nodes-toolbar__actions">' + addBtn + "</div>" +
+    "</header>";
+}
+
+function renderCardActions(nodeId, options, lang) {
+  if (options.readOnly === true || options.canRemove === false) return "";
+  const pending = String(options.pendingNodeRemove || "");
+  if (pending && pending === String(nodeId)) {
+    return '<div class="nodes-confirm">' +
+      '<button type="button" class="nodes-card__btn nodes-card__btn--danger" data-node-remove-confirm="' +
+      esc(nodeId) + '">' + esc(t("nodes.remove.confirm_yes", lang)) + "</button>" +
+      '<button type="button" class="nodes-card__btn" data-node-remove-cancel>' +
+      esc(t("nodes.remove.cancel", lang)) + "</button></div>";
+  }
+  return '<div class="nodes-card__actions">' +
+    '<button type="button" class="nodes-card__btn" data-node-edit="' + esc(nodeId) + '">' +
+    esc(t("nodes.edit", lang)) + "</button>" +
+    '<button type="button" class="nodes-card__btn" data-node-remove="' + esc(nodeId) + '">' +
+    esc(t("nodes.remove", lang)) + "</button></div>";
+}
+
+function renderNodeCard(node, options, lang, now) {
+  const ready = evaluateReadiness(node, { ...options, now });
+  const reason = ready.reasons.length
+    ? t(ready.reasons[0], lang, { state: t("auth." + ready.auth, lang) })
+    : "";
+  const autoProbe = node.auto_probe !== false;
+  const interval = Number(node.heartbeat_interval_sec) >= 5 ? Number(node.heartbeat_interval_sec) : 60;
+  const model = String(node.default_model || "").trim();
+  const prefs = [];
+  prefs.push(autoProbe
+    ? (lang === "en" ? ("heartbeat " + interval + "s") : ("心跳 " + interval + "s"))
+    : (lang === "en" ? "probe off" : "探测关"));
+  if (model) prefs.push((lang === "en" ? "model " : "模型 ") + model);
+  return '<article class="nodes-card" data-node-id="' + esc(node.id) + '">' +
+    '<div class="nodes-card__head">' +
+    "<div><h3 class=\"nodes-card__title\">" + esc(node.name || node.id) + "</h3>" +
+    '<p class="nodes-card__id">' + esc(node.id) +
+    (node.adapter ? " · " + esc(node.adapter) : "") + "</p></div>" +
+    badge(t("verdict." + ready.verdict, lang), VERDICT_BADGE[ready.verdict]) +
+    "</div>" +
+    '<div class="nodes-card__dims">' +
+    badge(t("presence." + ready.presence, lang), presenceBadge(ready.presence)) +
+    badge(t("auth." + ready.auth, lang), authBadge(ready.auth)) +
+    badge(t("intake." + ready.intake, lang), ready.intake === "paused" ? "badge--warn" : "badge--in_review") +
+    '<span class="badge badge--self_check">' + esc(capacityText(node.slots, lang)) + "</span>" +
+    "</div>" +
+    '<p class="nodes-card__prefs">' + esc(prefs.join(" · ")) + "</p>" +
+    '<div class="nodes-card__foot">' +
+    (reason ? '<p class="nodes-card__reason">' + esc(reason) + "</p>" : "<span></span>") +
+    renderCardActions(node.id, options, lang) +
+    "</div></article>";
+}
+
+/** 列表页：工具栏 + 卡片网格；新增／编辑由宿主模态框承接。 */
 export function renderNodeList(state = {}, options = {}) {
   const lang = options.lang === "en" ? "en" : "zh";
 
-  if (state.status === "loading") return '<p class="nodes-loading">' + esc(t("nodes.loading", lang)) + "</p>";
-  if (state.status === "unauthenticated") {
-    return emptyState(lang, ["nodes.unauthenticated", "nodes.unauthenticated.hint"]);
+  if (state.status === "loading") {
+    return renderToolbar(lang, options) +
+      '<p class="nodes-loading">' + esc(t("nodes.loading", lang)) + "</p>";
   }
-  if (state.status === "error") return emptyState(lang, ["nodes.error", "nodes.error.hint"]);
-  if (state.status === "expired") return emptyState(lang, ["nodes.expired", "nodes.expired.hint"]);
+  if (state.status === "unauthenticated") {
+    return renderToolbar(lang, options) +
+      emptyState(lang, ["nodes.unauthenticated", "nodes.unauthenticated.hint"]);
+  }
+  if (state.status === "error") {
+    return renderToolbar(lang, options) + emptyState(lang, ["nodes.error", "nodes.error.hint"]);
+  }
+  if (state.status === "expired") {
+    return renderToolbar(lang, options) + emptyState(lang, ["nodes.expired", "nodes.expired.hint"]);
+  }
 
   const nodes = Array.isArray(state.nodes) ? state.nodes : [];
-
-  if (!nodes.length) {
-    return emptyState(lang, ["nodes.empty", "nodes.empty.hint"]);
-  }
-
   const now = options.now ?? Date.now();
-  const rows = nodes.map(node => {
-    const ready = evaluateReadiness(node, { ...options, now });
-    const reason = ready.reasons.length
-      ? t(ready.reasons[0], lang, { state: t("auth." + ready.auth, lang) })
-      : "";
-    return "<tr>" +
-      '<td class="name">' + esc(node.name || node.id) + "</td>" +
-      '<td class="id">' + esc(node.id) + "</td>" +
-      '<td>' + badge(t("presence." + ready.presence, lang), presenceBadge(ready.presence)) + "</td>" +
-      '<td>' + badge(t("auth." + ready.auth, lang), authBadge(ready.auth)) + "</td>" +
-      '<td>' + esc(capabilityText(node.capability, lang)) + "</td>" +
-      '<td class="num">' + esc(capacityText(node.slots, lang)) + "</td>" +
-      "<td>" + badge(t("intake." + ready.intake, lang), ready.intake === "paused" ? "badge--warn" : "badge--in_review") + "</td>" +
-      "<td>" + badge(t("verdict." + ready.verdict, lang), VERDICT_BADGE[ready.verdict]) +
-        (reason ? '<span class="field-hint"> ' + esc(reason) + "</span>" : "") + "</td>" +
-      "</tr>";
-  }).join("");
-
   const executableCount = nodes.filter(node =>
     evaluateReadiness(node, { ...options, now }).executable
   ).length;
+  const summary = nodes.length
+    ? nodes.length + " " + t("nodes.count", lang) + " · " +
+      executableCount + " " + t("nodes.executable", lang)
+    : "";
 
-  return '<p class="field-hint">' + esc(nodes.length + " " + t("nodes.count", lang)) + " · " +
-    esc(executableCount + " " + t("nodes.executable", lang)) + "</p>" +
-    '<div class="table-wrap"><table class="table"><thead><tr>' +
-    "<th>" + esc(lang === "en" ? "Node" : "节点") + "</th>" +
-    "<th>" + esc(lang === "en" ? "ID" : "编号") + "</th>" +
-    "<th>" + esc(t("dim.presence", lang)) + "</th>" +
-    "<th>" + esc(t("dim.auth", lang)) + "</th>" +
-    "<th>" + esc(t("dim.capability", lang)) + "</th>" +
-    "<th>" + esc(t("dim.capacity", lang)) + "</th>" +
-    "<th>" + esc(t("dim.intake", lang)) + "</th>" +
-    "<th>" + esc(lang === "en" ? "Verdict" : "结论") + "</th>" +
-    "</tr></thead><tbody>" + rows + "</tbody></table></div>";
+  if (!nodes.length) {
+    return renderToolbar(lang, options, summary) +
+      emptyState(lang, ["nodes.empty", "nodes.empty.hint"]);
+  }
+
+  const cards = nodes.map(node => renderNodeCard(node, options, lang, now)).join("");
+  return renderToolbar(lang, options, summary) +
+    '<div class="nodes-grid" role="list">' + cards + "</div>";
 }
 
 function presenceBadge(presence) {

@@ -180,13 +180,18 @@ test("加载／空／错误／过期／未认证各走一种状态，不互相�
   assert.match(outputs.error, /empty-state/);
 });
 
-test("列表行同时给出四维与结论，且复用共享组件类名", async () => {
+test("列表卡片同时给出四维与结论，且复用共享徽标组件", async () => {
   const mod = await load();
   const html = mod.renderNodeList({ nodes: [node()] }, { lang: "zh", now: NOW });
-  assert.match(html, /class="table"/, "复用共享表格组件");
+  // VN-721 起列表由表格改为卡片网格：维度不再是表头，而是每卡四枚徽标。
+  assert.match(html, /class="nodes-grid"/, "节点列表用卡片网格");
+  assert.match(html, /class="nodes-card"/, "每个节点一张卡片");
   assert.match(html, /class="badge badge--done"/, "复用共享徽标组件");
-  for (const key of ["dim.presence", "dim.auth", "dim.capability", "dim.capacity", "dim.intake"]) {
-    assert.ok(html.includes(mod.t(key, "zh")), "缺少维度表头：" + key);
+  const dims = html.match(/<div class="nodes-card__dims">([\s\S]*?)<\/div>/);
+  assert.ok(dims, "四维徽标容器应在");
+  assert.equal((dims[1].match(/class="badge/g) || []).length, 4, "在线／认证／接收／容量四维各一枚徽标");
+  for (const key of ["presence.online", "auth.ready", "intake.open"]) {
+    assert.ok(html.includes(mod.t(key, "zh")), "缺少维度徽标：" + key);
   }
   assert.ok(html.includes(mod.t("verdict.executable", "zh")));
 });

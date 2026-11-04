@@ -663,6 +663,32 @@ test('VN-705 工程清单复用看板快照，并说明快照缺策略而不是�
   assert.equal(context.projectsStateFrom({ projects: [] }).status, 'ok');
 });
 
+test('工程清单的任务计数按工程归组，快照没有任务行时不写 0', async () => {
+  const { context } = await loadReviewModules();
+  const withTasks = context.projectsStateFrom({
+    projects: [{ id: 'p-1', name: 'Alpha' }, { id: 'p-2', name: 'Beta' }],
+    tasks: [
+      { project_id: 'p-1', status: 'ready' },
+      { project_id: 'p-1', status: 'in_progress' },
+      { project_id: 'p-1', status: 'done' },
+      { project_id: 'p-2', status: 'claimed' },
+      { project_id: '', status: 'ready' },
+      { status: 'ready' },
+    ],
+  });
+  assert.deepEqual(withTasks.taskCounts['p-1'], { total: 3, running: 1 });
+  assert.deepEqual(withTasks.taskCounts['p-2'], { total: 1, running: 1 });
+  // 没有 project_id 的行不记到任何工程名下。
+  const totals = Object.values(withTasks.taskCounts).reduce((sum, c) => sum + c.total, 0);
+  assert.equal(totals, 4);
+
+  // 快照根本没有 tasks 字段：不写 taskCounts，视图据此写「任务数未知」。
+  assert.equal('taskCounts' in context.projectsStateFrom({ projects: [{ id: 'p-1' }] }), false);
+  // 有 tasks 但一道都不属于这些工程：仍是「已知」，只是都是 0。
+  const empty = context.projectsStateFrom({ projects: [{ id: 'p-1' }], tasks: [] });
+  assert.deepEqual(empty.taskCounts, {});
+});
+
 test('VN-705 页面骨架留出面包屑范围位，静态导出不引入绝对资源路径', () => {
   const html = fs.readFileSync(__dirname + '/page.html', 'utf8');
   assert.match(html, /id="app"/);

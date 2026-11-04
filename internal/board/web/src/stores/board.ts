@@ -97,6 +97,23 @@ const state = reactive({
   drawer: null as TaskDrawerSel | null,
   /** 正在等第二次确认的工程 id（两段式移除，避免一次误点就删）。 */
   removePending: '',
+  /** 正在等第二次确认的节点 id。 */
+  pendingNodeRemove: '',
+  /** 节点表单预设：claude / codex / custom。 */
+  nodeFormPreset: 'custom' as 'claude' | 'codex' | 'custom',
+  /** 节点新增／编辑模态；关闭时为 null。 */
+  nodeModal: null as null | {
+    mode: 'create' | 'edit'
+    draft: {
+      id: string
+      name: string
+      entry: string
+      slots: number
+      auto_probe: boolean
+      heartbeat_interval_sec: number
+      default_model: string
+    }
+  },
   /** 移除结果提示；kind=error 时界面必须显式红着说，不能静默。 */
   removeNotice: null as { kind: 'ok' | 'error'; text: string } | null,
 })
@@ -230,6 +247,117 @@ export const boardStore = {
     }
     await boardStore.fetchSnapshot()
     await boardStore.loadView('projects')
+  },
+
+  applyNodePreset(preset: 'claude' | 'codex' | 'custom') {
+    state.nodeFormPreset = preset
+    state.removeNotice = null
+  },
+
+  openCreateNodeModal(preset: 'claude' | 'codex' | 'custom' = 'custom') {
+    const base = {
+      slots: 1,
+      auto_probe: true,
+      heartbeat_interval_sec: 60,
+      default_model: '',
+    }
+    const p =
+      preset === 'claude'
+        ? { ...base, id: 'claude', name: 'Claude Code', entry: 'claude', default_model: 'sonnet' }
+        : preset === 'codex'
+          ? { ...base, id: 'codex', name: 'Codex CLI', entry: 'codex', default_model: 'gpt-5' }
+          : { ...base, id: '', name: '', entry: '' }
+    state.nodeFormPreset = preset
+    state.removeNotice = null
+    state.nodeModal = { mode: 'create', draft: p }
+  },
+
+  openEditNodeModal(node: Record<string, unknown>) {
+    const meta = (node.meta && typeof node.meta === 'object' ? node.meta : {}) as Record<string, unknown>
+    const argv = Array.isArray(meta.argv) ? (meta.argv as unknown[]) : []
+    const entry = String(meta.entry_path || argv[0] || node.entry_path || '').trim()
+    const slotsRaw = (node.slots as { total?: number } | undefined)?.total ?? node.slot_limit ?? 1
+    const interval = Number(meta.heartbeat_interval_sec)
+    state.nodeFormPreset = 'custom'
+    state.removeNotice = null
+    state.nodeModal = {
+      mode: 'edit',
+      draft: {
+        id: String(node.id || node.node_id || '').trim(),
+        name: String(node.name || node.label || '').trim(),
+        entry,
+        slots: Number(slotsRaw) > 0 ? Number(slotsRaw) : 1,
+        auto_probe: meta.auto_probe !== false,
+        heartbeat_interval_sec: interval >= 5 ? interval : 60,
+        default_model: String(meta.default_model || '').trim(),
+      },
+    }
+  },
+
+  closeNodeModal() {
+    state.nodeModal = null
+  },
+
+  requestRemoveNode(nodeId: string) {
+    state.pendingNodeRemove = String(nodeId || '').trim()
+    state.removeNotice = null
+  },
+
+  cancelRemoveNode() {
+    state.pendingNodeRemove = ''
+  },
+
+  /** 节点页登记：写入当前工程（或快照首个工程）。 */
+  async registerNode(input: {
+    id: string
+    name?: string
+    entry: string
+    slots?: number
+    auto_probe?: boolean
+    heartbeat_interval_sec?: number
+    default_model?: string
+  }) {
+    const zh = state.lang === 'zh'
+    let projectId = String(state.route.project || '').trim()
+    if (!projectId) {
+      const first = (state.snapshot?.projects || [])[0]
+      projectId = String(first?.id || '').trim()
+    }
+    if (!projectId) {
+      state.removeNotice = {
+        kind: 'error',
+        text: zh ? '请先在顶栏选择工程，再登记节点' : 'Select a project before registering a node',
+      }
+      return
+    }
+    const outcome = await sources.registerNode(projectId, input)
+    if (!outcome.ok) {
+      state.removeNotice = { kind: 'error', text: removalErrorText(outcome, state.lang) }
+      return
+    }
+    state.removeNotice = {
+      kind: 'ok',
+      text: zh ? `已登记节点 ${input.id}` : `Registered node ${input.id}`,
+    }
+    state.nodeFormPreset = 'custom'
+    state.nodeModal = null
+    await boardStore.loadView('nodes')
+  },
+
+  async removeNode(nodeId: string) {
+    const target = String(nodeId || '').trim()
+    if (!target) return
+    const outcome = await sources.removeNode(target)
+    state.pendingNodeRemove = ''
+    if (!outcome.ok) {
+      state.removeNotice = { kind: 'error', text: removalErrorText(outcome, state.lang) }
+      return
+    }
+    state.removeNotice = {
+      kind: 'ok',
+      text: state.lang === 'zh' ? `已删除节点 ${target}` : `Removed node ${target}`,
+    }
+    await boardStore.loadView('nodes')
   },
 
   /** 工程列表「编辑」：弹窗收集名称／路径／策略后 PATCH。 */
@@ -439,6 +567,10 @@ export function removalErrorText(
       return zh ? '当前凭据没有写权限' : 'This credential has no write scope'
     case 'invalid_project_id':
       return zh ? '工程 id 形态不对' : 'Malformed project id'
+    case 'invalid_node_id':
+      return zh ? '节点 id 不合法（需小写字母开头）' : 'Malformed node id'
+    case 'invalid_entry_path':
+      return zh ? '请填写可执行文件路径' : 'Executable path is required'
     case 'network_error':
       return zh ? '连不上本机中枢' : 'Cannot reach the local hub'
     default:

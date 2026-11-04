@@ -3,7 +3,8 @@
 // 覆盖 Acceptance：
 //   · 自动模式／计算上限／节点容量／max_parallel 参考值四种标签不同，且默认不开启自动执行；
 //   · 保存状态机（脏／保存中／已保存／失败／冲突）语义明确，冲突保留草稿；
-//   · 无秘密字段入口：草稿里出现 token／password 一类键就拒绝渲染与保存。
+//   · 无秘密字段入口：草稿里出现 token／password 一类键就拒绝渲染与保存；
+//   · F47／F57 的六类收敛项各有分区，超时与重试、通知只声明真实入口不放控件。
 // 视觉（深浅／双语／窄屏／键盘）由同目录浏览器用例负责。
 //
 // 运行：node --test internal/board/assets/views/settings/settings.test.cjs
@@ -283,7 +284,11 @@ test("EV-002 分区齐全且顺序固定，每个分区都有可访问名", asyn
   const policy = view.normalizePolicy(POLICY);
   const html = view.renderSettings(state({ policy, platformSupported: true }), { lang: "zh" });
 
-  assert.deepEqual([...view.SETTINGS_SECTIONS], ["managed", "nodes", "retention", "appearance", "agents"]);
+  assert.deepEqual(
+    [...view.SETTINGS_SECTIONS],
+    ["managed", "nodes", "retention", "retries", "notifications", "appearance", "agents"],
+    "F57 的六类收敛项都要有归属：节点／容量、超时与重试、通知、采集与保留、外观、Agent 状态",
+  );
   const order = view.SETTINGS_SECTIONS.map(id => html.indexOf('data-section="' + id + '"'));
   assert.ok(order.every(index => index >= 0), "分区必须全部渲染");
   assert.deepEqual(order, [...order].sort((a, b) => a - b), "渲染顺序必须与 SETTINGS_SECTIONS 一致");
@@ -404,6 +409,69 @@ test("EV-002 新增分区同样有中英两版，说明链也翻译", async () =
   assert.ok(en.includes("Appearance"));
   assert.ok(en.includes("System agent status"));
   assert.ok(en.includes("Entry") && en.includes("Owner") && en.includes("Boundary"));
+});
+
+// ---------------------------------------------------------------------------
+// F47 / F57：单一设置页要收敛「超时与重试」「通知」。
+//
+// 这两类此前只写在需求里，页面上没有分区，入口仍然散在 config.toml 和服务端。
+// 补分区时不复制控件，只声明入口——但入口必须是真实位置，不能写「在别处配置」。
+// ---------------------------------------------------------------------------
+
+test("F57 超时与重试、通知两个分区已收敛到设置页", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const html = view.renderSettings(state({ policy }), { lang: "zh" });
+
+  const retries = sectionHtml(html, "retries");
+  const notifications = sectionHtml(html, "notifications");
+  assert.ok(retries, "缺少「超时与重试」分区");
+  assert.ok(notifications, "缺少「通知与提醒」分区");
+
+  // 入口要能落地：超时/心跳在 config.toml，重试口径在 reconcile，提醒在 v1 读接口。
+  assert.ok(retries.includes("timeout_sec"), "超时要指向 config.toml [gates] timeout_sec");
+  assert.ok(retries.includes("heartbeat_ttl_sec"), "心跳要指向 config.toml [locks] heartbeat_ttl_sec");
+  assert.ok(retries.includes("DefaultRetryPolicy"), "重试要指向实际实现，不写空话");
+  assert.ok(notifications.includes("/api/v1/projects/{id}/notifications"), "通知要指向真实读接口");
+  assert.ok(notifications.includes("/acks"), "确认要指向真实写路径");
+
+  // 只声明入口，不放控件：阈值、渠道、确认动作都不在浏览器里。
+  for (const [id, block] of [["retries", retries], ["notifications", notifications]]) {
+    assert.ok(!/<input|<select|<button|<a\s/.test(block), id + " 分区不得含可聚焦元素");
+  }
+});
+
+test("F57 两个新分区同样带入口／归属／边界，且英文版不残留中文", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const zh = view.renderSettings(state({ policy }), { lang: "zh" });
+
+  for (const id of ["retries", "notifications"]) {
+    const block = sectionHtml(zh, id);
+    for (const fact of ["entry", "owner", "boundary"]) {
+      assert.ok(block.includes('data-fact="' + fact + '"'), id + " 缺少说明链：" + fact);
+    }
+  }
+
+  const en = view.renderSettings(state({ policy }), { lang: "en" });
+  assert.ok(en.includes("Timeouts &amp; retries") || en.includes("Timeouts & retries"));
+  assert.ok(en.includes("Notifications &amp; reminders") || en.includes("Notifications & reminders"));
+  assert.ok(!/[\u4e00-\u9fa5]/.test(en), "英文界面不得残留中文");
+});
+
+test("E2E-101 只读是表单的一等状态，不靠禁用外观冒充", async () => {
+  const view = await load();
+  const policy = view.normalizePolicy(POLICY);
+  const html = view.renderSettings(state({ policy }), { lang: "zh" });
+
+  assert.ok(html.includes('data-readonly="1"'), "只读时表单要声明 data-readonly");
+  assert.ok(html.includes('data-form-caption="1"'), "字段区要说明它在展示什么");
+  assert.ok(html.includes("只作展示，不提交"), "只读说明要讲清不会提交");
+  assert.ok(html.includes("只读快照"), "概念表要标明自己是当前生效值快照");
+
+  const editable = view.renderSettings(state({ policy, editable: true }), { lang: "zh" });
+  assert.ok(!editable.includes('data-readonly="1"'), "可写时不得带只读标记");
+  assert.ok(editable.includes("请求会带上当前 revision"), "可写说明要讲清保存语义");
 });
 
 // ---------------------------------------------------------------------------

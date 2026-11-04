@@ -41,11 +41,17 @@ func (a Admission) Valid() bool {
 //
 // ProjectID 只是归属展示，不是工作者身份；SharedGroup 为空表示不参与共享资源组，
 // 非空时必须显式给出 GroupLimit，且同组成员必须一致。
+//
+// AutoProbe / HeartbeatIntervalSec / DefaultModel 写入 nodes.meta，不进 NodeConfig 契约校验：
+// 自动探测=按间隔刷新心跳；默认模型=受管启动时注入 CLI 的模型参数。
 type Registration struct {
-	Config      model.NodeConfig `json:"config"`
-	ProjectID   string           `json:"project_id,omitempty"`
-	SharedGroup string           `json:"shared_group,omitempty"`
-	GroupLimit  int              `json:"group_limit,omitempty"`
+	Config               model.NodeConfig `json:"config"`
+	ProjectID            string           `json:"project_id,omitempty"`
+	SharedGroup          string           `json:"shared_group,omitempty"`
+	GroupLimit           int              `json:"group_limit,omitempty"`
+	AutoProbe            *bool            `json:"auto_probe,omitempty"`
+	HeartbeatIntervalSec int              `json:"heartbeat_interval_sec,omitempty"`
+	DefaultModel         string           `json:"default_model,omitempty"`
 }
 
 // CapabilityEvidence 是一项能力的声明值与验证值。

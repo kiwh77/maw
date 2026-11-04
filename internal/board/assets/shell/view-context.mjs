@@ -70,6 +70,14 @@ function listField(payload, name) {
   return null;
 }
 
+/** 登记 meta 里历史用 ok；看板四维只认 ready／needs-*／unknown。 */
+function normalizeAuthState(raw) {
+  const state = String(raw || "").trim().toLowerCase();
+  if (state === "ok" || state === "ready") return "ready";
+  if (state === "needs-login" || state === "needs-model" || state === "unknown") return state;
+  return state || "unknown";
+}
+
 /** 把读接口 NodeRow（node_id/label/last_seen/slot_limit）对齐成节点视图形状。 */
 export function normalizeNodeRow(row) {
   if (!row || typeof row !== "object") return row;
@@ -80,15 +88,29 @@ export function normalizeNodeRow(row) {
   const slotLimit = Number(row.slots?.total ?? row.slot_limit ?? 0) || 0;
   const busy = Number(row.slots?.busy ?? row.active_slots ?? 0) || 0;
   const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
+  const intakePaused = typeof row.intake === "string"
+    ? row.intake === "paused"
+    : Boolean(row.intake?.paused || meta.draining || meta.accept_new === false);
+  const heartbeatInterval = Number(meta.heartbeat_interval_sec) || 0;
   return {
     ...row,
     id,
     name,
+    meta,
+    adapter: row.adapter || meta.adapter_kind || meta.cli_flavor || "",
     presence: row.presence || { online: online !== false && Boolean(lastSeen), last_seen: lastSeen },
-    auth: row.auth || { state: meta.auth_state || "unknown" },
-    capability: row.capability || meta.capabilities || {},
-    slots: row.slots || { busy, total: slotLimit },
-    intake: row.intake || { paused: Boolean(meta.draining), reason: meta.pause_reason || "" },
+    auth: row.auth || { state: normalizeAuthState(meta.auth_state) },
+    capability: row.capability || meta.capabilities || {
+      declared: ["local_cli"],
+      verified: ["local_cli"],
+      cli_version: meta.cli_flavor || "local_cli",
+      verified_version: meta.cli_flavor || "local_cli",
+    },
+    slots: row.slots || { busy, total: slotLimit || 1 },
+    intake: intakePaused ? "paused" : "open",
+    auto_probe: meta.auto_probe !== false,
+    heartbeat_interval_sec: heartbeatInterval >= 5 ? heartbeatInterval : 60,
+    default_model: String(meta.default_model || "").trim(),
   };
 }
 
@@ -316,6 +338,10 @@ export function analyticsStateFrom(payload) {
  *
  * `policyKnown` 记录快照到底有没有带策略：看板快照本身不含策略字段，
  * 这时页面必须说明「数值未知」，而不是让每一行都显示成「关闭」。
+ *
+ * `taskCounts` 按工程把快照里的任务行归组（总数／进行中）：工程清单页要回答
+ * 「这个工程还剩多少活」，而这层已经在手边有任务行，不必让视图再拼一遍。
+ * 快照没有 tasks 字段时**不写** taskCounts——「没取到」与「0 道任务」是两件事。
  */
 export function projectsStateFrom(payload) {
   if (!payload || typeof payload !== "object") return errorState("missing_snapshot");
@@ -338,7 +364,34 @@ export function projectsStateFrom(payload) {
     project.auto_enabled !== undefined ||
     project.managed_execution_limit !== undefined
   ));
-  return { status: "ok", projects, policyKnown };
+  const state = { status: "ok", projects, policyKnown };
+  if (Array.isArray(payload.tasks)) {
+    state.taskCounts = projectTaskCounts(payload.tasks);
+  }
+  return state;
+}
+
+/** 执行中（契约 §4 的「执行中」泳道）：已领取但没开工也算占着位子。 */
+const RUNNING_STATUSES = Object.freeze(["claimed", "in_progress", "self_check"]);
+
+/**
+ * 任务行 → 按工程归组。
+ *
+ * 没有 project_id 的行不归到任何工程：宁可少算一个工程的数，也不把它记到
+ * 别的工程名下。返回空对象表示「有任务行，但一道都不属于这些工程」，
+ * 这与「没有任务行」不同，调用方靠 taskCounts 是否存在区分。
+ */
+function projectTaskCounts(tasks) {
+  const counts = {};
+  for (const task of tasks) {
+    if (!task || typeof task !== "object") continue;
+    const pid = String(task.project_id || "").trim();
+    if (!pid) continue;
+    const bucket = counts[pid] || (counts[pid] = { total: 0, running: 0 });
+    bucket.total += 1;
+    if (RUNNING_STATUSES.indexOf(String(task.status || "")) >= 0) bucket.running += 1;
+  }
+  return counts;
 }
 
 /**

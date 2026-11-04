@@ -301,12 +301,41 @@ func (rt *Runtime) argvFromAssignedNode(op dispatch.Operation) ([]string, bool) 
 		if e != nil {
 			return e
 		}
-		return json.Unmarshal(b, &argv)
+		if e := json.Unmarshal(b, &argv); e != nil {
+			return e
+		}
+		argv = withDefaultModelArgs(argv, n.Meta)
+		return nil
 	})
 	if err != nil || len(argv) == 0 {
 		return nil, false
 	}
 	return argv, true
+}
+
+// withDefaultModelArgs 在尚未显式带模型参数时，按节点 default_model 注入 CLI 旗标。
+func withDefaultModelArgs(argv []string, meta map[string]any) []string {
+	if len(argv) == 0 || meta == nil {
+		return argv
+	}
+	modelName, _ := meta["default_model"].(string)
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return argv
+	}
+	for _, a := range argv {
+		if a == "--model" || a == "-m" || strings.HasPrefix(a, "--model=") {
+			return argv
+		}
+	}
+	flavor, _ := meta["cli_flavor"].(string)
+	out := append([]string{}, argv...)
+	switch strings.ToLower(strings.TrimSpace(flavor)) {
+	case "codex":
+		return append(out, "-m", modelName)
+	default:
+		return append(out, "--model", modelName)
+	}
 }
 
 // nodeIDFromLeaseKey 解析 node:<id>#<slot>。

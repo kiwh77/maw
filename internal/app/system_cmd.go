@@ -656,6 +656,8 @@ func startServeLoops(cwd string) {
 	if err != nil {
 		return
 	}
+	// 节点自动探测（心跳）：按各节点 heartbeat_interval_sec 刷新 last_seen。
+	startNodeProbeLoop(pc.GlobalDB)
 	rt, err := NewRuntime(pc, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "serve leader: runtime: %v\n", err)

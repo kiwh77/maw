@@ -74,6 +74,7 @@ type NodeWriteResult struct {
 type Nodes interface {
 	Register(ctx context.Context, req NodeWriteRequest) (NodeWriteResult, error)
 	UpdateConfig(ctx context.Context, req NodeWriteRequest) (NodeWriteResult, error)
+	Remove(ctx context.Context, nodeID model.NodeID) error
 }
 
 // ProbeRequest 受理一次节点探测（异步 Operation）。
