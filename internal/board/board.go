@@ -36,7 +36,10 @@ type Snapshot struct {
 	Percent       int            `json:"percent"`
 	NextHint      string         `json:"next_hint"`
 	Risks         RiskList       `json:"risks"`
-	Counts        map[string]int `json:"counts"`
+	// Problems 是聚合出的运行问题（blocked/conflict/重试/停滞/依赖等待），
+	// 随本批任务重算，供前端「问题」视图一屏审查。
+	Problems ProblemList    `json:"problems"`
+	Counts   map[string]int `json:"counts"`
 	Tasks         TaskList       `json:"tasks"`
 	Agents        AgentList      `json:"agents"`
 	Projects      ProjectList    `json:"projects"`
@@ -194,6 +197,7 @@ func aggregate(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapshot {
 		Percent:     pct,
 		NextHint:    next,
 		Risks:       risks,
+		Problems:    BuildProblems(tasks, agents),
 		Counts:      counts,
 		Tasks:       tasks,
 		Agents:      agents,
@@ -259,6 +263,9 @@ func (s *Snapshot) Normalize() {
 	}
 	if s.Risks == nil {
 		s.Risks = []string{}
+	}
+	if s.Problems == nil {
+		s.Problems = ProblemList{}
 	}
 	if s.Counts == nil {
 		s.Counts = map[string]int{}
