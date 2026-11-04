@@ -43,6 +43,8 @@ const I18N = {
     "projects.workspace.unknown": "未识别",
     "projects.count": "个工程",
     "projects.not_ready_hint": "自动模式未就绪的原因：",
+    "projects.edit": "编辑",
+    "projects.edit.hint": "改名称、路径与执行策略",
     "projects.remove": "移除",
     "projects.remove.hint": "只从本机中枢注销登记，不动工程目录",
     "projects.remove.confirm": "确认移除？",
@@ -77,6 +79,8 @@ const I18N = {
     "projects.workspace.unknown": "Unknown",
     "projects.count": "projects",
     "projects.not_ready_hint": "Auto mode not ready because:",
+    "projects.edit": "Edit",
+    "projects.edit.hint": "Change name, path and execution policy",
     "projects.remove": "Remove",
     "projects.remove.hint": "Unregisters from the local hub only; the project directory stays untouched",
     "projects.remove.confirm": "Remove this project?",
@@ -151,6 +155,9 @@ function removalCell(view, lang, options) {
       "</span></td>";
   }
   return '<td class="actions" data-field="actions">' +
+    '<button type="button" class="projects-edit" data-project-edit="' + esc(view.id) +
+    '" title="' + esc(t("projects.edit.hint", lang)) + '">' +
+    esc(t("projects.edit", lang)) + "</button> " +
     '<button type="button" class="projects-remove" data-project-remove="' + esc(view.id) +
     '" title="' + esc(t("projects.remove.hint", lang)) + '">' +
     esc(t("projects.remove", lang)) + "</button></td>";

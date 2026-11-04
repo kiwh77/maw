@@ -384,6 +384,63 @@ func main() {
 	projectRmCmd.Flags().Bool("force", false, i18n.T("flag.force_remove"))
 	projectRmCmd.Flags().String("agent", "", i18n.T("flag.agent"))
 	projectCmd.AddCommand(projectRmCmd)
+	// 工程属性／策略编辑：只写显式出现的 flag，没传的字段保持原值。
+	projectSetCmd := &cobra.Command{
+		Use:   "set [id|名称]",
+		Short: "编辑工程名称、路径与执行策略",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			in := app.ProjectUpdateInput{Ref: args[0], DryRun: dryRun}
+			flags := cmd.Flags()
+			if flags.Changed("name") {
+				v, _ := flags.GetString("name")
+				in.Name = &v
+			}
+			if flags.Changed("path") {
+				v, _ := flags.GetString("path")
+				in.Path = &v
+			}
+			if flags.Changed("main-branch") {
+				v, _ := flags.GetString("main-branch")
+				in.MainBranch = &v
+			}
+			if flags.Changed("max-parallel") {
+				v, _ := flags.GetInt("max-parallel")
+				in.MaxParallel = &v
+			}
+			if flags.Changed("auto") {
+				v, _ := flags.GetBool("auto")
+				in.AutoEnabled = &v
+			}
+			if flags.Changed("limit") {
+				v, _ := flags.GetInt("limit")
+				in.Limit = &v
+			}
+			if flags.Changed("allowed-nodes") {
+				v, _ := flags.GetStringSlice("allowed-nodes")
+				in.AllowedNodes = &v
+			}
+			if flags.Changed("worker-node") {
+				v, _ := flags.GetString("worker-node")
+				in.WorkerNode = &v
+			}
+			if flags.Changed("llm-node") {
+				v, _ := flags.GetString("llm-node")
+				in.LLMNode = &v
+			}
+			printRes(app.ProjectUpdate(cwd, in))
+		},
+	}
+	projectSetCmd.Flags().String("name", "", "工程展示名")
+	projectSetCmd.Flags().String("path", "", "工程本地路径（绝对路径）")
+	projectSetCmd.Flags().String("main-branch", "", "主干分支")
+	projectSetCmd.Flags().Int("max-parallel", 1, "看板 max_parallel 参考值")
+	projectSetCmd.Flags().Bool("auto", false, "是否启用自动派发")
+	projectSetCmd.Flags().Int("limit", 1, "受管执行同时上限")
+	projectSetCmd.Flags().StringSlice("allowed-nodes", nil, "限定自动调度可用节点（逗号分隔）")
+	projectSetCmd.Flags().String("worker-node", "", "系统 worker 节点")
+	projectSetCmd.Flags().String("llm-node", "", "系统 LLM 节点")
+	projectCmd.AddCommand(projectSetCmd)
 	root.AddCommand(projectCmd)
 
 	// 节点管理：通用 local_cli 节点登记、列表与删除。

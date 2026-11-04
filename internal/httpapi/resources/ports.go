@@ -115,9 +115,38 @@ type ProjectRemovalResult struct {
 	Retained    map[string]int64
 }
 
+// ProjectUpdateRequest 是工程属性与策略的增量更新。
+//
+// 指针字段区分「没传」与「传了空值」：PATCH 只写显式出现的字段。
+type ProjectUpdateRequest struct {
+	ProjectID    string
+	Name         *string
+	Path         *string
+	MainBranch   *string
+	MaxParallel  *int
+	AutoEnabled  *bool
+	Limit        *int
+	AllowedNodes *[]string
+	WorkerNode   *string
+	LLMNode      *string
+	Actor        string
+}
+
+// ProjectUpdateResult 是更新后的工程投影。
+type ProjectUpdateResult struct {
+	ProjectID    string
+	ProjectName  string
+	ProjectPath  string
+	MainBranch   string
+	MaxParallel  int
+	ConfigPath   string
+	ConfigWriten bool
+}
+
 // Projects 是工程登记管理用例。
 type Projects interface {
 	Remove(ctx context.Context, req ProjectRemovalRequest) (ProjectRemovalResult, error)
+	Update(ctx context.Context, req ProjectUpdateRequest) (ProjectUpdateResult, error)
 }
 
 // 用例错误：HTTP 层按契约映射状态码。
@@ -136,5 +165,5 @@ type (
 )
 
 func (e ErrConflict) Error() string { return e.Code + ": " + e.Message }
-func (e ErrNotFound) Error() string  { return e.Message }
-func (e ErrInvalid) Error() string   { return e.Code + ": " + e.Message }
+func (e ErrNotFound) Error() string { return e.Message }
+func (e ErrInvalid) Error() string  { return e.Code + ": " + e.Message }

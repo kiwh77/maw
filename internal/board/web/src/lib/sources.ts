@@ -326,6 +326,58 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
       return { ok: true, status: res.status }
     },
 
+    /**
+     * 更新工程名称／路径／执行策略（PATCH /api/v1/projects/{id}）。
+     *
+     * 只发送界面真正改过的字段；没有传的字段由服务端保持原值。
+     * 与移除一样返回结构而不是抛异常，失败要能按 code 说人话。
+     */
+    async updateProject(projectId: string, patch: Record<string, unknown>): Promise<RemovalOutcome> {
+      const id = String(projectId || '').trim()
+      if (!id) return { ok: false, status: 0, code: 'invalid_project_id' }
+      if (!doFetch) return { ok: false, status: 0, code: 'network_error' }
+
+      const authed = await ensureSession()
+      if (!authed) return { ok: false, status: 401, code: 'unauthenticated', unauthenticated: true }
+      const csrf = readCookie(win, CSRF_COOKIE)
+      if (!csrf) return { ok: false, status: 403, code: 'csrf_failed' }
+
+      const url = '/api/v1/projects/' + encodeURIComponent(id)
+      let res: Response
+      try {
+        res = await doFetch(url, {
+          method: 'PATCH',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrf,
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify(patch || {}),
+        })
+      } catch {
+        return { ok: false, status: 0, code: 'network_error' }
+      }
+
+      let body: Record<string, unknown> = {}
+      try {
+        body = (await res.json()) as Record<string, unknown>
+      } catch {
+        body = {}
+      }
+      if (!res.ok) {
+        const detail = (body?.error || null) as { code?: string; message?: string } | null
+        return {
+          ok: false,
+          status: res.status,
+          code: detail?.code,
+          message: detail?.message,
+          unauthenticated: res.status === 401,
+        }
+      }
+      return { ok: true, status: res.status }
+    },
+
     async capabilities(projectId: string) {
       const url = capabilitiesPath(projectId)
       if (!url) return null

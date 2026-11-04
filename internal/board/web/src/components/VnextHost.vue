@@ -190,6 +190,13 @@ function onListClick(event: MouseEvent) {
     return
   }
 
+  // 工程编辑：改名称／路径／策略，确认后提交并刷新列表。
+  const edit = target?.closest?.('[data-project-edit]') as HTMLElement | null
+  if (edit?.dataset.projectEdit) {
+    void board.editProject(edit.dataset.projectEdit)
+    return
+  }
+
   // 工程移除走两段式：第一次只切到「确认移除？」，第二次才发请求。
   const ask = target?.closest?.('[data-project-remove]') as HTMLElement | null
   if (ask?.dataset.projectRemove) {

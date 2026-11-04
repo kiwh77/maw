@@ -32,7 +32,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/projects/{project_id}/nodes", a.handleRegisterNode)
 	mux.HandleFunc("/api/v1/nodes/{node_id}", a.handleUpdateNode)
 	mux.HandleFunc("/api/v1/nodes/{node_id}/probes", a.handleProbeNode)
-	mux.HandleFunc("/api/v1/projects/{project_id}", a.handleRemoveProject)
+	mux.HandleFunc("/api/v1/projects/{project_id}", a.handleProject)
 	// 写树兜底：未知写路径回 JSON not_found，不再让 404 落到纯文本页。
 	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "未知的 /api/v1 写路径", nil)
@@ -64,14 +64,76 @@ func writeNotWired(w http.ResponseWriter, name string) {
 		name+" 写入口未在本中枢接线；受管执行请改用 CLI", map[string]any{"use": "cli"})
 }
 
+// handleProject 是工程写入口：DELETE 移除，PATCH 更新属性／策略。
+//
+// 同一路径按方法分派，让「方法不对」回 JSON 405 而不是落到别的语义；
+// DELETE 的幂等约束与 PATCH 的增量字段各自只在对应分支里判定。
+func (a *API) handleProject(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodDelete:
+		a.handleRemoveProject(w, r)
+	case http.MethodPatch:
+		a.handleUpdateProject(w, r)
+	default:
+		w.Header().Set("Allow", "DELETE, PATCH")
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed",
+			"该写入口只接受 DELETE 或 PATCH", map[string]any{"allow": "DELETE, PATCH"})
+	}
+}
+
+// handleUpdateProject 更新工程名称／路径／执行策略。
+func (a *API) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project_id")
+	if !model.ProjectID(projectID).Valid() {
+		writeErr(w, http.StatusUnprocessableEntity, "invalid_project_id", "project_id 必须是 16 位十六进制", nil)
+		return
+	}
+	if a.Projects == nil {
+		writeNotWired(w, "工程更新")
+		return
+	}
+	var body struct {
+		Name         *string   `json:"name"`
+		Path         *string   `json:"path"`
+		MainBranch   *string   `json:"main_branch"`
+		MaxParallel  *int      `json:"max_parallel"`
+		AutoEnabled  *bool     `json:"auto_enabled"`
+		Limit        *int      `json:"limit"`
+		AllowedNodes *[]string `json:"allowed_nodes"`
+		WorkerNode   *string   `json:"worker_node"`
+		LLMNode      *string   `json:"llm_node"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	actor := ""
+	if id, ok := localauth.IdentityFrom(r.Context()); ok {
+		actor = id.Actor
+	}
+	out, err := a.Projects.Update(r.Context(), ProjectUpdateRequest{
+		ProjectID: projectID, Name: body.Name, Path: body.Path,
+		MainBranch: body.MainBranch, MaxParallel: body.MaxParallel,
+		AutoEnabled: body.AutoEnabled, Limit: body.Limit,
+		AllowedNodes: body.AllowedNodes, WorkerNode: body.WorkerNode,
+		LLMNode: body.LLMNode, Actor: actor,
+	})
+	if err != nil {
+		mapUseCaseErr(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, map[string]any{
+		"project_id": out.ProjectID, "project_name": out.ProjectName,
+		"project_path": out.ProjectPath, "main_branch": out.MainBranch,
+		"max_parallel": out.MaxParallel, "config_path": out.ConfigPath,
+		"config_written": out.ConfigWriten,
+	})
+}
+
 // handleRemoveProject 移除工程登记。
 //
 // DELETE 本身幂等，所以不要求 Idempotency-Key；但删除范围必须由用例回报，
 // 界面不能自行推断「删成功了」——只有 200 且带 removed 计数才算。
 func (a *API) handleRemoveProject(w http.ResponseWriter, r *http.Request) {
-	if !requireWriteMethod(w, r, http.MethodDelete) {
-		return
-	}
 	projectID := r.PathValue("project_id")
 	if !model.ProjectID(projectID).Valid() {
 		writeErr(w, http.StatusUnprocessableEntity, "invalid_project_id", "project_id 必须是 16 位十六进制", nil)

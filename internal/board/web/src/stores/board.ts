@@ -239,6 +239,65 @@ export const boardStore = {
     await boardStore.loadView('projects')
   },
 
+  /**
+   * 编辑工程：名称／路径与几个策略字段。
+   *
+   * 用逐项 prompt 而不是整块表单：这一步只补「列表里能改」，
+   * 真正的策略编排仍以设置页为准；留空即不提交该字段，服务端保持原值。
+   */
+  async editProject(projectId: string) {
+    const target = String(projectId || '').trim()
+    if (!target) return
+    const zh = state.lang === 'zh'
+    const row = (state.snapshot?.projects || []).find((p) => String(p.id || '') === target) as
+      | { name?: string; path?: string; main_branch?: string }
+      | undefined
+    const name = window.prompt(zh ? '工程名称' : 'Project name', row?.name || '')
+    if (name === null) return
+    const path = window.prompt(zh ? '存放路径' : 'Project path', row?.path || '')
+    if (path === null) return
+    const autoRaw = window.prompt(
+      zh ? '自动派发 auto_enabled（true/false，留空不改）' : 'auto_enabled (true/false, blank=skip)',
+      '',
+    )
+    if (autoRaw === null) return
+    const nodesRaw = window.prompt(
+      zh ? 'allowed_nodes（逗号分隔 node id，留空不改）' : 'allowed_nodes (comma-separated, blank=skip)',
+      '',
+    )
+    if (nodesRaw === null) return
+    const worker = window.prompt(
+      zh ? '系统节点 worker_node（留空不改）' : 'system worker_node (blank=skip)',
+      '',
+    )
+    if (worker === null) return
+    const autoTrim = String(autoRaw || '').trim().toLowerCase()
+    const patch: Record<string, unknown> = {}
+    if (name.trim()) patch.name = name.trim()
+    if (path.trim()) patch.path = path.trim()
+    if (autoTrim === 'true' || autoTrim === 'false') patch.auto_enabled = autoTrim === 'true'
+    if (String(nodesRaw || '').trim()) {
+      patch.allowed_nodes = String(nodesRaw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    }
+    if (String(worker || '').trim()) patch.worker_node = String(worker).trim()
+    if (!Object.keys(patch).length) return
+
+    const outcome = await sources.updateProject(target, patch)
+    if (!outcome.ok) {
+      state.removeNotice = { kind: 'error', text: removalErrorText(outcome, state.lang) }
+      return
+    }
+    state.removeNotice = {
+      kind: 'ok',
+      text: zh ? '工程已更新' : 'Project updated',
+    }
+    await boardStore.fetchSnapshot()
+    await boardStore.loadView('projects')
+  },
+
   syncFromLocation() {
     const next = parseRoute(location.search, location.hash, routeKnown) as BoardRoute
     Object.assign(state.route, next)
