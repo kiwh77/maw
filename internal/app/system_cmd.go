@@ -170,6 +170,9 @@ func SystemWatch(cwd string, once bool) (Result, error) {
 		Config:       cfg,
 		Orchestrator: orch,
 		ProjectID:    pc.ID(),
+		// 系统级信号的真实证据源。为 nil 时 Watcher 会完全跳过信号检测；
+		// 注入后仍受 auto_kinds 与 escalate_human 约束，默认不自动改状态。
+		SignalFacts: newHubSignalFacts(pc.GlobalDB, cfg),
 		LeaderLock: func() (func(), error) {
 			lockPath := filepath.Join(rt.StateDir(), "dispatch", "coordinator.lock")
 			_ = os.MkdirAll(filepath.Dir(lockPath), 0o755)

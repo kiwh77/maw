@@ -99,8 +99,14 @@
 
 - 生成规则按仓库既有拆卡约定：`id` 唯一、`deps` 字段名（不是 `depends`）、
   每条卡带 `goal` / `write_scope` / `read_scope` / `acceptance` / `verify` / `not_doing`。
-- **必须追加到蓝图末尾并保留既有题全集**：`STATUS.md` 记过一次事故——单题临时 toml
-  做增量 `plan apply` 把 30 道 idle 题标成 `removed_from_plan`。生成器禁止产出「单题计划文件」。
+- **生成器绝不产出「只含新题的独立计划文件」**。`plan apply` 实际有两条落地路径
+  （只读复核）：`app.PlanApply`（`internal/app/plan_cmd.go:27,57`）与
+  `appSystemEffects.ApplyPlan`（`internal/app/system_cmd.go:621-629`），分别由
+  CLI `maw plan apply [blueprint]` 与编排器 B 线调用；后者把
+  `.multiagent/handoffs/system-split-*.toml` 当**完整期望题集**。
+  历史事故（`STATUS.md`）正是拿单题临时 toml 做增量 apply，把 30 道 idle 题标成
+  `removed_from_plan`。因此本波只走「**追加到现有蓝图末尾、保留既有题全集**」这一条：
+  生成片段 → `plan check` → 人工 `plan apply`。
 - 不接 LLM 也能用：内置模板化拆卡（按 Lane/文件归属分组），`--from` 读需求文档，
   `--dry-run` 只打印；接了 `llm_command` 才走 `task_split` 的 LLM 路径。
 
@@ -111,13 +117,32 @@
 | 信号 | 判据（真实库） | 默认动作 |
 | --- | --- | --- |
 | 门禁环境失败 | 最近 submit 的 gate 结果含环境失败词表（`gitops.IsEnvFailure`） | 入队 `unblock_assist`，标记 `needs_human` |
-| Agent 全 offline | 工程内无 `last_seen` 在心跳窗口内的非 offline Agent | 入队 `dispatch_ready`，只观察 |
+| Agent 全 offline | 工程内无 `last_seen` 在心跳窗口内的非 offline Agent | 建议 `dispatch_ready`；默认被 `auto_kinds` 过滤，**只上报** |
 | merging 卡死 | 任务 `status=merging` 且超过阈值未推进 | 入队 `ops_run`，命令须在 `ops_allowlist` 内 |
 | 锁／租约残留 | `maw prune` 能列出但受 unknown 占用保护 | 只上报，不自动 prune |
 
 - 冷却与次数沿用 `cooldown_sec` / `max_attempts`；`needs_human` / `auth_required`
   继续走 `escalate_patterns`，不自动处置。
 - 审计沿用 `internal/systemagent/audit.go` 的 sidecar，不另起一套日志。
+
+⚠️ **「只观察」必须靠代码保证，不能靠配置约定**：`Orchestrator.Step`
+（`orchestrator.go:100-110`）会无视 `auto_kinds` 把 `dispatch_ready` 强制追加进消费 kinds；
+`KindAllowed(kind, cfg, explicit=true)`（`classifier.go:29-42`）又对显式入队的四种 kind
+全放行。光靠「运维别把 dispatch_ready 放进 auto_kinds」太脆：一次误配或一次显式
+trigger 就变成真派发。
+
+本波利用 `orchestrator.go:190-191` **既有**的 `action=escalate_human` 预分类路径
+（命中即 finish 为 `Escalated`、跳过 Dispatcher），在信号侧给 `all_agents_offline`
+预置该 action + `Escalate=true`。于是：
+
+| 路径 | 是否真派发 | 说明 |
+| --- | --- | --- |
+| `EnqueueSignals`（信号自动入队，`explicit=false`） | 否 | `auto_kinds` 过滤 + 预分类升级人工，双保险；即便误把 `dispatch_ready` 放进 `auto_kinds`，job 终态仍是 `Escalated` |
+| `maw lead dispatch` / `SystemTrigger`（`explicit=true`） | **是** | 有意的显式动作，绕过白名单并被 `Step` 真消费成 Match → Claim → 派发；由 `RequireLead` 权限门把守 |
+| `gate_env_failure` / `merging_stalled` | 否 | 前者入 `unblock_assist` 升级人工；后者 `ops_run` 命令须在 `OpsAllowlist` 内且默认未放行 |
+
+因此装配层约定：`maw lead signals` 默认只读；`--enqueue` 必须先打印「当前 auto_kinds」并
+在结果里标出哪些信号会真改状态，由人确认后再执行。
 
 ### 2.4 主动调度（`maw lead dispatch`）：不是缺触发，是「规范已设计、生产未落地」
 
@@ -252,6 +277,76 @@ maw node models --flavor claude --json
 
 **总验收**：`maw task list --json` 里本迭代七张卡全部 `done`；
 `maw plan check` 无 error；`go test ./...` 全绿；看板设置-节点页能编辑并看到模型来源标记。
+
+### 5.1 已跑通的实测记录（2026-11-04 15:3x）
+
+```text
+$ maw lead status --json
+→ ok=true, view=lead, enabled=false, dispatch_enabled=false,
+  auto_kinds=["unblock_assist"], queue={queued:0,...}   # 只读，如实反映「开关全关」
+
+$ maw lead dispatch -m "lead dispatch smoke 20261104" --json
+→ ok=true, job_id=sjob_6456d1279e9dbe78, kind=dispatch_ready, run.ok=true
+
+$ maw system status --json
+→ queue.done=1, queued=0；enabled=false / auto_kinds=["unblock_assist"] / dispatch_enabled=false 均未变
+```
+
+判据：这条链路证明「**触发源显式入队、消费与选题全自动**」在默认关闭配置下依然可达，
+且没有偷偷打开任何常驻循环。门禁 `go test ./...` 同期全绿（含 `tests/managed`、`tests/resilience`）。
+
+### 5.2 本波完整实测（15:3x–15:5x，全部只读或可回溯）
+
+| 动作 | 实测结果 |
+| --- | --- |
+| `maw lead status --json` | `ok=true`、`is_lead=false`、`leads=null`、开关如实显示全关 |
+| `maw lead signals --json` | `count=7`（全是 `all_agents_offline`）、`enqueued=0`、每条 `escalate=true`；纯只读 |
+| `maw lead signals --enqueue`（授权后） | `enqueued=0`：`auto_kinds` 未放行 `dispatch_ready`，且代码层预分类升级人工，双保险 |
+| `maw node models --json` | 13 条（cn 9 + intl 4）、`has_evidence=true`、每条带 `source=workbuddy:{cn,intl}` |
+| `maw node models --flavor cn` | 只返回 9 条，未与 intl 混 |
+| `maw lead split --brief …`（授权、默认 dry-run） | 生成 1 张 `SMOKE-001`，diff 显示「既有题数 80 → 81，绝不减少」，`written=false`；蓝图未被写入、配置已自动恢复 |
+| 未授权跑 `maw lead split` | 被 `RequireLead` 拒绝（默认 `leads=[]`），错误提示含配置方法 |
+| 前端 | `vite build` 1040 modules 成功；`dist/board-web.js` 含 `nodes/models`、`node-model-options`、`data-model-status`；`node --test` 80/80 |
+| 门禁 | `CGO_ENABLED=0 go test ./...` **全绿**（含 `tests/managed`、`tests/resilience`） |
+
+### 5.3 启用 lead 的方法（默认故意不开）
+
+```toml
+# .multiagent/config.toml
+[identity]
+leads = ["<你的 Agent 名>"]   # 或运行时 export MAW_AGENT=<已授权名>
+```
+
+---
+
+## 7. 本波交付边界：已完成什么、还欠什么
+
+**已完成（代码已落主干、可复跑）**
+
+1. 目标一：`lead` 本机能力标记 + 权限门；`maw lead status/split/signals/dispatch` 四个入口；
+   模板化拆卡（追加式、绝不产单题计划文件）；四类系统级信号的检测、真实读库证据源、
+   自动入队触发与「只观察」的代码层保证；`dispatch_ready` 显式调度端到端跑通。
+2. 目标二：证据驱动的模型目录（只汇总已登记实测枚举）、`maw node models`、
+   `GET /api/v1/nodes/models`、节点编辑器的可选目录下拉与「未标定」标记；
+   节点一期现场收口为干净基线。
+3. 装配：`SystemWatch` 注入信号证据源、i18n 补齐 `dispatch_ready`、前端产物重建。
+
+**明确未做（需要下一波卡片，不夸大）**
+
+1. `internal/app/board_cmd.go` 的 `Tasks` / `Probes` 端口仍未注入：
+   `POST /api/v1/projects/{id}/tasks`、`POST /api/v1/nodes/{id}/probes` 仍回 501。
+   原因：`TaskCreate` 用例与「探测落成 Operation」都没有可复用的生产实现，
+   硬接会绕过 `NodeConfig.Validate` 与幂等语义，属于独立装配卡而非本波顺手能补。
+   本波拆卡走「生成 → 追加蓝图 → 人工 plan apply」，**不依赖**这个 HTTP 端点。
+2. 节点编辑仍走 `POST register`，没有 PATCH / `ExpectedRevision` / If-Match；
+   `nodes.Service`（mode/platform/timeout、SetAdmission、Validate）仍未接线；
+   `cliFlavorFromID` 仍只认 claude/codex。
+3. LLM 拆题路径仍不可用（`llm_command=[]`）；本波只做模板化拆卡，符合
+   「不接 LLM 也能用、接了才走 task_split」的设计。
+4. 信号自动入队虽已接进 `SystemWatch`，但默认 `auto_kinds=["unblock_assist"]`，
+   其余信号只上报；开启需在配置里显式放行并接受 escalated 终态。
+5. §4 的七张卡是**设计稿，未压入 `blueprint.toml`**：本波直接在主干实现，
+   不制造一批新的「未完成需求」去污染看板。
 
 ---
 

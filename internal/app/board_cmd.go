@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -177,7 +178,28 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 	}
 	sysH := sysAPI.Handler()
 
+	// 模型目录只读端点：只列「已登记实测枚举」，不写状态、不探测本机 CLI。
+	// flavor 是发行包维度（cn / intl），不是节点的 cli_flavor（claude / codex）。
+	modelsH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method_not_allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		out, err := ListNodeModels(r.URL.Query().Get("flavor"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(out)
+	})
+
 	v1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/nodes/models" {
+			modelsH.ServeHTTP(w, r)
+			return
+		}
 		kind := v1Route(r.URL.Path)
 		// 写方法落在没有专属写处理者的路径上时分给写树：
 		// 命令资源（dispatches／claims／cancellations…）归 commands，

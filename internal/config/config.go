@@ -91,6 +91,10 @@ type Identity struct {
 	Workers    []string `toml:"workers"`
 	Reviewers  []string `toml:"reviewers"`
 	Integrator string   `toml:"integrator"`
+	// Leads 是本机「lead 能力标记」名单（toml 键 leads）。
+	// 它只是给同一个 worker 多一项授权，不新增角色：不改 Role() 返回值、
+	// 不改 agents 表结构；integrator / reviewer 也不会自动成为 lead。
+	Leads []string `toml:"leads"`
 }
 
 func Load(path string) (*Config, error) {
@@ -415,5 +419,7 @@ ops_allowlist = ["maw next", "maw merge --yes", "maw prune", "maw task unblock"]
 workers = []
 reviewers = ["r1"]
 integrator = "int"
+# leads 是本机 lead 能力标记；空数组表示默认无人可调用 maw lead *
+leads = []
 `
 }

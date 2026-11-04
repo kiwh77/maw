@@ -15,13 +15,16 @@ import (
 
 // Watcher 订阅读 events 表，把 blocked 分类入队，并驱动 Orchestrator.Step。
 type Watcher struct {
-	Store       *db.Store
-	Config      config.SystemAgent
+	Store        *db.Store
+	Config       config.SystemAgent
 	Orchestrator *Orchestrator
 	// ProjectID 非空时只看该工程；空则全局。
-	ProjectID string
+	ProjectID  string
 	LeaderLock func() (release func(), err error)
 	Clock      func() time.Time
+	// SignalFacts 可选：系统级信号的证据源。为 nil 时 PollOnce 完全跳过信号检测，
+	// 既有 task.blocked 入队路径不变；由装配卡注入读库 / 读事件的真实实现。
+	SignalFacts SignalFacts
 }
 
 func (w *Watcher) now() time.Time {
@@ -51,6 +54,14 @@ func (w *Watcher) PollOnce(ctx context.Context) (enqueued, ran int, err error) {
 	n, err := w.ingestBlocked(ctx)
 	if err != nil {
 		return n, 0, err
+	}
+	// 系统级信号仅在注入了证据源时检测并入队；未注入时现有行为完全不变。
+	if w.SignalFacts != nil {
+		sn, e := w.ingestSignals(ctx)
+		if e != nil {
+			return n, 0, e
+		}
+		n += sn
 	}
 	ran = 0
 	if w.Orchestrator != nil {
@@ -88,6 +99,24 @@ func isLockErr(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "locked") || strings.Contains(msg, "锁")
+}
+
+// ingestSignals 检测系统级信号并经现有 Enqueue 入队观察。
+// KindAllowed / 冷却 / max_attempts 的过滤都在 EnqueueSignals 内完成，
+// 这里只负责「检测 + 开一次写事务」，不新增任何动作。
+func (w *Watcher) ingestSignals(ctx context.Context) (int, error) {
+	_ = ctx
+	signals := DetectSystemSignals(w.SignalFacts, w.Config, w.now())
+	var jobs []*db.SystemJob
+	err := w.Store.Write(func(tx *sql.Tx) error {
+		var e error
+		jobs, e = EnqueueSignals(tx, w.Config, signals, w.now())
+		return e
+	})
+	if err != nil {
+		return 0, err
+	}
+	return len(jobs), nil
 }
 
 func (w *Watcher) ingestBlocked(ctx context.Context) (int, error) {

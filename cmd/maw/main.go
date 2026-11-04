@@ -479,6 +479,24 @@ func main() {
 			printRes(app.NodeRemove(cwd, args[0], dryRun))
 		},
 	})
+	nodeModelsCmd := &cobra.Command{
+		Use:   "models",
+		Short: "列出已登记实测的模型枚举（只读）",
+		Run: func(cmd *cobra.Command, args []string) {
+			flavor, _ := cmd.Flags().GetString("flavor")
+			out, err := app.ListNodeModels(flavor)
+			if err != nil {
+				printRes(nil, err)
+				return
+			}
+			printRes(app.Result{
+				"ok": true, "models": out.Models,
+				"flavor": out.Flavor, "has_evidence": out.HasEvidence,
+			}, nil)
+		},
+	}
+	nodeModelsCmd.Flags().String("flavor", "", "发行包维度 cn / intl；留空列全部（不是 claude/codex）")
+	nodeCmd.AddCommand(nodeModelsCmd)
 	root.AddCommand(nodeCmd)
 
 	taskCmd := &cobra.Command{Use: "task"}
@@ -622,6 +640,36 @@ func main() {
 	}
 	leadDispatchCmd.Flags().StringP("message", "m", "", "调度说明（写入审计）")
 	leadCmd.AddCommand(leadDispatchCmd)
+
+	leadSplitCmd := &cobra.Command{
+		Use:   "split",
+		Short: "把需求拆成任务卡草稿并追加到蓝图（默认只预览 diff）",
+		Run: func(cmd *cobra.Command, args []string) {
+			from, _ := cmd.Flags().GetString("from")
+			brief, _ := cmd.Flags().GetString("brief")
+			lane, _ := cmd.Flags().GetString("lane")
+			ids, _ := cmd.Flags().GetStringSlice("ids")
+			write, _ := cmd.Flags().GetBool("write")
+			printRes(app.LeadSplit(cwd, brief, from, lane, ids, write))
+		},
+	}
+	leadSplitCmd.Flags().String("from", "", "需求文档路径")
+	leadSplitCmd.Flags().String("brief", "", "需求文本（优先于 --from）")
+	leadSplitCmd.Flags().String("lane", "LD", "生成 id 的前缀")
+	leadSplitCmd.Flags().StringSlice("ids", nil, "显式指定前若干张卡的 id")
+	leadSplitCmd.Flags().Bool("write", false, "真正追加写入蓝图（默认只返回 diff，不写盘）")
+	leadCmd.AddCommand(leadSplitCmd)
+
+	leadSignalsCmd := &cobra.Command{
+		Use:   "signals",
+		Short: "检测系统级阻塞信号（默认纯只读）",
+		Run: func(cmd *cobra.Command, args []string) {
+			enq, _ := cmd.Flags().GetBool("enqueue")
+			printRes(app.LeadSignals(cwd, enq))
+		},
+	}
+	leadSignalsCmd.Flags().Bool("enqueue", false, "入队观察作业（需 lead 身份，受 auto_kinds 与升级人工约束）")
+	leadCmd.AddCommand(leadSignalsCmd)
 	root.AddCommand(leadCmd)
 
 	// 同一二进制的内部 Runner：参数白名单，隐藏于帮助。

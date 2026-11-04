@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useBoard } from '../stores/board'
 import { NODE_PRESETS } from '../../../assets/views/nodes/nodes-view.mjs'
 
@@ -35,6 +35,57 @@ const title = computed(() => {
   return zh.value ? '新增执行节点' : 'Add execution node'
 })
 
+// 模型目录只来自「已登记实测枚举」，绝不在前端硬编码一份通用模型清单。
+// 端点未接线 / 不可达时保持自由输入，并把状态标为「目录不可用」而不是伪造可选项。
+type ModelEntry = { id: string; source: string; verified: boolean }
+const modelCatalog = ref<ModelEntry[]>([])
+const catalogEvidence = ref(false)
+const catalogLoaded = ref(false)
+
+// 目录按「发行包维度」(cn / intl) 登记，与节点的 cli_flavor(claude / codex)
+// 是两套口径。绝不硬做映射去臆测能力：直接列全部已登记模型并标出来源，
+// 让用户自己判断；写进节点的仍是 default_model 这一个自由值。
+async function loadModelCatalog() {
+  catalogLoaded.value = false
+  try {
+    const res = await fetch('/api/v1/nodes/models', { headers: { Accept: 'application/json' } })
+    if (!res.ok) throw new Error(String(res.status))
+    const data = await res.json()
+    modelCatalog.value = Array.isArray(data.models) ? data.models : []
+    catalogEvidence.value = Boolean(data.has_evidence)
+  } catch {
+    modelCatalog.value = []
+    catalogEvidence.value = false
+  } finally {
+    catalogLoaded.value = true
+  }
+}
+
+const modelStatus = computed(() => {
+  const value = form.default_model.trim()
+  if (!value) {
+    return {
+      kind: 'empty',
+      text: zh.value ? '未指定，沿用 CLI 自身默认模型' : 'Unset; CLI default applies',
+    }
+  }
+  const hit = modelCatalog.value.find((m) => m.id === value)
+  if (hit) {
+    return {
+      kind: hit.verified ? 'verified' : 'listed',
+      text: hit.verified
+        ? (zh.value ? `已实测 · 来源 ${hit.source}` : `Verified · source ${hit.source}`)
+        : (zh.value ? `目录内 · 来源 ${hit.source}` : `Listed · source ${hit.source}`),
+    }
+  }
+  return {
+    kind: 'unverified',
+    text: catalogLoaded.value && !catalogEvidence.value
+      ? (zh.value ? '未标定：本节点无已登记的模型证据目录，按自定义值保存' : 'Unverified: no registered catalog for this node; saved as custom')
+      : (zh.value ? '未标定：目录内无此模型，按自定义值保存' : 'Unverified: not in catalog; saved as custom'),
+  }
+})
+
 function applyPreset(kind: 'claude' | 'codex' | 'custom') {
   const p = NODE_PRESETS[kind] || NODE_PRESETS.custom
   if (kind === 'custom' && editing.value) return
@@ -42,6 +93,7 @@ function applyPreset(kind: 'claude' | 'codex' | 'custom') {
   form.name = String(p.name || form.name || '')
   form.entry = String(p.entry || form.entry || '')
   form.slots = Number(p.slots) > 0 ? Number(p.slots) : 1
+  // 这两个是「常用值」而非实测证据；保存时仍会按目录标为未标定。
   if (kind === 'claude') form.default_model = form.default_model || 'sonnet'
   if (kind === 'codex') form.default_model = form.default_model || 'gpt-5'
   board.applyNodePreset(kind)
@@ -60,6 +112,7 @@ watch(
     form.heartbeat_interval_sec =
       Number(draft.heartbeat_interval_sec) >= 5 ? Number(draft.heartbeat_interval_sec) : 60
     form.default_model = String(draft.default_model || '')
+    void loadModelCatalog()
   },
   { immediate: true },
 )
@@ -196,8 +249,23 @@ async function submit() {
           <input
             v-model="form.default_model"
             class="input"
-            :placeholder="zh ? '如 sonnet / gpt-5；执行任务时默认使用' : 'e.g. sonnet / gpt-5'"
+            list="node-model-options"
+            :placeholder="zh ? '选目录内模型，或填自定义值' : 'Pick from catalog or type a custom value'"
           >
+          <datalist id="node-model-options">
+            <option
+              v-for="m in modelCatalog"
+              :key="`${m.flavor}:${m.id}`"
+              :value="m.id"
+              :label="`${m.flavor} · ${m.source}${m.verified ? ' ✓' : ''}`"
+            />
+          </datalist>
+          <span class="field-hint" :data-model-status="modelStatus.kind">
+            {{ modelStatus.text }}
+            <template v-if="modelCatalog.length">
+              · {{ zh ? '目录可用' : 'catalog available' }} ({{ modelCatalog.length }})
+            </template>
+          </span>
           <span class="field-hint">
             {{
               zh
