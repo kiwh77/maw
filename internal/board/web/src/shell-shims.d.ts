@@ -41,6 +41,7 @@ declare module '*/assets/shell/router.mjs' {
   export const PARAM_STATUS: string
   export const PARAM_SEARCH: string
   export const PARAM_DETAIL: string
+  export const PARAM_ITERATION: string
   export function isLegacyProjectAnchor(hash?: string): boolean
   export function projectFromHash(hash?: string): string
   export function parseRoute(

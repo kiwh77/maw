@@ -83,10 +83,19 @@ func GetIteration(tx *sql.Tx, projectID, id string) (*Iteration, error) {
 	return it, err
 }
 
-// ListIterations 按创建时间升序列出工程的全部迭代。
+// ListIterations 列出迭代。
+//
+// projectID 为空时跨工程列出全部迭代（看板「全部工程」与顶栏下拉需要它），
+// 否则只列该工程。排序固定为「工程 → 创建时间 → id」，输出顺序可复现。
 func ListIterations(tx *sql.Tx, projectID string) ([]*Iteration, error) {
-	rows, err := tx.Query(`SELECT `+iterationCols+` FROM iterations
-		WHERE project_id = ? ORDER BY created_at ASC, id ASC`, projectID)
+	q := `SELECT ` + iterationCols + ` FROM iterations`
+	var args []any
+	if pid := strings.TrimSpace(projectID); pid != "" {
+		q += ` WHERE project_id = ?`
+		args = append(args, pid)
+	}
+	q += ` ORDER BY project_id ASC, created_at ASC, id ASC`
+	rows, err := tx.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -90,6 +90,8 @@ const listHtml = computed(() => {
       agent: board.state.route.agent,
       status: board.state.route.status,
       search: board.state.route.search,
+      // null＝不筛；空串＝只看未归属迭代，视图不能把它当「没筛」。
+      iteration: board.state.route.iteration,
     },
   }
   return render(viewState || { status: 'loading' }, ctx)
@@ -164,7 +166,17 @@ function selectIteration(id: string) {
 }
 
 onMounted(reload)
-watch(() => [props.viewId, board.state.route.project, board.state.route.agent, board.state.route.status, board.state.route.search], reload)
+watch(
+  () => [
+    props.viewId,
+    board.state.route.project,
+    board.state.route.agent,
+    board.state.route.status,
+    board.state.route.search,
+    board.state.route.iteration,
+  ],
+  reload,
+)
 
 function onListClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null

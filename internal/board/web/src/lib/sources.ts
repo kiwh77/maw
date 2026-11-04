@@ -46,7 +46,13 @@ export function isStaticExport(win: Window | null | undefined) {
   return protocol === 'file:'
 }
 
-type RouteLike = { project?: string; agent?: string; status?: string }
+type RouteLike = {
+  project?: string
+  agent?: string
+  status?: string
+  /** null 表示不按迭代筛；空串表示只看未归属迭代的任务。 */
+  iteration?: string | null
+}
 
 type JsonFail = { unavailable: true; status: number; unauthenticated?: boolean }
 
@@ -206,6 +212,10 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
     if (route.project) params.set('project', route.project)
     if (route.agent) params.set('agent', route.agent)
     if (route.status) params.set('status', route.status)
+    // 空串是合法筛选值；null/undefined 才是「不按迭代筛」。
+    if (route.iteration !== null && route.iteration !== undefined) {
+      params.set('iteration', route.iteration)
+    }
     const query = params.toString()
     return getJSON(TASKS_SOURCE + (query ? `?${query}` : ''))
   }

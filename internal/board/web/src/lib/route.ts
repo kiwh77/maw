@@ -8,6 +8,7 @@ export {
   PARAM_STATUS,
   PARAM_SEARCH,
   PARAM_DETAIL,
+  PARAM_ITERATION,
   parseRoute,
   serializeQuery,
   serializeHash,

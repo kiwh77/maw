@@ -138,6 +138,7 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 			"tasks":            snap.Tasks,
 			"agents":           snap.Agents,
 			"projects":         snap.Projects,
+			"iterations":       snap.Iterations,
 			"filter_project":   snap.FilterProject,
 			"filter_agent":     snap.FilterAgent,
 			"filter_status":    snap.FilterStatus,

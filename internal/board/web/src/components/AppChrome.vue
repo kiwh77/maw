@@ -49,6 +49,32 @@ const statusOptions = computed(() => {
   return Object.keys(counts).sort()
 })
 
+/**
+ * 迭代下拉的两个哨兵值。
+ *
+ * 路由里 `iteration` 是三态：null＝不筛、空串＝只看未归属、其余＝具体迭代。
+ * `<select>` 的 value 只能是字符串，所以「不筛」与「未归属」各用一个哨兵，
+ * 提交时再翻回路由值——否则选「未归属」会被当成「不筛」而丢筛选。
+ */
+const ALL_ITERATIONS = '__all__'
+const UNASSIGNED_ITERATION = '__unassigned__'
+
+const iterationOptions = computed(() =>
+  (snap.value?.iterations || []).filter((it) => it && String(it.id || '').trim()),
+)
+
+const iterationValue = computed(() => {
+  const value = board.state.route.iteration
+  if (value === null || value === undefined) return ALL_ITERATIONS
+  return value === '' ? UNASSIGNED_ITERATION : String(value)
+})
+
+function onIterationChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  const iteration = value === ALL_ITERATIONS ? null : value === UNASSIGNED_ITERATION ? '' : value
+  board.patchFilters({ iteration })
+}
+
 const taskCountLabel = computed(() => {
   const n = snap.value?.tasks?.length ?? 0
   const total = snap.value?.total ?? n
@@ -61,7 +87,7 @@ function onFilterChange(field: 'agent' | 'status', event: Event) {
 }
 
 function onReset() {
-  board.patchFilters({ agent: '', status: '', search: '' })
+  board.patchFilters({ agent: '', status: '', search: '', iteration: null })
   search.value = ''
 }
 
@@ -131,6 +157,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
       >
         <option value="">{{ board.state.lang === 'zh' ? '全部状态' : 'All statuses' }}</option>
         <option v-for="st in statusOptions" :key="st" :value="st">{{ st }}</option>
+      </select>
+      <select
+        id="f-iteration"
+        :value="iterationValue"
+        aria-label="Iteration"
+        @change="onIterationChange"
+      >
+        <option :value="ALL_ITERATIONS">
+          {{ board.state.lang === 'zh' ? '全部迭代' : 'All iterations' }}
+        </option>
+        <option
+          v-for="it in iterationOptions"
+          :key="String(it.project_id || '') + '/' + String(it.id)"
+          :value="String(it.id)"
+        >
+          {{ it.name ? `${it.name} · ${it.id}` : it.id }}
+        </option>
+        <option :value="UNASSIGNED_ITERATION">
+          {{ board.state.lang === 'zh' ? '未归属迭代' : 'No iteration' }}
+        </option>
       </select>
       <button type="button" id="f-reset" class="quiet-button" @click="onReset">
         {{ board.state.lang === 'zh' ? '重置' : 'Reset' }}

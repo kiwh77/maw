@@ -34,13 +34,23 @@ export type BoardRoute = {
   agent: string
   status: string
   search: string
+  /** null 表示不按迭代筛；空串表示只看未归属迭代的任务。 */
+  iteration: string | null
   detail: string
   fromHash?: boolean
+}
+
+export type Iteration = {
+  id: string
+  name?: string
+  project_id?: string
+  status?: string
 }
 
 export type Snapshot = {
   projects?: Array<{ id: string; name?: string; path?: string; main_branch?: string }>
   agents?: Array<Record<string, unknown>>
+  iterations?: Iteration[]
   tasks?: Array<Record<string, unknown>>
   counts?: Record<string, number>
   total?: number
@@ -154,7 +164,7 @@ export const boardStore = {
     Object.assign(state.route, next)
   },
 
-  patchFilters(patch: Partial<Pick<BoardRoute, 'project' | 'agent' | 'status' | 'search'>>) {
+  patchFilters(patch: Partial<Pick<BoardRoute, 'project' | 'agent' | 'status' | 'search' | 'iteration'>>) {
     const next = withRoute(state.route, patch) as BoardRoute
     writeRoute(next, { history: window.history, location: window.location, replace: true })
     Object.assign(state.route, next)
@@ -267,6 +277,10 @@ export const boardStore = {
     if (state.route.project) params.set('project', state.route.project)
     if (state.route.agent) params.set('agent', state.route.agent)
     if (state.route.status) params.set('status', state.route.status)
+    // 空串是合法筛选值：`?iteration=` 只要未归属迭代的任务。
+    if (state.route.iteration !== null && state.route.iteration !== undefined) {
+      params.set('iteration', state.route.iteration)
+    }
     const q = params.toString()
     const urls = [`/api/board${q ? `?${q}` : ''}`, `./snapshot.json${q ? `?${q}` : ''}`]
     for (const url of urls) {
