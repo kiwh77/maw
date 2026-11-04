@@ -1,6 +1,7 @@
 package main
 
 import (
+	"time"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -344,6 +345,29 @@ func main() {
 	statusReportCmd.Flags().String("kind", "", i18n.T("flag.kind"))
 	statusCmd.AddCommand(statusReportCmd)
 	root.AddCommand(statusCmd)
+
+	// wait：等 deps 或等任务终态，超时用退出码 2 与「参数/环境错误」区分开。
+	waitCmd := &cobra.Command{
+		Use:   "wait",
+		Short: i18n.T("cmd.wait.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			task, _ := cmd.Flags().GetString("task")
+			depsOf, _ := cmd.Flags().GetString("deps-of")
+			timeoutSec, _ := cmd.Flags().GetInt("timeout")
+			pollSec, _ := cmd.Flags().GetInt("poll")
+			printRes(app.Wait(cwd, app.WaitInput{
+				TaskID:  task,
+				DepsOf:  depsOf,
+				Timeout: time.Duration(timeoutSec) * time.Second,
+				Poll:    time.Duration(pollSec) * time.Second,
+			}))
+		},
+	}
+	waitCmd.Flags().String("task", "", i18n.T("flag.wait_task"))
+	waitCmd.Flags().String("deps-of", "", i18n.T("flag.deps_of"))
+	waitCmd.Flags().Int("timeout", 300, i18n.T("flag.wait_timeout"))
+	waitCmd.Flags().Int("poll", 2, i18n.T("flag.wait_poll"))
+	root.AddCommand(waitCmd)
 	root.AddCommand(&cobra.Command{Use: "doctor", Run: func(cmd *cobra.Command, args []string) { printRes(app.Doctor(cwd)) }})
 
 	blockCmd := &cobra.Command{
