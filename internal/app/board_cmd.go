@@ -147,9 +147,11 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 	obsAPI := newObservabilityAPI(store, auth)
 	obsH := obsAPI.Handler()
 
-	// 工程登记写资源：看板「工程」页的移除走这一条，与 CLI 同一套用例。
+	// 工程登记与节点写资源：看板「工程」页的移除、节点登记都走这一条。
+	// 节点接到本机 nodes 表（通用 local_cli），不再回 501。
 	resAPI := &httpresources.API{
 		Projects: projectRemovalPort{cwd: cwd},
+		Nodes:    hubDBNodes{gdb: gdb},
 		Auth:     auth,
 	}
 	resH := resAPI.Handler()

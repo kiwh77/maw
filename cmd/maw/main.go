@@ -386,6 +386,47 @@ func main() {
 	projectCmd.AddCommand(projectRmCmd)
 	root.AddCommand(projectCmd)
 
+	// 节点管理：通用 local_cli 节点登记、列表与删除。
+	nodeCmd := &cobra.Command{Use: "node", Short: "管理本机执行节点（通用 local_cli）"}
+	nodeCmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "列出已登记节点",
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.NodeList(cwd)) },
+	})
+	nodeRegCmd := &cobra.Command{
+		Use:   "register",
+		Short: "登记通用本地 CLI 节点",
+		Run: func(cmd *cobra.Command, args []string) {
+			id, _ := cmd.Flags().GetString("id")
+			label, _ := cmd.Flags().GetString("label")
+			project, _ := cmd.Flags().GetString("project")
+			slots, _ := cmd.Flags().GetInt("slots")
+			cmdJSON, _ := cmd.Flags().GetString("cmd")
+			system, _ := cmd.Flags().GetBool("system")
+			printRes(app.NodeRegister(cwd, app.NodeRegisterInput{
+				ID: id, Label: label, ProjectID: project, Slots: slots,
+				ArgvJSON: cmdJSON, System: system, DryRun: dryRun,
+			}))
+		},
+	}
+	nodeRegCmd.Flags().String("id", "", "节点 id")
+	nodeRegCmd.Flags().String("label", "", "展示名")
+	nodeRegCmd.Flags().String("project", "", "归属工程 id（默认当前仓）")
+	nodeRegCmd.Flags().Int("slots", 1, "槽位上限")
+	nodeRegCmd.Flags().String("cmd", "", `启动 argv JSON，如 ["/bin/echo","ok"]`)
+	nodeRegCmd.Flags().Bool("system", false, "标记为系统节点候选")
+	_ = nodeRegCmd.MarkFlagRequired("id")
+	nodeCmd.AddCommand(nodeRegCmd)
+	nodeCmd.AddCommand(&cobra.Command{
+		Use:   "rm [id]",
+		Short: "删除节点登记",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			printRes(app.NodeRemove(cwd, args[0], dryRun))
+		},
+	})
+	root.AddCommand(nodeCmd)
+
 	taskCmd := &cobra.Command{Use: "task"}
 	taskCmd.AddCommand(&cobra.Command{Use: "list", Run: func(cmd *cobra.Command, args []string) { printRes(app.TaskList(cwd)) }})
 	taskCmd.AddCommand(&cobra.Command{

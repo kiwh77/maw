@@ -17,12 +17,13 @@ const (
 	AdapterWorkBuddy AdapterKind = "workbuddy"
 	AdapterTrae      AdapterKind = "trae"
 	AdapterZCode     AdapterKind = "zcode"
+	AdapterLocalCLI  AdapterKind = "local_cli"
 )
 
 // Valid 报告取值是否合法。
 func (a AdapterKind) Valid() bool {
 	switch a {
-	case AdapterCodeBuddy, AdapterWorkBuddy, AdapterTrae, AdapterZCode:
+	case AdapterCodeBuddy, AdapterWorkBuddy, AdapterTrae, AdapterZCode, AdapterLocalCLI:
 		return true
 	}
 	return false

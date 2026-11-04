@@ -69,6 +69,28 @@ function listField(payload, name) {
   return null;
 }
 
+/** 把读接口 NodeRow（node_id/label/last_seen/slot_limit）对齐成节点视图形状。 */
+export function normalizeNodeRow(row) {
+  if (!row || typeof row !== "object") return row;
+  const id = String(row.id || row.node_id || "").trim();
+  const name = String(row.name || row.label || id).trim();
+  const lastSeen = row.presence?.last_seen || row.last_seen || "";
+  const online = row.presence?.online;
+  const slotLimit = Number(row.slots?.total ?? row.slot_limit ?? 0) || 0;
+  const busy = Number(row.slots?.busy ?? row.active_slots ?? 0) || 0;
+  const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
+  return {
+    ...row,
+    id,
+    name,
+    presence: row.presence || { online: online !== false && Boolean(lastSeen), last_seen: lastSeen },
+    auth: row.auth || { state: meta.auth_state || "unknown" },
+    capability: row.capability || meta.capabilities || {},
+    slots: row.slots || { busy, total: slotLimit },
+    intake: row.intake || { paused: Boolean(meta.draining), reason: meta.pause_reason || "" },
+  };
+}
+
 /** 节点列表响应 → 节点视图状态。 */
 export function nodesStateFrom(payload) {
   if (!payload || typeof payload !== "object") return errorState("missing_payload");
@@ -78,7 +100,7 @@ export function nodesStateFrom(payload) {
   if (payload.unavailable) return errorState("unavailable");
   const nodes = listField(payload, "nodes");
   if (!nodes) return errorState("invalid_payload");
-  return { status: "ok", nodes };
+  return { status: "ok", nodes: nodes.map(normalizeNodeRow) };
 }
 
 /** 运行列表响应 → 运行视图状态；`reconciliation` 等字段原样保留。 */

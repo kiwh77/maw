@@ -164,6 +164,12 @@ ON CONFLICT(node_id) DO UPDATE SET
 	return err
 }
 
+// DeleteNode 删除节点行；不存在不算错误。
+func DeleteNode(tx *sql.Tx, id string) error {
+	_, err := tx.Exec(`DELETE FROM nodes WHERE node_id = ?`, strings.TrimSpace(id))
+	return err
+}
+
 // GetNode 返回节点；不存在返回 nil。
 func GetNode(tx *sql.Tx, id string) (*Node, error) {
 	var (
