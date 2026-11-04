@@ -222,6 +222,8 @@ func (s Snapshot) WithIteration(iterationID string) Snapshot {
 	out.UpdatedAt = s.UpdatedAt
 	out.GeneratedAt = s.GeneratedAt
 	out.Projects = s.Projects
+	// 迭代清单是下拉候选全集，与当前任务筛选无关，必须原样保留。
+	out.Iterations = s.Iterations
 	out.FilterProject = s.FilterProject
 	out.FilterAgent = s.FilterAgent
 	out.FilterStatus = s.FilterStatus

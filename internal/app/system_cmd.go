@@ -336,17 +336,24 @@ func (p systemDispatchProjection) Policy(_ context.Context, projectID string) (m
 }
 
 // allowedNodes 优先用 config [managed].allowed_nodes；未配置时回退 worker_node 单值。
+// 配置里重复的节点 ID 只保留首次出现，顺序不变。
 func (p systemDispatchProjection) allowedNodes(projectID string) []model.NodeID {
 	_ = projectID
 	if p.rt != nil && p.rt.pc != nil && p.rt.pc.Config != nil {
 		raw := p.rt.pc.Config.Managed.AllowedNodes
 		out := make([]model.NodeID, 0, len(raw))
+		seen := make(map[model.NodeID]struct{}, len(raw))
 		for _, id := range raw {
 			id = strings.TrimSpace(id)
 			if id == "" {
 				continue
 			}
-			out = append(out, model.NodeID(id))
+			nid := model.NodeID(id)
+			if _, ok := seen[nid]; ok {
+				continue
+			}
+			seen[nid] = struct{}{}
+			out = append(out, nid)
 		}
 		if len(out) > 0 {
 			return out
