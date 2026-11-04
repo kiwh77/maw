@@ -27,7 +27,7 @@ func DetectApp() string {
 		return "qoder"
 	case hasEnvPrefix("TRAE_") || strings.Contains(strings.ToLower(os.Getenv("TERM_PROGRAM")), "trae"):
 		return "trae"
-	case hasEnvPrefix("CLAUDE_") || envTruthy("CLAUDECODE") || strings.Contains(os.Getenv("PATH"), "claude"):
+	case hasClaudeRuntime():
 		return "claude"
 	case hasEnvPrefix("WINDSURF_") || hasEnvPrefix("CODEIUM_"):
 		return "windsurf"
@@ -118,6 +118,18 @@ func ResolveOrAllocate(cwd, explicit, projectName string, existingIDs []string) 
 		return "", false, err
 	}
 	return Suggest(projectName, existingIDs), true, nil
+}
+
+// hasClaudeRuntime 判断当前进程是否运行在 claude 运行时内。
+//
+// 只认明确的运行时环境变量：
+//   - CLAUDE_* 前缀，覆盖 CLAUDE_CODE_SSE_PORT / CLAUDE_CODE_ENTRYPOINT 等 IDE 集成变量；
+//   - CLAUDECODE 为真值。
+//
+// PATH 是否含 claude 目录（如 ~/.claude-code/bin）不作为依据：普通终端只要 PATH 里带上
+// 该目录就会被误判成 claude-*，因此这里显式不看 PATH。
+func hasClaudeRuntime() bool {
+	return hasEnvPrefix("CLAUDE_") || envTruthy("CLAUDECODE")
 }
 
 func envTruthy(key string) bool {

@@ -36,6 +36,7 @@ func requireDarwin(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("进程组／锁验收以 darwin 为准")
 	}
+	testsupport.RequireProcessTools(t)
 }
 
 // G01：旧心跳／未知占用不得把 managed 任务打回可重派。

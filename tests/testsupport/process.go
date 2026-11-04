@@ -26,6 +26,19 @@ func StartSleep(t *testing.T, seconds int) *exec.Cmd {
 	return cmd
 }
 
+// RequireProcessTools 在本机无法执行 ps 时跳过依赖进程身份探测的用例。
+//
+// 进程启动时间／身份探测走 /bin/ps；受限环境（沙箱禁 setuid exec）下无法取证，
+// 跳过比伪造证据诚实。与 internal/runner/process 的同类守卫保持同一口径。
+func RequireProcessTools(t *testing.T) {
+	t.Helper()
+	cmd := exec.Command("ps", "-p", "1", "-o", "pid=")
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	if err := cmd.Run(); err != nil {
+		t.Skipf("本机无法执行 ps，跳过依赖进程身份探测的测试: %v", err)
+	}
+}
+
 // WriteScript 写可执行 shell 脚本到 dir。
 func WriteScript(t *testing.T, dir, name, body string) string {
 	t.Helper()

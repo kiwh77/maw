@@ -22,6 +22,7 @@ import (
 	"github.com/kiwh77/maw/internal/engine/ports"
 	"github.com/kiwh77/maw/internal/runner/process"
 	"github.com/kiwh77/maw/internal/runner/recovery"
+	"github.com/kiwh77/maw/tests/testsupport"
 )
 
 type harness struct {
@@ -125,6 +126,7 @@ merge_order = 2
 }
 
 func TestProbeClaimRunnerManifestAndRecovery(t *testing.T) {
+	testsupport.RequireProcessTools(t)
 	h := newHarness(t)
 
 	// Probe → 受控 CLI（labeled: tests/managed/testdata/fake-codebuddy.sh）

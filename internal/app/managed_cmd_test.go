@@ -2,6 +2,7 @@ package app
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -13,6 +14,19 @@ import (
 	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/runner/process"
 )
+
+// requireProcessTools 在本机无法执行 ps 时跳过依赖进程身份探测的用例。
+//
+// package app 不能反向导入 tests/testsupport（后者依赖 app），故此处保留同口径守卫；
+// 受限环境（沙箱禁 setuid exec）下无法取证，跳过比伪造证据诚实。
+func requireProcessTools(t *testing.T) {
+	t.Helper()
+	cmd := exec.Command("ps", "-p", "1", "-o", "pid=")
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	if err := cmd.Run(); err != nil {
+		t.Skipf("本机无法执行 ps，跳过依赖进程身份探测的测试: %v", err)
+	}
+}
 
 func TestManagedStatusDefaults(t *testing.T) {
 	f := newFixture(t)
@@ -78,6 +92,7 @@ func TestManagedStartLaunchesDetachedRunner(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("受管进程控制仅在 darwin 验收")
 	}
+	requireProcessTools(t)
 	f := newFixture(t)
 	f.seedTask("VN-M8", "ready", "", []string{"mod_m8/**"})
 	t.Setenv("MAW_RUNNER_ONCE", "1")
