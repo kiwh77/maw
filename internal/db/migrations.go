@@ -436,6 +436,56 @@ CREATE UNIQUE INDEX IF NOT EXISTS system_jobs_dedupe
     WHERE trigger_event_id > 0;
 `
 
+// systemAgentRunReconcileDDL 是 v13：system_jobs.kind 放行 run_reconcile。
+//
+// 与 v10 同法重建表：SQLite 不能就地修改 CHECK 约束。v12 的 run_id /
+// operation_id / journal_dir 三列必须一并回灌，否则升级会把作业到执行的反查链丢掉。
+const systemAgentRunReconcileDDL = `
+CREATE TABLE system_jobs_v13 (
+    job_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    trigger_event_id INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    decision_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    run_id TEXT NOT NULL DEFAULT '',
+    operation_id TEXT NOT NULL DEFAULT '',
+    journal_dir TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    locked_by TEXT NOT NULL DEFAULT '',
+    locked_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    CHECK (kind IN ('unblock_assist', 'task_split', 'ops_run', 'dispatch_ready', 'run_reconcile')),
+    CHECK (status IN ('queued', 'running', 'done', 'failed', 'escalated', 'cancelled')),
+    CHECK (attempts >= 0),
+    CHECK (max_attempts >= 1)
+);
+INSERT INTO system_jobs_v13(
+    job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
+    decision_json, result_json, run_id, operation_id, journal_dir,
+    attempts, max_attempts, locked_by, locked_at, created_at, updated_at, finished_at
+)
+SELECT
+    job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
+    decision_json, result_json, run_id, operation_id, journal_dir,
+    attempts, max_attempts, locked_by, locked_at, created_at, updated_at, finished_at
+FROM system_jobs;
+DROP TABLE system_jobs;
+ALTER TABLE system_jobs_v13 RENAME TO system_jobs;
+CREATE INDEX IF NOT EXISTS system_jobs_status ON system_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS system_jobs_project ON system_jobs(project_id, status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS system_jobs_dedupe
+    ON system_jobs(project_id, kind, task_id, trigger_event_id)
+    WHERE trigger_event_id > 0;
+`
+
 // iterationsDDL 是 v11：迭代（批次）容器与任务归属。
 //
 // 迭代是任务的容器与合入单位；老任务升级后 iteration_id 为空，表示「未归属任何迭代」。

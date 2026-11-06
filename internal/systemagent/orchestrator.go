@@ -67,6 +67,9 @@ type Orchestrator struct {
 	// Dispatch 处理 dispatch_ready：Match → Claim → launch_spec → Coordinator.Step。
 	// 为空时该 kind 的作业按「派发未接线」升级人工，不做空转。
 	Dispatch DispatchPort
+	// Reconcile 处理 run_reconcile：核实受管 Run 的现场，只按端口结论 release/keep/escalate。
+	// 为空时作业按「核实未接线」升级人工（mode=unwired），不修改任何资源。
+	Reconcile ReconcilePort
 	// 审计侧车与 op 日志目录按 <global>/runtime/<project> 推导（见 audit.go），
 	// 不要求宿主额外注入状态目录。
 	ResolvePath func(projectID string) (string, error)
@@ -98,8 +101,8 @@ func (o *Orchestrator) Step(ctx context.Context) (int, error) {
 		n = 1
 	}
 	kinds := append([]string{}, o.Config.AutoKinds...)
-	// 显式入队的 task_split / ops_run / dispatch_ready 也要能被消费
-	for _, extra := range []string{SystemKindTaskSplit, SystemKindOpsRun, SystemKindDispatchReady} {
+	// 显式入队的 task_split / ops_run / dispatch_ready / run_reconcile 也要能被消费
+	for _, extra := range []string{SystemKindTaskSplit, SystemKindOpsRun, SystemKindDispatchReady, SystemKindRunReconcile} {
 		found := false
 		for _, k := range kinds {
 			if k == extra {
@@ -185,6 +188,13 @@ func (o *Orchestrator) runJob(ctx context.Context, job *db.SystemJob) error {
 			return err
 		}
 		projectPath = p
+	}
+
+	// run_reconcile 必须排在预分类 escalate 之前：unknown 现场的信号会预置
+	// action=escalate_human，但契约要求交 ReconcilePort 核实后按端口结论记结果
+	// （unknown → mode=keep），不能在这里被「预分类」提前截断。
+	if job.Kind == SystemKindRunReconcile {
+		return o.runReconcileJob(ctx, job, projectPath)
 	}
 
 	// 规则：escalate 模式（decision 预置）或 escalate 原因 → 不调 LLM

@@ -46,6 +46,9 @@ ALTER TABLE system_jobs ADD COLUMN journal_dir TEXT NOT NULL DEFAULT '';
 
 func init() {
 	migrations = append(migrations, Migration{Version: 12, Name: "system_job_run_link", SQL: systemJobRunLinkDDL})
+	// v13 必须排在 v12 之后追加：v13 重建表时要回灌 v12 新增的三列。
+	// MigrateDB 按注册顺序执行，因此这里不走 migrations.go 的台账字面量。
+	migrations = append(migrations, Migration{Version: 13, Name: "system_agent_run_reconcile", SQL: systemAgentRunReconcileDDL})
 }
 
 // ProjectionSystemAgentEvents 是系统 Agent 事件游标在 projection_state 中的名字。
@@ -62,6 +65,8 @@ const (
 	SystemKindTaskSplit     = "task_split"
 	SystemKindOpsRun        = "ops_run"
 	SystemKindDispatchReady = "dispatch_ready"
+	// SystemKindRunReconcile 核实受管 Run 的现场并按结论释放/保留资源（v13 放行 CHECK）。
+	SystemKindRunReconcile = "run_reconcile"
 )
 
 const (

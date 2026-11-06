@@ -23,6 +23,8 @@ const (
 	agentHeartbeatWindow  = 15 * time.Minute
 	mergingStallThreshold = 30 * time.Minute
 	staleLockAge          = 30 * time.Minute
+	// runUnverifiedWindow 是「非终态 Run 心跳缺失」的判定阈值，与 Agent 心跳窗口同值。
+	runUnverifiedWindow = agentHeartbeatWindow
 )
 
 // SignalKind 是系统级信号的类别，与 system_jobs.kind 是两套概念：
@@ -34,6 +36,7 @@ const (
 	SignalAllAgentsOffline SignalKind = "all_agents_offline"
 	SignalMergingStalled   SignalKind = "merging_stalled"
 	SignalStaleLock        SignalKind = "stale_lock"
+	SignalRunUnverified    SignalKind = "run_unverified"
 )
 
 // Signal 是一次系统级观察的结果。
@@ -59,7 +62,7 @@ type Signal struct {
 // Key 返回信号的稳定去重键，冷却与去重都按它，而不是按 job 的 task+kind。
 func (s Signal) Key() string {
 	id := s.TaskID
-	if s.Kind == SignalStaleLock {
+	if s.Kind == SignalStaleLock || s.Kind == SignalRunUnverified {
 		id = s.ResourceKey
 	}
 	return string(s.Kind) + ":" + s.ProjectID + ":" + id
@@ -108,6 +111,28 @@ type HeldLockFact struct {
 	// UnknownHolder 表示占用者身份不明 / 证据不足，受 unknown 占用保护，
 	// 这种残留只上报，不允许自动释放或自动处置。
 	UnknownHolder bool
+}
+
+// UnverifiedRunFact 是一条可能仍占资源、但尚未核实的受管 Run 证据。
+type UnverifiedRunFact struct {
+	ProjectID  string
+	TaskID     string
+	RunID      string
+	InstanceID string
+	// State 取 runs.reconciliation_state：running / finished / not_started / unknown。
+	State string
+	// LastSeen 是 Run 的最后更新时间（runs.updated_at）；零值表示证据不足。
+	LastSeen time.Time
+	// CheckedAt 是最近一次核实的时刻；零值表示从未核实。
+	CheckedAt time.Time
+}
+
+// UnverifiedRunSource 是 SignalFacts 的可选扩展：提供 Run 核实证据。
+//
+// 写成可选接口而不是给 SignalFacts 加必选方法，是为了不打断既有装配实现
+// （hubSignalFacts 等）；未实现时只是不产出 run_unverified，不影响其它信号。
+type UnverifiedRunSource interface {
+	UnverifiedRuns() []UnverifiedRunFact
 }
 
 // SignalFacts 是 DetectSystemSignals 唯一的证据来源。
@@ -231,7 +256,60 @@ func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Tim
 			},
 		})
 	}
+	// 5) 未核实 Run：unknown 一律产出；非终态且心跳超阈值也产出。只入队观察，
+	//    真正的释放/保留结论由 ReconcilePort 给出，编排层不按 State 自行分支。
+	if src, ok := facts.(UnverifiedRunSource); ok {
+		for _, r := range src.UnverifiedRuns() {
+			if !runUnverified(r, now) {
+				continue
+			}
+			state := strings.ToLower(strings.TrimSpace(r.State))
+			decision := map[string]any{
+				"run_id":          r.RunID,
+				"reconcile_state": state,
+				"observation":     true,
+			}
+			escalate := state == "unknown"
+			if escalate {
+				// 契约：unknown 行「mode=keep（信号预分类为 escalate）」，
+				// 编排层先路由 run_reconcile 再处理预分类，故不会绕过核实。
+				decision["action"] = string(ActionEscalateHuman)
+			}
+			emit(Signal{
+				Kind:        SignalRunUnverified,
+				ProjectID:   r.ProjectID,
+				TaskID:      r.TaskID,
+				ResourceKey: r.RunID,
+				Reason: fmt.Sprintf("Run %s 处于 %s 且超过 %s 未核实，入队核实并只按端口结论处置",
+					r.RunID, state, runUnverifiedWindow),
+				JobKind:  SystemKindRunReconcile,
+				Decision: decision,
+				Escalate: escalate,
+			})
+		}
+	}
 	return out
+}
+
+// runUnverified 判定一条 Run 证据是否属于「未核实的占用」。
+//
+// 本轮已核实过的一律跳过；finished 是确定结束，不产出；unknown 无现场可依，
+// 直接产出；其余非终态按最后更新是否超过阈值判定（零值按证据不足处理）。
+func runUnverified(f UnverifiedRunFact, now time.Time) bool {
+	if !f.CheckedAt.IsZero() && now.Sub(f.CheckedAt) <= runUnverifiedWindow {
+		return false
+	}
+	state := strings.ToLower(strings.TrimSpace(f.State))
+	if state == "finished" {
+		return false
+	}
+	if state == "unknown" {
+		return true
+	}
+	if f.LastSeen.IsZero() {
+		return true
+	}
+	return now.Sub(f.LastSeen) > runUnverifiedWindow
 }
 
 // agentAlive 报告 Agent 是否算「在线」：状态非 offline 且心跳在窗口内。

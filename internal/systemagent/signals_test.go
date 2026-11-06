@@ -20,6 +20,7 @@ type fakeFacts struct {
 	agents   []AgentHeartbeatFact
 	merging  []MergingTaskFact
 	locks    []HeldLockFact
+	runs     []UnverifiedRunFact
 }
 
 func (f fakeFacts) Projects() []string                    { return f.projects }
@@ -27,6 +28,7 @@ func (f fakeFacts) RecentGateFailures() []GateFailureFact { return f.gates }
 func (f fakeFacts) AgentHeartbeats() []AgentHeartbeatFact { return f.agents }
 func (f fakeFacts) MergingTasks() []MergingTaskFact       { return f.merging }
 func (f fakeFacts) HeldLocks() []HeldLockFact             { return f.locks }
+func (f fakeFacts) UnverifiedRuns() []UnverifiedRunFact   { return f.runs }
 
 var signalTestNow = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 
@@ -408,6 +410,133 @@ func TestDetectSignalsIndependent(t *testing.T) {
 		if findSignal(signals, k) == nil {
 			t.Fatalf("缺信号 %s: %+v", k, signals)
 		}
+	}
+}
+
+// TestDetectRunUnverified 覆盖验收 2：超阈值未核实的占用 Run 产出 run_unverified，
+// JobKind=run_reconcile；unknown 预分类升级，其余只入队观察。
+func TestDetectRunUnverified(t *testing.T) {
+	stale := signalTestNow.Add(-runUnverifiedWindow - time.Minute)
+	fresh := signalTestNow.Add(-time.Minute)
+	cases := []struct {
+		name     string
+		fact     UnverifiedRunFact
+		trigger  bool
+		escalate bool
+	}{
+		{"unknown 一律产出并预分类升级", UnverifiedRunFact{State: "unknown"}, true, true},
+		{"running 心跳超阈值", UnverifiedRunFact{State: "running", LastSeen: stale}, true, false},
+		{"running 心跳新鲜", UnverifiedRunFact{State: "running", LastSeen: fresh}, false, false},
+		{"running 缺 LastSeen 按证据不足", UnverifiedRunFact{State: "running"}, true, false},
+		{"not_started 超阈值", UnverifiedRunFact{State: "not_started", LastSeen: stale}, true, false},
+		{"finished 不产出", UnverifiedRunFact{State: "finished", LastSeen: stale}, false, false},
+		{"本轮已核实", UnverifiedRunFact{State: "unknown", CheckedAt: fresh}, false, false},
+		{"核实时间也已超窗", UnverifiedRunFact{State: "unknown", CheckedAt: stale}, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.fact.ProjectID = "p1"
+			tc.fact.TaskID = "T-1"
+			tc.fact.RunID = "run_1"
+			signals := DetectSystemSignals(fakeFacts{
+				projects: []string{"p1"},
+				runs:     []UnverifiedRunFact{tc.fact},
+			}, config.SystemAgent{}, signalTestNow)
+			got := findSignal(signals, SignalRunUnverified)
+			if tc.trigger != (got != nil) {
+				t.Fatalf("trigger=%v got=%+v signals=%+v", tc.trigger, got, signals)
+			}
+			if !tc.trigger {
+				return
+			}
+			if got.JobKind != SystemKindRunReconcile {
+				t.Fatalf("JobKind=%q want %q", got.JobKind, SystemKindRunReconcile)
+			}
+			if got.ResourceKey != "run_1" || got.Decision["run_id"] != "run_1" {
+				t.Fatalf("应按 Run 维度去重并携带 run_id: %+v", got)
+			}
+			if got.Escalate != tc.escalate {
+				t.Fatalf("Escalate=%v want %v", got.Escalate, tc.escalate)
+			}
+			if tc.escalate && got.Decision["action"] != string(ActionEscalateHuman) {
+				t.Fatalf("unknown 应预分类升级: %v", got.Decision)
+			}
+		})
+	}
+}
+
+// TestDetectRunUnverifiedDedupesByRunID 同一任务的不同 Run 各产出一条，Key 不互相冷却。
+func TestDetectRunUnverifiedDedupesByRunID(t *testing.T) {
+	signals := DetectSystemSignals(fakeFacts{
+		projects: []string{"p1"},
+		runs: []UnverifiedRunFact{
+			{ProjectID: "p1", TaskID: "T-1", RunID: "run_1", State: "unknown"},
+			{ProjectID: "p1", TaskID: "T-1", RunID: "run_2", State: "unknown"},
+			{ProjectID: "p1", TaskID: "T-1", RunID: "run_1", State: "running"},
+		},
+	}, config.SystemAgent{}, signalTestNow)
+	if n := countSignal(signals, SignalRunUnverified); n != 2 {
+		t.Fatalf("应按 Run 去重为 2 条，实际 %d: %+v", n, signals)
+	}
+}
+
+// TestEnqueueRunUnverifiedDefaultObservationOnly 默认不放行 auto_kinds 时只观察：
+// run_reconcile 不落库；显式放行后才入队。
+func TestEnqueueRunUnverifiedDefaultObservationOnly(t *testing.T) {
+	st, err := db.OpenStore(filepath.Join(t.TempDir(), "maw.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	signals := DetectSystemSignals(fakeFacts{
+		projects: []string{"p1"},
+		runs:     []UnverifiedRunFact{{ProjectID: "p1", TaskID: "T-1", RunID: "run_1", State: "unknown"}},
+	}, config.SystemAgent{}, signalTestNow)
+	sig := findSignal(signals, SignalRunUnverified)
+	if sig == nil {
+		t.Fatal("应产出 run_unverified")
+	}
+
+	// 默认：run_reconcile 不在 auto_kinds，只观察。
+	if err := st.Write(func(tx *sql.Tx) error {
+		_, e := EnqueueSignals(tx, config.SystemAgent{MaxAttempts: 3}, []Signal{*sig}, signalTestNow)
+		return e
+	}); err != nil {
+		t.Fatalf("enqueue default: %v", err)
+	}
+	var n int
+	if err := st.Read(func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM system_jobs WHERE kind = ?`, SystemKindRunReconcile).Scan(&n)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("默认不应入队 run_reconcile，实际 %d 条", n)
+	}
+
+	// 放行后：入队且带信号键。
+	cfg := config.SystemAgent{AutoKinds: []string{SystemKindRunReconcile}, CooldownoutSec: 300, MaxAttempts: 3}
+	var queued []*db.SystemJob
+	if err := st.Write(func(tx *sql.Tx) error {
+		var e error
+		queued, e = EnqueueSignals(tx, cfg, []Signal{*sig}, signalTestNow)
+		return e
+	}); err != nil {
+		t.Fatalf("enqueue allowed: %v", err)
+	}
+	if len(queued) != 1 || queued[0].Kind != SystemKindRunReconcile {
+		t.Fatalf("应入队 1 条 run_reconcile: %+v", queued)
+	}
+	if queued[0].Decision["signal_key"] != sig.Key() {
+		t.Fatalf("决策应保留 signal_key: %v", queued[0].Decision)
+	}
+	// 预分类升级也随作业落库，编排层会先走核实再处理它。
+	if queued[0].Decision["action"] != string(ActionEscalateHuman) {
+		t.Fatalf("unknown 信号应带 escalate_human: %v", queued[0].Decision)
 	}
 }
 
