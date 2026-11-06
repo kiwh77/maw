@@ -14,6 +14,9 @@ import BoardView from './views/BoardView.vue'
 import FactoryView from './views/FactoryView.vue'
 import TopoView from './views/TopoView.vue'
 import ProblemsView from './views/ProblemsView.vue'
+// 统计页承载两个页签：原有「用量统计」+ SH-503「自愈统计」。
+// 注册表不在本卡写域内，因此沿用已注册的 analytics 路由，避免改侧栏/深链。
+import AnalyticsView from './views/AnalyticsView.vue'
 
 const board = useBoard()
 const def = computed(() => resolveView(board.registry, board.state.route.view))
@@ -144,6 +147,7 @@ const themeValue = readTheme()
         <!-- problems 走 Vue 问题审查视图（读 snapshot.problems）；VnextHost 里
              旧的 renderProblems 映射保留给旧挂载层与既有单测，不再由本壳渲染。 -->
         <ProblemsView v-else-if="board.state.route.view === 'problems'" />
+        <AnalyticsView v-else-if="board.state.route.view === 'analytics'" />
         <VnextHost v-else :view-id="board.state.route.view" />
       </div>
     </main>

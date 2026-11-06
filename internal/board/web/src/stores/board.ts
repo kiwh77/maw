@@ -622,6 +622,16 @@ export const boardStore = {
     return null
   },
 
+  /**
+   * 自愈统计（SH-503）单独取数：它不是一个注册视图，挂在上方 analytics 页签里，
+   * 因此不走 loadView 的 viewStates 状态机（那个状态机按 DATA_KINDS 判类型）。
+   */
+  async fetchSystemHealth() {
+    const payload = await sources.systemHealth({ project: state.route.project })
+    state.payloads.system_health = payload
+    return payload
+  },
+
   async loadView(kind: string) {
     if (!kind) return
     const token = ++state.loadToken

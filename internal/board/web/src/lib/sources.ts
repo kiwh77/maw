@@ -8,6 +8,8 @@ export {
   DATA_KINDS,
 } from '../../../assets/shell/view-context.mjs'
 
+import { systemHealthPath } from './system-health'
+
 const TASKS_SOURCE = '/api/board'
 
 /** 节点是系统级资源：同一台机器上的 CLI 对任何工程都可用，不走工程过滤。 */
@@ -286,6 +288,13 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
     activity: projectSource('activity'),
     sessions: projectSource('sessions'),
     analytics: projectSource('analytics'),
+    /**
+     * 自愈统计（SH-503）：有工程读工程作用域，没有工程读全局聚合。
+     * 与 timeline/analytics 同口径：未选工程也能进，不返回「先选工程」。
+     */
+    async systemHealth(route: RouteLike) {
+      return getJSON(systemHealthPath(route?.project || ''), { auth: true })
+    },
     /** 问题页：从看板快照 + 运行列表提炼阻塞/异常信号。 */
     async problems(route: RouteLike) {
       const board = await fetchTasks(route)

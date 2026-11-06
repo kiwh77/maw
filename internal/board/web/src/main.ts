@@ -22,6 +22,8 @@ import nodesCSS from '../../assets/views/nodes/nodes.css?inline'
 import boardDepsCSS from './board-deps.css?inline'
 // 问题审查视图样式（BUX-FE-002）：同样内联，避免静态导出多一个绝对 CSS 引用。
 import problemsCSS from './problems.css?inline'
+// 自愈统计视图样式（SH-503）：同一内联方式，产物仍只有 board-web.js。
+import systemHealthCSS from './system-health.css?inline'
 import App from './App.vue'
 
 export { Graph } from '@antv/x6'
@@ -51,6 +53,7 @@ export const VNEXT_STYLES = [
   nodesCSS,
   boardDepsCSS,
   problemsCSS,
+  systemHealthCSS,
 ].join('\n')
 
 function injectStyles() {
