@@ -7,6 +7,7 @@ import (
 
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/gitops"
 	"github.com/kiwh77/maw/internal/systemagent"
 )
@@ -22,6 +23,7 @@ type hubSignalFacts struct {
 	heartbeats []systemagent.AgentHeartbeatFact
 	merging    []systemagent.MergingTaskFact
 	locks      []systemagent.HeldLockFact
+	runs       []systemagent.UnverifiedRunFact
 }
 
 func newHubSignalFacts(gdb string, cfg config.SystemAgent) systemagent.SignalFacts {
@@ -84,6 +86,37 @@ func (f *hubSignalFacts) load(tx *sql.Tx, cfg config.SystemAgent) {
 				})
 			}
 		}
+		// Run 核实证据：状态取 reconciliation_state，时间取 updated_at。
+		// keep 会刷新 updated_at，因此「最近一次核实」天然成为 15 分钟窗口的一部分。
+		taskByInstance := map[string]string{}
+		if tasks, e := db.ListTasks(tx, p.ID); e == nil {
+			for _, t := range tasks {
+				if t != nil && t.InstanceID != "" {
+					taskByInstance[t.InstanceID] = t.ID
+				}
+			}
+		}
+		if runs, e := db.ListRuns(tx, p.ID); e == nil {
+			for _, r := range runs {
+				if r == nil || r.ID == "" {
+					continue
+				}
+				// 已确认的终态 Run 不再产出证据；unknown 或非终态才需要核实。
+				if r.Reconciliation != model.ReconciliationUnknown && r.Phase.Terminal() {
+					continue
+				}
+				seen := parseRFC3339(r.UpdatedAt)
+				f.runs = append(f.runs, systemagent.UnverifiedRunFact{
+					ProjectID:  p.ID,
+					TaskID:     taskByInstance[r.InstanceID],
+					RunID:      r.ID,
+					InstanceID: r.InstanceID,
+					State:      string(r.Reconciliation),
+					LastSeen:   seen,
+					CheckedAt:  seen,
+				})
+			}
+		}
 	}
 
 	// 门禁失败证据：gate_env_failed 直接采信；gate_failed 需再用词表复核，
@@ -141,4 +174,7 @@ func (f *hubSignalFacts) AgentHeartbeats() []systemagent.AgentHeartbeatFact {
 	return f.heartbeats
 }
 func (f *hubSignalFacts) MergingTasks() []systemagent.MergingTaskFact { return f.merging }
-func (f *hubSignalFacts) HeldLocks() []systemagent.HeldLockFact        { return f.locks }
+func (f *hubSignalFacts) HeldLocks() []systemagent.HeldLockFact       { return f.locks }
+func (f *hubSignalFacts) UnverifiedRuns() []systemagent.UnverifiedRunFact {
+	return f.runs
+}

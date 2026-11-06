@@ -247,12 +247,13 @@ func buildOrchestratorWithCoord(pc *projCtx, cfg config.SystemAgent, coord *disp
 		})
 	}
 	return &systemagent.Orchestrator{
-		Store:    store,
-		Config:   cfg,
-		Invoker:  inv,
-		Effects:  appSystemEffects{cwd: pc.Repo},
-		Dispatch: disp,
-		WorkerID: "system-agent",
+		Store:     store,
+		Config:    cfg,
+		Invoker:   inv,
+		Effects:   appSystemEffects{cwd: pc.Repo},
+		Dispatch:  disp,
+		Reconcile: newLeadReconcilePort(store, rt),
+		WorkerID:  "system-agent",
 		ResolvePath: func(projectID string) (string, error) {
 			if projectID == pc.ID() {
 				return pc.Repo, nil
