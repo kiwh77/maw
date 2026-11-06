@@ -562,11 +562,12 @@ func (b changeBridge) Subscribe(ctx context.Context) (<-chan httpobservability.C
 // auth 为 nil 时表示调用方已在外层鉴权（测试或同源内嵌）。
 func newObservabilityAPI(store *db.Store, auth *localauth.Authenticator) *httpobservability.API {
 	return &httpobservability.API{
-		Auth:      auth,
-		Timeline:  newCheckpointTimeline(store),
-		Stats:     &httpobservability.SQLStats{Store: store},
-		Sessions:  &httpobservability.SQLSessions{Store: store},
-		Reminders: &httpobservability.SQLReminders{Store: store, Writer: store},
+		Auth:         auth,
+		Timeline:     newCheckpointTimeline(store),
+		Stats:        &httpobservability.SQLStats{Store: store},
+		Sessions:     &httpobservability.SQLSessions{Store: store},
+		Reminders:    &httpobservability.SQLReminders{Store: store, Writer: store},
+		SystemHealth: &httpobservability.SQLSystemHealth{Store: store},
 		Changes: changeBridge{inner: &httpevents.PollingChanges{
 			Interval: 2 * time.Second,
 			// 失效信号只带水位与版本：没有正文，事实由查询接口按水位补拉。

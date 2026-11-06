@@ -137,3 +137,27 @@ type ChangeSignal struct {
 type ChangeSource interface {
 	Subscribe(ctx context.Context) (<-chan ChangeSignal, func())
 }
+
+// SystemHealthQuery 是一次系统健康查询：窗口与工程范围已在传输层校验。
+type SystemHealthQuery struct {
+	ProjectID string
+	Window    projection.Window
+	Loc       *time.Location
+}
+
+// SystemHealthPage 是一次系统健康快照。
+//
+// 指标直接读事实表，没有投影落后；Watermark 的 complete_before 通常等于 cursor，
+// 只用于告诉调用方「这份报表读到哪个游标」。
+type SystemHealthPage struct {
+	Report    *analytics.SystemHealthReport
+	Watermark *Watermark
+}
+
+// SystemHealthSource 产出自愈／系统健康报表（`maw.lead.selfheal/v1` §6）。
+//
+// 它与 StatsSource 分开：统计口径随合同演进，而系统健康必须共用同一套
+// unknown 语义，不能借道业务统计接口。
+type SystemHealthSource interface {
+	SystemHealth(ctx context.Context, q SystemHealthQuery) (SystemHealthPage, error)
+}

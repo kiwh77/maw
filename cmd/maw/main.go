@@ -742,6 +742,23 @@ func main() {
 		Short: i18n.T("cmd.system.status.short"),
 		Run:   func(cmd *cobra.Command, args []string) { printRes(app.SystemStatus(cwd)) },
 	})
+	// system health：与 HTTP /api/v1/system/health 共用 analytics，输出同一份报表。
+	systemHealthCmd := &cobra.Command{
+		Use:   "health",
+		Short: i18n.T("cmd.system.health.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			start, _ := cmd.Flags().GetString("start")
+			end, _ := cmd.Flags().GetString("end")
+			project, _ := cmd.Flags().GetString("project")
+			printRes(app.SystemHealthReport(cwd, app.SystemHealthInput{
+				ProjectID: project, Start: start, End: end,
+			}))
+		},
+	}
+	systemHealthCmd.Flags().String("project", "", i18n.T("flag.project"))
+	systemHealthCmd.Flags().String("start", "", i18n.T("flag.start"))
+	systemHealthCmd.Flags().String("end", "", i18n.T("flag.end"))
+	systemCmd.AddCommand(systemHealthCmd)
 	systemTriggerCmd := &cobra.Command{
 		Use:   "trigger",
 		Short: i18n.T("cmd.system.trigger.short"),

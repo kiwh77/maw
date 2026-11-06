@@ -205,6 +205,49 @@ func (s *SQLStats) Report(ctx context.Context, q StatsQuery, data TimelineData) 
 	return report, nil
 }
 
+type SQLSystemHealth struct {
+	Store query.Store
+	// Service 可注入；nil 时用零值（analytics.Service 无状态）。
+	Service *analytics.Service
+}
+
+// SQLSystemHealth 在一个只读快照里产出系统健康报表（`maw.lead.selfheal/v1` §6）。
+//
+// 与 SQLStats 分开实现：健康报表读 system_jobs／runs／agents 事实表，
+// 不依赖投影区间，也不消费 TimelineData。
+func (s *SQLSystemHealth) SystemHealth(ctx context.Context, q SystemHealthQuery) (SystemHealthPage, error) {
+	if s == nil || s.Store == nil {
+		return SystemHealthPage{}, &ErrInvalid{Code: codeCapabilityOff, Field: "system_health",
+			Message: "系统健康存储未配置"}
+	}
+	svc := s.Service
+	if svc == nil {
+		svc = &analytics.Service{}
+	}
+	var report *analytics.SystemHealthReport
+	var cursor int64
+	err := s.Store.Read(func(tx *sql.Tx) error {
+		r, err := svc.SystemHealth(tx, analytics.Query{
+			ProjectID: q.ProjectID,
+			Window:    q.Window,
+			Loc:       q.Loc,
+		})
+		if err != nil {
+			return err
+		}
+		report = r
+		// 同一快照里取事件游标：报表与水位必须同源，否则「读到哪个位置」无法复现。
+		return tx.QueryRow(`SELECT COALESCE(MAX(cursor), 0) FROM run_events`).Scan(&cursor)
+	})
+	if err != nil {
+		return SystemHealthPage{}, err
+	}
+	return SystemHealthPage{
+		Report:    report,
+		Watermark: watermarkOf(cursor, cursor, time.Now().UTC(), nil),
+	}, nil
+}
+
 // defaultMaxTurnsPerSession 是单会话轮次明细上限。
 //
 // 上限存在的意义是响应大小，不是统计口径：超出时置 TurnsTruncated 并计入缺测，

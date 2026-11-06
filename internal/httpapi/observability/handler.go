@@ -22,6 +22,8 @@ type API struct {
 	Sessions SessionSource
 	// Reminders 提供提醒列表与确认。
 	Reminders ReminderSource
+	// SystemHealth 提供自愈与系统健康报表；nil 时该能力为 unsupported。
+	SystemHealth SystemHealthSource
 	// Changes 提供 SSE 失效信号；nil 时流接口报 503 而不是假装连上。
 	Changes ChangeSource
 	// Now 可注入时钟（测试用）；默认 time.Now。
@@ -47,6 +49,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/projects/{project_id}/notifications/{notification_id}/acks", a.handleAck)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/observability/capabilities", a.handleCapabilities)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/observability/stream", a.handleStream)
+	// 系统健康：全局与工程作用域同源，读事实表，不带投影游标依赖。
+	mux.HandleFunc("GET /api/v1/system/health", a.handleSystemHealth)
+	mux.HandleFunc("GET /api/v1/projects/{project_id}/system/health", a.handleSystemHealth)
 
 	var h http.Handler = mux
 	if a.Auth != nil {
