@@ -13,6 +13,7 @@ import (
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
 	httpobservability "github.com/kiwh77/maw/internal/httpapi/observability"
+	"github.com/kiwh77/maw/internal/projection"
 )
 
 // ---- 注册表本身 ----
@@ -179,8 +180,14 @@ func TestV1RouteDispatchesObservability(t *testing.T) {
 		"/api/v1/projects/p1/observability/capabilities": v1Observability,
 		"/api/v1/projects/p1/observability/stream":       v1Observability,
 
-		"/api/v1/system-jobs":                v1System,
-		"/api/v1/projects/p1/system-jobs":    v1System,
+		// 「全部工程」的全局统计路由没有工程段，也必须落到观测树。
+		"/api/v1/timeline":  v1Observability,
+		"/api/v1/activity":  v1Observability,
+		"/api/v1/sessions":  v1Observability,
+		"/api/v1/analytics": v1Observability,
+
+		"/api/v1/system-jobs":             v1System,
+		"/api/v1/projects/p1/system-jobs": v1System,
 	}
 	for path, want := range cases {
 		if got := v1Route(path); got != want {
@@ -260,13 +267,42 @@ func TestTimelineEchoesCheckpointCursors(t *testing.T) {
 	}
 }
 
-func TestTimelineRequiresProject(t *testing.T) {
+func TestTimelineAggregatesAllProjects(t *testing.T) {
+	// 没有全局检查点来源：缺测如实上报，不猜水位。
 	data, err := checkpointTimeline{}.Timeline(context.Background(), httpobservability.TimelineQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data.Unsupported) == 0 || data.Unsupported[0].Reason != "project_required" {
-		t.Fatalf("缺 project_id 时应报不支持而不是猜: %+v", data.Unsupported)
+	if len(data.Missing) == 0 || data.Missing[0].Reason != "projection_source_not_configured" {
+		t.Fatalf("缺全局检查点来源时应报缺测而不是猜: %+v", data.Missing)
+	}
+
+	// 有全局检查点：合并水位与完整度，并说明区间未重建。
+	tl := checkpointTimeline{LoadAll: func(context.Context) (*checkpointAggregate, error) {
+		return &checkpointAggregate{
+			Cursor: 4200, CompleteBefore: 4100,
+			Completeness: projection.CompletenessPartial, Dirty: true,
+		}, nil
+	}}
+	data, err = tl.Timeline(context.Background(), httpobservability.TimelineQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Cursors.StateCursor != 4200 || data.Cursors.ProjectionCursor != 4100 {
+		t.Fatalf("全部工程水位没有按合并检查点回显: %+v", data.Cursors)
+	}
+	if data.Cursors.Completeness != projection.CompletenessPartial {
+		t.Fatalf("完整度应为 partial，实得 %q", data.Cursors.Completeness)
+	}
+	reasons := map[string]bool{}
+	for _, m := range data.Missing {
+		reasons[m.Reason] = true
+	}
+	if !reasons["projection_not_rebuilt"] {
+		t.Fatal("缺少「区间未重建」的缺测说明")
+	}
+	if !reasons["projection_dirty_range"] {
+		t.Fatal("缺少「有工程脏范围」的缺测说明")
 	}
 }
 
@@ -287,6 +323,11 @@ func TestObservabilityHandlerAnswers(t *testing.T) {
 		"/api/v1/projects/p1/analytics?window=24h",
 		"/api/v1/projects/p1/notifications?window=24h",
 		"/api/v1/projects/p1/observability/capabilities",
+		// 「全部工程」：同一批接口不指定工程也要能应答。
+		"/api/v1/timeline?window=24h",
+		"/api/v1/activity?window=24h",
+		"/api/v1/sessions?window=24h",
+		"/api/v1/analytics?window=24h",
 	} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

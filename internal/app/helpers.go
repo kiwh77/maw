@@ -173,6 +173,7 @@ func writeTaskCardWithDeps(wt string, t *db.Task, agent string, all []*db.Task) 
 	fmt.Fprintf(&bld, "## 不要做（not_doing）\n%s\n\n", strings.Join(notLines, "\n"))
 	fmt.Fprintf(&bld, "## 协议\n负责人 `%s`；工程 `%s`。\n", agent, t.ProjectID)
 	bld.WriteString("里程碑 `maw progress -m \"...\"`；完成 `maw submit`；随后可 `maw merge --yes`。\n")
+	bld.WriteString("统计 `maw stats report --turns <轮次> --input-tokens <输入> --output-tokens <输出>`（拿不到 token 可省略 token 参数）；不写会让看板统计缺这段执行。\n")
 	return os.WriteFile(filepath.Join(wt, "TASK.md"), []byte(bld.String()), 0o644)
 }
 

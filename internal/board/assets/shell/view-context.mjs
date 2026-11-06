@@ -18,16 +18,18 @@ export const DATA_KINDS = Object.freeze([
 ]);
 
 /**
- * 按工程物化的观测数据。
+ * 必须指定工程才能取数的观测数据。
  *
- * 这四类事实的来源是投影，而投影按工程建。没有工程时「什么都没查到」与
- * 「没有查」是两件事：这里必须让调用方能区分，不能用空列表冒充空成功。
+ * 这四类事实的来源是投影，而投影按工程建；但服务端已提供全局路由
+ * （/api/v1/timeline|activity|sessions|analytics）按「全部工程」聚合，
+ * 所以它们不再要求先选工程。缺少工程时「什么都没查到」与「没有查」仍是两件事：
+ * 这里保留 NO_PROJECT_STATE 让调用方能区分，不能用空列表冒充空成功。
  *
  * 执行视图**不在**此列：它是中枢首页的默认视图，没有工程时按工程逐个取数再合并，
  * 分组键带上工程（见 execution-view.mjs 的 groupKeyOf），所以「全部工程」是
  * 一个有内容的正常状态，而不是「先选工程」。
  */
-export const PROJECT_SCOPED_KINDS = Object.freeze(["timeline", "activity", "sessions", "analytics"]);
+export const PROJECT_SCOPED_KINDS = Object.freeze([]);
 
 /** 缺少工程上下文时的显式状态（既不是空成功，也不是错误）。 */
 export const NO_PROJECT_STATE = Object.freeze({ status: "no_project", reason: "project_required" });

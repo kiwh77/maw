@@ -19,6 +19,8 @@ type API struct {
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/projects", a.handleProjects)
+	// 执行节点是系统级资源：跨工程共用一套节点，查看时不再按工程过滤。
+	mux.HandleFunc("GET /api/v1/nodes", a.handleNodes)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/tasks", a.handleProjectTasks)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/nodes", a.handleProjectNodes)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/runs", a.handleProjectRuns)

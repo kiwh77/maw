@@ -32,6 +32,7 @@ const root = ref<HTMLElement | null>(null)
  * 重新取数。以前没人接这段，四个按钮点了什么也不会发生。
  */
 const timelineCtx = ref<ReturnType<typeof createDateContext> | null>(null)
+const timelineSelectedId = ref<string | null>(null)
 const localStates = ref<Record<string, unknown>>({})
 
 const LIST: Record<string, (s: unknown, ctx: unknown) => string> = {
@@ -85,10 +86,13 @@ const listHtml = computed(() => {
     readOnly: board.state.readOnly,
     // 时间轴换窗口后由宿主给出显式日期上下文；其它视图忽略该字段。
     dateContext: kind === 'timeline' ? timelineCtx.value ?? undefined : undefined,
+    // 时间轴选中区间：点击泳道后重新渲染，详情随选中项下钻。
+    selectedId: kind === 'timeline' ? timelineSelectedId.value ?? undefined : undefined,
     // 视图不猜自己有没有写通道：由宿主显式声明，静态导出页自然拿不到按钮。
     canRemove: !board.state.readOnly,
     pendingRemove: board.state.removePending,
     pendingNodeRemove: board.state.pendingNodeRemove,
+    nodeCheckPending: board.state.nodeCheckPending,
     nodeFormPreset: board.state.nodeFormPreset,
     nodeNotice: board.state.removeNotice,
     removeNotice: board.state.removeNotice,
@@ -123,6 +127,7 @@ const showDetail = computed(() => Boolean(board.state.route.detail && DETAIL[pro
 async function reload() {
   localStates.value = {}
   timelineCtx.value = null
+  timelineSelectedId.value = null
   await board.loadView(props.viewId)
 }
 
@@ -185,6 +190,15 @@ function onListClick(event: MouseEvent) {
     return
   }
 
+  // 时间轴区间：点击即选中，详情面板跟随下钻。
+  if (props.viewId === 'timeline') {
+    const barEl = target?.closest?.('[data-interval-id]') as HTMLElement | null
+    if (barEl?.dataset.intervalId) {
+      timelineSelectedId.value = barEl.dataset.intervalId
+      return
+    }
+  }
+
   if (props.viewId === 'nodes') {
     if (target?.closest?.('[data-node-open-create]')) {
       board.openCreateNodeModal('custom')
@@ -197,6 +211,11 @@ function onListClick(event: MouseEvent) {
       const list = viewState?.nodes || payload?.nodes || []
       const row = list.find((n) => String(n.id || n.node_id || '') === editNode.dataset.nodeEdit)
       if (row) board.openEditNodeModal(row)
+      return
+    }
+    const checkNode = target?.closest?.('[data-node-check]') as HTMLElement | null
+    if (checkNode?.dataset.nodeCheck) {
+      void board.checkNode(checkNode.dataset.nodeCheck)
       return
     }
     const askNode = target?.closest?.('[data-node-remove]') as HTMLElement | null
@@ -218,7 +237,7 @@ function onListClick(event: MouseEvent) {
 
   const edit = target?.closest?.('[data-project-edit]') as HTMLElement | null
   if (edit?.dataset.projectEdit) {
-    void board.editProject(edit.dataset.projectEdit)
+    board.openEditProjectModal(edit.dataset.projectEdit)
     return
   }
 

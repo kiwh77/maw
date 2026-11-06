@@ -1,6 +1,7 @@
 package query
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/kiwh77/maw/internal/engine/model"
@@ -125,6 +126,9 @@ type NodeRow struct {
 	AccountQuota int             `json:"account_quota"`
 	CreatedAt    string          `json:"created_at"`
 	LastSeen     string          `json:"last_seen"`
+	// Meta 是节点登记时写入的装配信息（cli_flavor／argv／default_model／探测结果）。
+	// 看板要展示 CLI 与四维状态，缺这份 meta 就只能显示「状态未知」。
+	Meta map[string]any `json:"meta,omitempty"`
 }
 
 // Nodes 按 node_id 排序返回节点页。
@@ -148,7 +152,7 @@ func (r *Reader) Nodes(q NodeQuery) (Page[NodeRow], error) {
 		args = append(args, keys[0])
 	}
 
-	stmt := `SELECT node_id, project_id, label, slot_limit, account_quota, created_at, last_seen
+	stmt := `SELECT node_id, project_id, label, slot_limit, account_quota, created_at, last_seen, meta_json
 FROM nodes WHERE ` + strings.Join(where, " AND ") + `
 ORDER BY node_id ASC
 LIMIT ?`
@@ -162,10 +166,16 @@ LIMIT ?`
 
 	items := make([]NodeRow, 0, limit+1)
 	for rows.Next() {
-		var row NodeRow
+		var (
+			row     NodeRow
+			metaRaw string
+		)
 		if err := rows.Scan(&row.NodeID, &row.ProjectID, &row.Label, &row.SlotLimit,
-			&row.AccountQuota, &row.CreatedAt, &row.LastSeen); err != nil {
+			&row.AccountQuota, &row.CreatedAt, &row.LastSeen, &metaRaw); err != nil {
 			return Page[NodeRow]{}, err
+		}
+		if strings.TrimSpace(metaRaw) != "" {
+			_ = json.Unmarshal([]byte(metaRaw), &row.Meta)
 		}
 		items = append(items, row)
 	}

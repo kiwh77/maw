@@ -57,6 +57,8 @@ type Runner struct {
 	observer observe.Writer
 	// observationFailures 统计观测落库失败次数（只报告，不阻塞运行）。
 	observationFailures atomic.Int64
+	// observed 统计成功落库的观测条数；为 0 时由调用方补一条基线。
+	observed atomic.Int64
 
 	// deliverMu 串行化「取待交付记录 + 提交 + 推进游标」这一整段。
 	// 摄取与心跳会同时想交付，不串行就会把同一条记录提交两次。
@@ -177,6 +179,9 @@ type Report struct {
 	// ObservationFailures 是观测落库失败的次数。观测失败不影响运行结论，
 	// 但必须报出来：否则「没记上」会被当成「没有」。
 	ObservationFailures int64
+	// Observed 是成功落库的观测条数。为 0 表示这次运行没有产生任何来源观测，
+	// 调用方可据此补一条基线，而不是让运行在统计里消失。
+	Observed int64
 }
 
 // runState 是单次 Run 的幂等标记：终态只能提交一次。
@@ -305,6 +310,7 @@ loop:
 	rep.Submitted = int(r.delivered.Load())
 	rep.Pending = r.journal.Status().PendingRecords
 	rep.ObservationFailures = r.observationFailures.Load()
+	rep.Observed = r.observed.Load()
 	return rep, nil
 }
 

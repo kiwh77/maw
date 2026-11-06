@@ -493,9 +493,9 @@ test('VN-705 回顾／统计／设置登记为独立分组，与执行视图共�
   assert.deepEqual(settings.items.map(def => def.id), ['projects', 'nodes', 'settings']);
   assert.equal(i18n.translate('nav.review', 'zh'), '统计');
 
-  // 每个视图的四组语言键都必须存在，且中英都有；缺一版等于没做完。
+  // 每个视图的标题、主标题与眉标语言键都必须存在，且中英都有；缺一版等于没做完。
   views.all.forEach(def => {
-    const keys = [def.titleKey, def.headingKey, def.descKey, def.eyebrowKey];
+    const keys = [def.titleKey, def.headingKey, def.eyebrowKey];
     if (def.navKey) keys.push(def.navKey);
     keys.forEach(key => {
       assert.notEqual(i18n.translate(key, 'zh'), key, 'missing zh: ' + key);
@@ -509,9 +509,8 @@ test('VN-705 回顾／统计／设置登记为独立分组，与执行视图共�
     assert.notEqual(i18n.translate(group.labelKey, 'zh'), group.labelKey);
   });
 
-  // 观测类视图按工程物化，必须在注册表里声明，不能到渲染时再猜。
-  assert.deepEqual(views.vnextIds.filter(id => views.requiresProject(id)),
-    ['timeline', 'activity', 'sessions', 'analytics']);
+  // 观测类视图走全局聚合路由，不再要求先选工程。
+  assert.deepEqual(views.vnextIds.filter(id => views.requiresProject(id)), []);
   assert.equal(views.requiresProject('projects'), false);
   assert.equal(views.requiresProject('settings'), false);
 });
@@ -584,26 +583,32 @@ test('VN-705 观测适配：能力缺失降级为「未提供该数据」，不�
   assert.equal(context.activityStateFrom({ status: 'ready', hours: null }).status, 'error');
 });
 
-test('VN-705 缺工程时不发请求也不出空表：状态是「未选上下文」', async () => {
+test('VN-705 缺工程时走全局聚合路由，不出空表也不要求先选工程', async () => {
   const { context, shell } = await loadReviewModules();
 
-  assert.equal(context.needsProject('timeline'), true);
+  assert.equal(context.needsProject('timeline'), false);
   assert.equal(context.needsProject('nodes'), false);
-  assert.equal(shell.needsProject('analytics'), true);
+  assert.equal(shell.needsProject('analytics'), false);
   assert.deepEqual(context.NO_PROJECT_STATE, { status: 'no_project', reason: 'project_required' });
 
-  // 地址按工程拼，工程身份必须转义，避免拼出另一个路径。
+  // 有工程仍按工程拼地址，工程身份必须转义，避免拼出另一个路径。
   assert.equal(shell.projectResourcePath('timeline', 'p 1/2'), '/api/v1/projects/p%201%2F2/timeline');
   assert.equal(shell.projectResourcePath('analytics', 'p-1'), '/api/v1/projects/p-1/analytics');
   assert.equal(shell.projectResourcePath('nodes', 'p-1'), '');
   assert.equal(shell.projectResourcePath('timeline', '  '), '');
+
+  // 没有工程（「全部工程」）走服务端全局路由，由服务端聚合全部工程。
+  assert.equal(shell.resourcePath('timeline', ''), '/api/v1/timeline');
+  assert.equal(shell.resourcePath('activity', '  '), '/api/v1/activity');
+  assert.equal(shell.resourcePath('sessions', ''), '/api/v1/sessions');
+  assert.equal(shell.resourcePath('analytics', 'p-1'), '/api/v1/projects/p-1/analytics');
   assert.equal(shell.capabilitiesPath('p-1'), '/api/v1/projects/p-1/observability/capabilities');
 
-  // 没有工程的默认数据源不打网络：直接判不可用，由挂载层换成「先选工程」。
-  let asked = 0;
-  const sources = shell.createDefaultSources({ fetch: () => { asked += 1; return Promise.resolve({ ok: true, json: async () => ({}) }); } });
-  assert.deepEqual(await sources.timeline({ project: '' }), { unavailable: true, status: 0 });
-  assert.equal(asked, 0);
+  let asked = [];
+  const sources = shell.createDefaultSources({ fetch: url => { asked.push(String(url)); return Promise.resolve({ ok: true, json: async () => ({}) }); } });
+  const payload = await sources.timeline({ project: '' });
+  assert.equal(payload.unavailable, undefined, '全部工程不应被判成不可用');
+  assert.ok(asked.includes('/api/v1/timeline'), '全部工程应请求全局统计路由');
 });
 
 test('VN-705 设置页只搬字段不补默认值，只读由地址与中枢版本决定', async () => {

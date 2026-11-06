@@ -96,6 +96,33 @@ type Probes interface {
 	Accept(ctx context.Context, req ProbeRequest) (ProbeResult, error)
 }
 
+// NodeCheckItem 是一条同步自检项（二进制、版本、参数等）。
+type NodeCheckItem struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// NodeCheckResult 是一次同步 CLI 环境自检的结果。
+//
+// 与 Probes 的分工：Probes 只受理异步 Operation，不跑厂商 CLI；
+// NodeChecks 是看板「测试环境」按钮直连的同步检查，会实际启动 CLI 并回写节点 meta。
+type NodeCheckResult struct {
+	NodeID    model.NodeID    `json:"node_id"`
+	OK        bool            `json:"ok"`
+	Version   string          `json:"version,omitempty"`
+	LatencyMS int64           `json:"latency_ms"`
+	CheckedAt string          `json:"checked_at"`
+	Checks    []NodeCheckItem `json:"checks"`
+	Error     string          `json:"error,omitempty"`
+	Meta      map[string]any  `json:"meta,omitempty"`
+}
+
+// NodeChecks 是同步 CLI 环境自检用例。
+type NodeChecks interface {
+	Check(ctx context.Context, nodeID model.NodeID) (NodeCheckResult, error)
+}
+
 // ProjectRemovalRequest 是从本机中枢移除一个工程登记。
 //
 // Force 是显式的「连现场一起清掉」：默认实现必须在有未完成任务或在线 Agent
@@ -164,5 +191,5 @@ type (
 )
 
 func (e ErrConflict) Error() string { return e.Code + ": " + e.Message }
-func (e ErrNotFound) Error() string  { return e.Message }
-func (e ErrInvalid) Error() string   { return e.Code + ": " + e.Message }
+func (e ErrNotFound) Error() string { return e.Message }
+func (e ErrInvalid) Error() string  { return e.Code + ": " + e.Message }

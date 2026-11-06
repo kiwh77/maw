@@ -1,34 +1,29 @@
-// 工程策略与保留设置（vnext / UI · VN-725）。
+// 系统执行策略（vnext / UI · VN-725）。
 //
-// 目标：把「自动执行、计算上限、节点容量、max_parallel 参考值」这四件经常被混为
-// 一谈的东西分开展示，并让保存过程（脏、保存中、已保存、冲突、错误）可核对。
+// 目标：执行策略是系统级资源，整台机器只有一份生效值。页面用一张表把
+// 「自动模式、计算上限、节点容量、max_parallel 参考值、保留天数、保留运行数」
+// 一次讲清，不再按工程拆分，也不在表下重复第二套表单。
 //
 // 依据：
 //   docs/ARCHITECTURE_VNEXT.zh-CN.md（受管执行默认关闭；上限是硬约束，参考值是建议）
-//   docs/contracts/vnext/http/http-api-contract-v1.md（写请求带 revision，冲突返回 409）
+//   docs/contracts/vnext/http/http-contract-v1.md（写请求带 revision，冲突返回 409）
 //   docs/BOARD_DESIGN.md（UI-C：共用主题／布局组件，中英深浅，窄屏不溢出）
 //
-// 四个概念各自成立，互不推导：
+// 四类值互不推导：
 //   auto     自动模式   —— 关闭 / 已开启 / 未就绪（平台不支持或配置未生效）
 //   limit    计算上限   —— 同时受管执行的硬上限；开启自动模式时必须 ≥1
 //   capacity 节点容量   —— 单节点执行槽，与全局上限不是同一件事
 //   ref      max_parallel 参考值 —— 来自工程配置的建议值，**不是硬约束**
 //
 // 三条硬规则：
-//   1. 自动执行默认关闭。表单永远不回填「默认开启」，未就绪时只解释原因，不给开关。
-//   2. 保存必须带 revision。带旧 revision 的保存返回冲突，页面保留用户输入并要求重载，
-//      不能静默覆盖别人刚改的设置。
-//   3. 本页不出现秘密字段。令牌、密钥这类东西只能在 CLI／本机凭据库管理，
-//      表单里出现一个 password 输入框就等于把凭据写进页面状态。
+//   1. 自动执行默认关闭。表里永远不回填「默认开启」，未就绪时只解释原因，不给开关。
+//   2. 保存必须带 revision；带旧 revision 返回冲突，页面要求重载而不是静默覆盖。
+//   3. 本页不出现秘密字段。令牌、密钥只在 CLI／本机凭据库管理。
 //
-// 分区（EV-002 / F47 / F57）：F57 要求把「节点接入与容量、主题、语言、超时与重试、
-// 通知、采集与保留」收敛到单一设置页。这里按「能不能改」分成两段：
-//   字段区（managed / nodes / retention）：在表单内，有写入口时才是可编辑字段；
-//   声明区（retries / notifications / appearance / agents）：在表单外，只读。
-// 声明区**故意没有控件**：主题／语言在顶栏（#theme-select / #lang-select），
-// 节点清单在 ?view=nodes，超时与通知阈值在 config.toml 与服务端策略里。
-// 复制一份到本页只会多出第二个真相。每个分区都用「入口／归属／边界」三行说清
-// 这件事在哪儿改、谁说了算、本页不做什么。
+// 页面结构（系统级）：
+//   policy  策略表：当前生效值 + 只读原因（中枢没有策略写入口）；
+//   entries 相关入口：节点页、工程级 config.toml、顶栏主题语言、超时、通知。
+// 入口区只声明位置，不放控件；复制一份到本页只会多出第二个真相。
 
 export const AUTO_MODE = Object.freeze({ off: "off", on: "on", not_ready: "not_ready" });
 
@@ -69,34 +64,16 @@ const SECRET_KEY = /(token|secret|password|passwd|pat|api[-_]?key|credential)/i;
 /**
  * 设置页的分区（EV-002 / F47 / F57）。
  *
- * F57 点名六类：节点接入与容量、主题、语言、超时与重试、通知、采集与保留。
- * 收敛的是**入口声明**而不是控件：主题与语言仍由顶栏持有（`#theme-select` /
- * `#lang-select`），节点清单仍由 `?view=nodes` 持有，超时与通知阈值在 config.toml
- * 与服务端策略里。每个分区说清三件事：入口在哪、谁说了算、本页不做什么。
- * 照抄一套开关会让两处状态各走各的，比入口分散更难查。
- *
- * 顺序即阅读顺序：先放表单里的字段区，再放表单外的只读声明区。
- * `retries` 与 `notifications` 是 F57 里此前一直没有落地的两块，
- * 它们的文案入口必须指向真实位置（见各分区的 entry 行），不能只写「在别处配置」。
+ * 执行策略是系统级资源：一页只展示一份当前生效值，不再按工程拆分，
+ * 也不在页面上复制第二套表单。其余配置只给入口，避免两处状态分叉。
  */
-export const SETTINGS_SECTIONS = Object.freeze([
-  "managed",
-  "nodes",
-  "retention",
-  "retries",
-  "notifications",
-  "appearance",
-  "agents",
-]);
-
-/** 每个分区固定三行说明链；缺一行就等于没说清归属。 */
-const FACT_ROWS = Object.freeze(["entry", "owner", "boundary"]);
+export const SETTINGS_SECTIONS = Object.freeze(["policy", "entries"]);
 
 const I18N = {
   zh: {
-    "settings.title": "工程策略与保留",
-    "settings.subtitle": "自动模式、计算上限、节点容量、参考值分开看；它们不是同一个数。",
-    "settings.table.caption": "当前生效值（来自 /api/runtime 的只读快照）；下表与下方字段区读的是同一份服务端值。",
+    "settings.title": "系统执行策略",
+    "settings.subtitle": "系统级只读快照：自动模式、计算上限、节点容量与保留口径一次看清。",
+    "settings.table.caption": "当前生效策略（来自 /api/runtime 的系统级只读快照，全机共用）。",
     "settings.form.caption.readonly": "字段区：下面是服务端回显的当前值，只作展示，不提交。",
     "settings.form.caption.editable": "字段区：改动后点保存，请求会带上当前 revision。",
     "settings.loading": "正在读取设置…",
@@ -137,7 +114,7 @@ const I18N = {
     "action.reload": "重新载入",
     "notice.no_secret": "本页不含令牌／密钥字段：凭据只在 CLI 与本机凭据库管理。",
     "settings.readonly": "只读",
-    "settings.readonly.hint": "中枢当前没有策略写入口：这里展示服务端回显的当前值，修改请走 CLI。",
+    "settings.readonly.hint": "只作展示，不提交：中枢当前没有策略写入口，修改请走 CLI。",
     "col.item": "项",
     "col.value": "当前值",
     "col.note": "说明",
@@ -193,6 +170,17 @@ const I18N = {
     "agents.does.1": "管：任务 blocked 时自动入队，并编排诊断／拆题／运维。",
     "agents.does.2": "不管：自动选题派发——那是「受管执行」分区里的自动模式。",
     "agents.does.3": "两个开关互不推导：只开自愈不会派任务，只开自动模式也不会自愈。",
+    "settings.scope": "系统级 · 全机共用，不随工程筛选变化。",
+    "settings.scope.badge": "系统级",
+    "section.policy": "系统执行策略",
+    "section.policy.desc": "整台机器只有一份生效策略；切换工程不会改变这里的值。",
+    "section.entries": "相关入口",
+    "section.entries.desc": "这些配置不在本页重复维护，避免出现第二个真相。",
+    "entries.nodes": "执行节点与容量：节点页 (?view=nodes)，节点是全机共用的执行资源。",
+    "entries.project": "工程级参数（max_parallel、allowed_nodes）：工程编辑，写入该工程目录的 config.toml。",
+    "entries.appearance": "主题与语言：页面顶栏。",
+    "entries.timeouts": "超时与重试：服务端配置与实现默认值。",
+    "entries.notifications": "通知与提醒：通知读接口与确认路径。",
     "err.limit_not_integer": "计算上限必须是整数。",
     "err.limit_below_min": "计算上限至少为 1；要关闭自动执行请关自动模式，而不是填 0。",
     "err.capacity_not_integer": "节点容量必须是整数。",
@@ -203,9 +191,9 @@ const I18N = {
     "err.secret_field": "本页不允许秘密字段：凭据请用 CLI 或本机凭据库。",
   },
   en: {
-    "settings.title": "Execution policy & retention",
-    "settings.subtitle": "Auto mode, execution limit, node capacity and the reference value are different things.",
-    "settings.table.caption": "Effective values (a read-only snapshot from /api/runtime); the table and the field area below read the same server payload.",
+    "settings.title": "System execution policy",
+    "settings.subtitle": "System-level read-only snapshot: auto mode, execution limit, node capacity and retention in one place.",
+    "settings.table.caption": "Current effective policy (system snapshot from /api/runtime, shared by the whole machine).",
     "settings.form.caption.readonly": "Field area: values below are echoed by the server for display only; nothing is submitted.",
     "settings.form.caption.editable": "Field area: saving sends the current revision with the request.",
     "settings.loading": "Loading settings…",
@@ -302,6 +290,17 @@ const I18N = {
     "agents.does.1": "Governs: enqueuing blocked tasks and orchestrating diagnosis, splitting and ops.",
     "agents.does.2": "Does not govern: auto dispatch, which is the auto mode in the managed execution section.",
     "agents.does.3": "The two switches are independent: self-healing alone never dispatches, auto mode alone never heals.",
+    "settings.scope": "System scope: shared by the whole machine and unaffected by the project filter.",
+    "settings.scope.badge": "System",
+    "section.policy": "System execution policy",
+    "section.policy.desc": "One effective policy per machine; switching projects does not change these values.",
+    "section.entries": "Related entry points",
+    "section.entries.desc": "These settings are not duplicated here, so there is only one source of truth.",
+    "entries.nodes": "Execution nodes & capacity: the Nodes view (?view=nodes); nodes are machine-wide resources.",
+    "entries.project": "Project-level fields (max_parallel, allowed_nodes): project editor, written to that project's config.toml.",
+    "entries.appearance": "Theme & language: the top bar.",
+    "entries.timeouts": "Timeouts & retries: server config and implementation defaults.",
+    "entries.notifications": "Notifications & reminders: the notification read API and ack path.",
     "err.limit_not_integer": "Execution limit must be an integer.",
     "err.limit_below_min": "Execution limit is at least 1; turn auto mode off instead of entering 0.",
     "err.capacity_not_integer": "Node capacity must be an integer.",
@@ -501,15 +500,6 @@ export function applySaveResult(current, result = {}) {
 
 // ---------- 渲染 ----------
 
-const STATUS_BADGE = {
-  [SAVE_STATUS.idle]: "badge--self_check",
-  [SAVE_STATUS.dirty]: "badge--claimed",
-  [SAVE_STATUS.saving]: "badge--in_progress",
-  [SAVE_STATUS.saved]: "badge--done",
-  [SAVE_STATUS.error]: "badge--blocked",
-  [SAVE_STATUS.conflict]: "badge--conflict",
-};
-
 const AUTO_BADGE = {
   [AUTO_MODE.on]: "badge--done",
   [AUTO_MODE.off]: "badge--self_check",
@@ -525,23 +515,8 @@ function emptyState(lang, keys) {
     '<p class="empty-state__text">' + esc(t(keys[1], lang)) + "</p></div>";
 }
 
-function fieldRow(lang, id, labelKey, hintKey, value, { readonly = false, unit = "" } = {}) {
-  const inputId = "settings-" + id;
-  const ro = readonly ? " readonly disabled" : "";
-  // 服务端没给值时不编默认值：留空并保持可读，比填一个看起来像配置的 0 更诚实。
-  const shown = value === null || value === undefined ? "" : value;
-  // 复用共享表单组件（.field / .field-label / .input / .field-hint），页面不再自建表单层。
-  return '<div class="field">' +
-    '<label class="field-label" for="' + inputId + '">' + esc(t(labelKey, lang)) + "</label>" +
-    '<input class="input" id="' + inputId + '" name="' + id + '" type="number" inputmode="numeric"' +
-    ' value="' + esc(shown) + '"' + ro + (unit ? ' data-unit="' + esc(unit) + '"' : "") + ">" +
-    '<p class="field-hint" id="' + inputId + '-hint">' + esc(t(hintKey, lang)) + "</p>" +
-    "</div>";
-}
-
 /**
- * 四件常被混淆的东西单独成行，标签与说明都不复用：自动模式是状态，
- * 上限是硬约束，容量是单节点，参考值只供参考。
+ * 系统策略表：一页只有这一份当前值，不再配一套重复的字段区。
  */
 function conceptTable(lang, policy, mode, reasonKey) {
   const rows = [
@@ -552,6 +527,8 @@ function conceptTable(lang, policy, mode, reasonKey) {
     { id: "limit", label: "field.limit", value: esc(policy.limit ?? "—"), note: t("field.limit.hint", lang) },
     { id: "capacity", label: "field.capacity", value: esc(policy.capacity ?? "—"), note: t("field.capacity.hint", lang) },
     { id: "ref", label: "field.ref", value: esc(policy.ref ?? "—"), note: t("field.ref.hint", lang) },
+    { id: "retention_days", label: "field.retention", value: esc(policy.retentionDays ?? "—"), note: t("field.retention.hint", lang) },
+    { id: "retention_runs", label: "field.retention_runs", value: esc(policy.retentionRuns ?? "—"), note: t("field.retention_runs.hint", lang) },
   ];
   const body = rows.map(row =>
     '<tr data-concept="' + row.id + '">' +
@@ -559,10 +536,8 @@ function conceptTable(lang, policy, mode, reasonKey) {
     '<td class="num">' + row.value + "</td>" +
     '<td class="note">' + esc(row.note) + "</td>" +
     "</tr>").join("");
-  // 概念表是「当前生效值」的只读快照，不是第二份可改的表单。caption 明说这一点，
-  // 免得读者把表里的值和下方字段区的值当成两个来源。
-  const caption = esc(t("settings.table.caption", lang)) + " " + esc(t("settings.subtitle", lang));
-  return '<table class="table settings-current"><caption class="field-hint">' + caption + "</caption>" +
+  return '<table class="table settings-current"><caption class="field-hint">' +
+    esc(t("settings.table.caption", lang)) + "</caption>" +
     "<thead><tr><th>" + esc(t("col.item", lang)) + "</th><th>" + esc(t("col.value", lang)) +
     "</th><th>" + esc(t("col.note", lang)) + "</th></tr></thead><tbody>" + body + "</tbody></table>";
 }
@@ -572,30 +547,6 @@ function errorsBlock(lang, errors) {
   const items = errors.map(e =>
     '<li class="field-error" data-error="' + esc(e.code) + '">' + esc(t("err." + e.code, lang)) + "</li>").join("");
   return '<ul class="settings-errors" role="alert" aria-live="polite">' + items + "</ul>";
-}
-
-/**
- * 说明链：入口／归属／边界。
- *
- * 三行缺一不可——只说「入口在这」而不说归属，用户会以为改这里就等于改成了；
- * 只说归属而不说边界，就会有人来找一个本页不打算提供的按钮。
- */
-function factsBlock(lang, id) {
-  const rows = FACT_ROWS.map(row =>
-    '<div class="settings-fact" data-fact="' + row + '">' +
-    "<dt>" + esc(t("fact." + row, lang)) + "</dt>" +
-    "<dd>" + esc(t("section." + id + "." + row, lang)) + "</dd>" +
-    "</div>").join("");
-  return '<dl class="settings-facts">' + rows + "</dl>";
-}
-
-/** 分区外壳：标题与说明取自同一组键，分区 id 同时是锚点与测试钩子。 */
-function section(lang, id, body) {
-  const headId = "settings-section-" + id;
-  return '<section class="settings-section" data-section="' + esc(id) + '" aria-labelledby="' + headId + '">' +
-    '<h2 class="settings-section__title" id="' + headId + '">' + esc(t("section." + id, lang)) + "</h2>" +
-    '<p class="field-hint settings-section__desc">' + esc(t("section." + id + ".desc", lang)) + "</p>" +
-    (body || "") + factsBlock(lang, id) + "</section>";
 }
 
 /**
@@ -627,25 +578,6 @@ function agentsTable(lang, agents) {
     "</tr></thead><tbody>" + body + "</tbody></table>";
 }
 
-const AGENT_BADGE = { on: "badge--done", off: "badge--self_check", unknown: "badge--blocked" };
-
-/**
- * 系统 Agent 开关状态块（SA-004）。
- *
- * 这里必须同时说三件事，否则读者会把它和「自动模式」混成一个开关：
- * 现在开没开、它管什么、它**不管**什么。未知时给「未知」，不给「关闭」。
- */
-function systemAgentBlock(lang, policy) {
-  const state = systemAgentStateOf(policy);
-  const does = ["agents.does.1", "agents.does.2", "agents.does.3"]
-    .map(key => "<li>" + esc(t(key, lang)) + "</li>").join("");
-  return '<p class="settings-agents__state" data-system-agent="' + esc(state) + '">' +
-    badge(t("agents.state." + state, lang), AGENT_BADGE[state] || "badge--self_check") +
-    '<span class="field-hint">' + esc(t("agents.state.hint." + state, lang)) + "</span></p>" +
-    '<div class="settings-agents__does"><p class="field-hint">' + esc(t("agents.does.title", lang)) + "</p>" +
-    '<ul class="settings-agents__list">' + does + "</ul></div>";
-}
-
 /**
  * 渲染设置页。
  * state: {status, policy, draft, save, errors, platformSupported, configApplied}
@@ -674,65 +606,61 @@ export function renderSettings(state = {}, options = {}) {
   const errors = state.errors || [];
   // 中枢没有策略写入口时按只读渲染：可编辑却存不下去，比明说只读更糟。
   const editable = state.editable === true;
-  // 保存必须带 revision：没有版本号就分不清「这是不是服务端当前那份」，
-  // 点了保存只能盲写，所以按钮先禁用并说明原因，而不是让它静默失败。
   const revisionMissing = policy.revision === null || policy.revision === undefined;
 
-  // 标题已由壳层 page-heading 提供；这里只保留保存态与只读标记。
+  // 顶栏只留三件事：作用域、自动模式、只读标记。其余说明都收进策略表。
   const saveStatus = '<p class="settings-save-status" data-save="' + esc(save) + '">' +
-    badge(t("save." + save, lang), STATUS_BADGE[save] || "badge--self_check") +
-    (editable ? "" : " " + badge(t("settings.readonly", lang), "badge--self_check")) + "</p>";
+    badge(t("settings.scope.badge", lang), "badge--done") + " " +
+    badge(t("auto." + mode, lang), AUTO_BADGE[mode]) + " " +
+    (editable ? "" : badge(t("settings.readonly", lang), "badge--self_check")) +
+    '<span class="field-hint">' + esc(t("settings.scope", lang)) + "</span></p>";
 
-  // 自动模式不是一个输入框，而是一段状态：开关在服务端，页面只能解释当前状态。
-  const autoFieldset = '<fieldset class="settings-fieldset"><legend class="field-label">' +
-    esc(t("field.auto", lang)) + "</legend>" +
-    '<p class="field-hint">' + esc(t("field.auto.hint", lang)) + "</p>" +
+  // 策略是系统级只读快照：一张表就是全页，不再重复一套字段区。
+  const policySection = '<section class="settings-section" data-section="policy" data-scope="system"' +
+    ' aria-labelledby="settings-section-policy">' +
+    '<h2 class="settings-section__title" id="settings-section-policy">' + esc(t("section.policy", lang)) + "</h2>" +
+    '<p class="field-hint settings-section__desc">' + esc(t("section.policy.desc", lang)) + "</p>" +
+    conceptTable(lang, policy, mode, reasonKey) +
     (reasonKey ? '<p class="field-hint" data-auto-reason="1">' + esc(t(reasonKey, lang)) + "</p>" : "") +
-    "</fieldset>";
-
-  // 分区顺序即 Tab 顺序：上限 → 容量 → 保留天数 → 保留运行数 → 保存。
-  // 表单外的四个只读声明区（超时与重试／通知／外观／系统 Agent）不产生可聚焦元素，
-  // 排在其后不影响键盘路径。
-  const managedSection = section(lang, "managed", autoFieldset +
-    fieldRow(lang, "limit", "field.limit", "field.limit.hint", state.draft?.limit ?? policy.limit, { readonly: !editable }));
-  const nodesSection = section(lang, "nodes",
-    fieldRow(lang, "capacity", "field.capacity", "field.capacity.hint", state.draft?.capacity ?? policy.capacity, { readonly: !editable }));
-  const retentionSection = section(lang, "retention",
-    fieldRow(lang, "retentionDays", "field.retention", "field.retention.hint", state.draft?.retentionDays ?? policy.retentionDays, { readonly: !editable }) +
-    fieldRow(lang, "retentionRuns", "field.retention_runs", "field.retention_runs.hint", state.draft?.retentionRuns ?? policy.retentionRuns, { readonly: !editable }));
-
-  // 只读是一等状态，不是「把输入框灰掉」：表单自己声明 data-readonly，
-  // 顶部说明它会展示什么、会不会提交，样式再按契约用 --muted 呈现为值。
-  // 输入框仍带 readonly／disabled（浏览器用例 D-04 依赖），但不再是唯一的只读信号。
-  const formCaptionKey = editable ? "settings.form.caption.editable" : "settings.form.caption.readonly";
-  const form = '<form class="settings-form" data-revision="' + esc(policy.revision ?? "") +
-    '" data-editable="' + (editable ? "1" : "0") + '"' +
-    (editable ? "" : ' data-readonly="1"') + ' onsubmit="return false" novalidate>' +
-    '<p class="settings-form__caption field-hint" data-form-caption="1">' + esc(t(formCaptionKey, lang)) + "</p>" +
-    managedSection + nodesSection + retentionSection +
     '<p class="field-hint" data-no-secret="1">' + esc(t("notice.no_secret", lang)) + "</p>" +
     (editable ? "" : '<p class="field-hint" data-readonly-reason="1">' + esc(t("settings.readonly.hint", lang)) + "</p>") +
     errorsBlock(lang, errors) +
-    (revisionMissing
+    (editable && !revisionMissing
+      ? '<div class="settings-actions"><button class="button button--primary" type="button"' +
+        (save === SAVE_STATUS.saving ? " disabled" : "") + ">" + esc(t("action.save", lang)) + "</button></div>"
+      : "") +
+    (editable && revisionMissing
       ? '<p class="field-hint" data-save-blocked="revision_missing">' + esc(t("err.revision_missing", lang)) + "</p>"
       : "") +
-    '<div class="settings-actions">' +
-    '<button class="button button--primary" type="submit"' +
-    (editable && !revisionMissing && save !== SAVE_STATUS.saving ? "" : " disabled") + ">" +
-    esc(t("action.save", lang)) + "</button>" +
     (save === SAVE_STATUS.conflict
-      ? '<button class="button" type="button" data-action="reload">' + esc(t("action.reload", lang)) + "</button>"
+      ? '<p class="field-hint" data-save-conflict="1">' + esc(t("save.conflict", lang)) + "</p>" +
+        '<button class="button" type="button" data-action="reload">' + esc(t("action.reload", lang)) + "</button>"
       : "") +
-    "</div></form>";
+    "</section>";
 
-  // 表单外的四个分区只声明入口，不放控件：阈值在 config.toml，提醒规则在服务端，
-  // 主题／语言在顶栏，Agent 状态由心跳上报。
+  // 其余配置只给入口，不在此页复制第二套控件。
+  const entryItems = [
+    { id: "nodes", text: "entries.nodes" },
+    { id: "project", text: "entries.project" },
+    { id: "appearance", text: "entries.appearance" },
+    { id: "timeouts", text: "entries.timeouts" },
+    { id: "notifications", text: "entries.notifications" },
+  ].map(item => '<li data-entry="' + item.id + '">' + esc(t(item.text, lang)) + "</li>").join("");
+  const entriesSection = '<section class="settings-section" data-section="entries"' +
+    ' aria-labelledby="settings-section-entries">' +
+    '<h2 class="settings-section__title" id="settings-section-entries">' + esc(t("section.entries", lang)) + "</h2>" +
+    '<p class="field-hint settings-section__desc">' + esc(t("section.entries.desc", lang)) + "</p>" +
+    '<ul class="settings-entries">' + entryItems + "</ul></section>";
+
+  // Agent 快照只在服务端给了数组时才成段：缺失不等于「没有 Agent」。
   const agents = systemAgentsOf(state);
-  const agentsBody = systemAgentBlock(lang, policy) + (agents
-    ? agentsTable(lang, agents)
-    : '<p class="field-hint" data-agents-unknown="1">' + esc(t("section.agents.unknown", lang)) + "</p>");
+  const agentsSection = agents === null ? "" :
+    '<section class="settings-section" data-section="agents"' +
+    ' aria-labelledby="settings-section-agents">' +
+    '<h2 class="settings-section__title" id="settings-section-agents">' + esc(t("section.agents", lang)) + "</h2>" +
+    (agents.length ? agentsTable(lang, agents) :
+      '<p class="field-hint" data-agents-empty="1">' + esc(t("section.agents.unknown", lang)) + "</p>") +
+    "</section>";
 
-  return saveStatus + conceptTable(lang, policy, mode, reasonKey) + form +
-    section(lang, "retries", "") + section(lang, "notifications", "") +
-    section(lang, "appearance", "") + section(lang, "agents", agentsBody);
+  return saveStatus + policySection + entriesSection + agentsSection;
 }

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"strings"
+	"time"
 
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/runner/observe"
@@ -32,6 +33,10 @@ func (s *Store) WriteFacts(ctx context.Context, f observe.Facts) error {
 	if projectID == "" {
 		projectID = s.ProjectID
 	}
+	occurredAt := db.UTCNow()
+	if !f.OccurredAt.IsZero() {
+		occurredAt = f.OccurredAt.UTC().Format(time.RFC3339Nano)
+	}
 	return s.DB.Write(func(tx *sql.Tx) error {
 		if err := db.UpsertSourceSession(tx, db.SourceSession{
 			SessionID:  sessionID,
@@ -39,7 +44,7 @@ func (s *Store) WriteFacts(ctx context.Context, f observe.Facts) error {
 			SourceNS:   f.SourceNS,
 			ExternalID: f.SessionID,
 			Adapter:    f.SourceNS,
-			OpenedAt:   db.UTCNow(),
+			OpenedAt:   occurredAt,
 			Meta:       map[string]any{"source_session_id": f.SessionID},
 		}); err != nil {
 			return err
@@ -53,7 +58,7 @@ func (s *Store) WriteFacts(ctx context.Context, f observe.Facts) error {
 			SourceNS:   f.SourceNS,
 			SessionID:  sessionID,
 			ExternalID: f.RecordUUID,
-			StartedAt:  db.UTCNow(),
+			StartedAt:  occurredAt,
 			Meta:       map[string]any{"record_type": f.RecordType, "record_ref": f.RecordRef},
 		}); err != nil {
 			return err

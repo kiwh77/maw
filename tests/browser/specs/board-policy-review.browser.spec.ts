@@ -66,30 +66,22 @@ test.describe('D 组：执行策略（自动化策略）', () => {
     }
   });
 
-  test('D-03 表单回填当前策略值', async ({ page }) => {
+  test('D-03 策略表回填当前上限，且不出现第二套表单', async ({ page }) => {
     const api = await apiJson(page, '/api/runtime');
     const limit = String(api.body?.auto_execution?.managed_execution_limit ?? '');
-    const value = await page.locator('#settings-limit').inputValue();
-    expect(value, '计算上限输入框没有回填当前值').toBe(limit);
+    const cell = page.locator('tr[data-concept="limit"] td.num');
+    await expect(cell).toHaveText(limit);
+    expect(await page.locator('input').count(), '系统策略页不该有输入框').toBe(0);
+    expect(await page.locator('form').count(), '系统策略页不该有第二套表单').toBe(0);
   });
 
-  test('D-04 保存入口不把用户带离策略页', async ({ page }) => {
+  test('D-04 只读策略页不会被保存入口带离', async ({ page }) => {
     const before = page.url();
-    const form = page.locator('.settings-form');
-    // 有无写入口是服务端事实：没有写入口时表单只读并解释，点了也不会导航。
-    const editable = (await form.getAttribute('data-editable')) === '1';
-    if (!editable) {
-      await expect(page.locator('.settings-form button[type="submit"]')).toBeDisabled();
-      await expect(page.locator('[data-readonly-reason]')).toBeVisible();
-      await expect(page.locator('#settings-limit')).toHaveAttribute('readonly', /.*/);
-      expect(page.url(), '只读表单不得把用户带离策略页').toBe(before);
-      await expect(page.locator('#page-h1')).toHaveText(/Execution policy|执行策略/i);
-      return;
-    }
-    await page.locator('#settings-limit').fill('2');
-    await page.locator('.settings-form button[type="submit"]').click();
-    await page.waitForTimeout(1200);
-    expect(page.url(), '保存按钮触发了原生表单提交，把用户带离策略页').toBe(before);
+    // 有无写入口是服务端事实：联合型中枢没有策略写接口，页面只读并解释。
+    await expect(page.locator('[data-readonly-reason]')).toBeVisible();
+    expect(await page.locator('form').count()).toBe(0);
+    expect(await page.locator('.settings-actions').count(), '只读页不应出现保存按钮').toBe(0);
+    expect(page.url(), '只读策略页不得把用户带离').toBe(before);
     await expect(page.locator('#page-h1')).toHaveText(/Execution policy|执行策略/i);
   });
 

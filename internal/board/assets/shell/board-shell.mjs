@@ -87,8 +87,11 @@ const DETAIL_RENDERERS = Object.freeze({
 
 const TASKS_SOURCE = "/api/board";
 
-/** 控制类资源：服务端只有 `/api/v1/projects/{id}/…`，没有全局列表。 */
-const CONTROL_RESOURCES = Object.freeze(["nodes", "runs", "deliveries"]);
+/** 节点是系统级资源：同一台机器上的 CLI 对任何工程都可用，不走工程过滤。 */
+const NODES_SOURCE = "/api/v1/nodes";
+
+/** 工程级控制资源：服务端只有 `/api/v1/projects/{id}/…`，没有全局列表。 */
+const CONTROL_RESOURCES = Object.freeze(["runs", "deliveries"]);
 
 /**
  * 按工程物化的观测资源名。
@@ -123,6 +126,19 @@ export function projectResourcePath(kind, projectId) {
   const id = String(projectId || "").trim();
   if (!id) return "";
   return "/api/v1/projects/" + encodeURIComponent(id) + "/" + resource;
+}
+
+/**
+ * 构造观测资源地址：有工程走工程路由，没有工程（「全部工程」）走全局路由。
+ *
+ * 全局路由由服务端按全部工程聚合，调用方不需要先选工程。
+ */
+export function resourcePath(kind, projectId) {
+  const resource = PROJECT_RESOURCES[kind];
+  if (!resource) return "";
+  const id = String(projectId || "").trim();
+  if (!id) return "/api/v1/" + resource;
+  return projectResourcePath(kind, id);
 }
 
 /** 构造控制类（节点／运行／交付）按工程地址。 */
@@ -261,10 +277,10 @@ export function createDefaultSources(win, fetchImpl = null) {
     return { [kind]: items, items };
   }
 
-  /** 观测资源：地址由工程决定，缺工程不拼地址、直接报不可用。 */
+  /** 观测资源：有工程走工程路由，没有工程（「全部工程」）走全局聚合路由。 */
   function projectSource(kind) {
     return async route => {
-      const url = projectResourcePath(kind, route && route.project);
+      const url = resourcePath(kind, route && route.project);
       if (!url) return { unavailable: true, status: 0 };
       return getJSON(url, { auth: true });
     };
@@ -324,7 +340,8 @@ export function createDefaultSources(win, fetchImpl = null) {
       if (!tasks || !runs || !deliveries) return { unavailable: true, status: 0 };
       return { tasks, runs, deliveries };
     },
-    nodes: controlSource("nodes"),
+    // 节点是系统级资源：选中任何工程都读同一份全局节点，不再按工程合并。
+    nodes: async () => withNamedList("nodes", await getJSON(NODES_SOURCE, { auth: true })),
     runs: controlSource("runs"),
     deliveries: controlSource("deliveries"),
     timeline: projectSource("timeline"),
@@ -594,8 +611,6 @@ export function createShell(options = {}) {
     if (eyebrow && def.eyebrowKey) eyebrow.textContent = t(def.eyebrowKey);
     const h1 = byId(doc, "page-h1");
     if (h1 && def.headingKey) h1.textContent = t(def.headingKey);
-    const desc = byId(doc, "page-desc");
-    if (desc && def.descKey) desc.textContent = t(def.descKey);
     const crumb = doc.querySelector(".breadcrumb .dim");
     if (crumb) crumb.textContent = t("nav.workbench");
     // 面包屑：`工作台 / <分组> / <工程或视图名>`。
@@ -725,37 +740,20 @@ export function createShell(options = {}) {
   /**
    * 只读收口。
    *
-   * 设置页自带保存按钮，而写入入口是否存在由中枢版本决定：视图自己不知道这件事，
-   * 也不该由它猜。所以由挂载层在这里把按钮禁用并追加说明——视图仍按原样渲染，
-   * 不会因为静态导出就少显示一段内容。
+   * 回顾类视图没有任何写入口，由挂载层在末尾追加一句只读说明。
+   * 设置页自己解释只读原因，不在这里重复追加第二份「只读」提示。
    */
   function applyViewChrome(def, viewState) {
     if (!root) return;
     const kind = def.id;
-    // 工程清单不再逐行回显策略（快照不带，读不到就不占列），
-    // 策略入口改由视图自己在页首说明，挂载层不再追加「数值未知」提示。
-    const wantNotice = REVIEW_KINDS.indexOf(kind) >= 0 || (kind === "settings" && readOnly);
+    // 设置页自己说明只读原因，挂载层不再追加同义提示，避免一页出现两次「只读」。
+    const wantNotice = REVIEW_KINDS.indexOf(kind) >= 0;
     if (wantNotice && typeof root.insertAdjacentHTML === "function" &&
       typeof root.querySelector === "function" && !root.querySelector("[data-readonly-notice]")) {
-      const html = kind === "settings"
-        ? noticeHtml("readonly", "settings.readonly", "settings.readonly.hint", t,
-          'data-readonly-notice="' + esc(kind) + '"')
-        : noticeHtml("readonly", "review.readonly", "review.readonly.hint", t,
-          'data-readonly-notice="' + esc(kind) + '"');
+      const html = noticeHtml("readonly", "review.readonly", "review.readonly.hint", t,
+        'data-readonly-notice="' + esc(kind) + '"');
       root.insertAdjacentHTML("beforeend", html);
     }
-    if (kind !== "settings" || !readOnly) return;
-    if (typeof root.querySelectorAll !== "function") return;
-    const forms = root.querySelectorAll("form");
-    Array.prototype.forEach.call(forms, form => {
-      if (form.dataset) form.dataset.readonly = "1";
-      form.setAttribute && form.setAttribute("data-readonly", "1");
-      const buttons = form.querySelectorAll ? form.querySelectorAll("button") : [];
-      Array.prototype.forEach.call(buttons, button => {
-        button.disabled = true;
-        button.setAttribute && button.setAttribute("aria-disabled", "true");
-      });
-    });
   }
 
   /** 该视图此刻是否被「必须先选工程」挡住。 */

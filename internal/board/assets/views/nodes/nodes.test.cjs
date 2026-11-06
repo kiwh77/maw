@@ -229,8 +229,8 @@ test("双语各自完整：英文界面不残留中文标签", async () => {
   const mod = await load();
   const zh = mod.renderNodeList({ nodes: [node()] }, { lang: "zh", now: NOW });
   const en = mod.renderNodeList({ nodes: [node()] }, { lang: "en", now: NOW });
-  assert.ok(zh.includes("执行节点"));
-  assert.ok(en.includes("Execution nodes"));
+  assert.ok(zh.includes("个节点"));
+  assert.ok(en.includes("nodes"));
   assert.doesNotMatch(en.replace(/node_a|codebuddy|本机 CodeBuddy/g, ""), /[\u4e00-\u9fa5]/,
     "英文界面不得混入中文");
 });

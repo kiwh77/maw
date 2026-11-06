@@ -96,6 +96,22 @@
   line-height: 1.4;
 }
 
+/* 环境自检结果：正常用 ok 色，失败用 danger 色，未自检保持弱化灰。 */
+.nodes-card__check {
+  margin: 0;
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.nodes-card__check[data-node-check-state="ok"] {
+  color: var(--ok, #2a7);
+}
+
+.nodes-card__check[data-node-check-state="fail"] {
+  color: var(--danger, #c44);
+}
+
 .nodes-modal__check {
   flex-direction: row;
   align-items: flex-start;

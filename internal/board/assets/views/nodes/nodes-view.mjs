@@ -30,8 +30,6 @@ export const PRESENCE_TTL_MS = 90_000;
 
 const I18N = {
   zh: {
-    "nodes.title": "执行节点",
-    "nodes.subtitle": "在线、认证、能力、容量分开看，四项都成立才接任务。",
     "nodes.empty": "还没有登记任何节点。",
     "nodes.empty.hint": "点右上角「新增节点」，或用 maw node register。",
     "nodes.error": "节点列表加载失败。",
@@ -50,6 +48,13 @@ const I18N = {
     "nodes.remove.confirm": "确认删除？",
     "nodes.remove.confirm_yes": "确认删除",
     "nodes.remove.cancel": "取消",
+    "nodes.check": "测试环境",
+    "nodes.check.running": "检测中…",
+    "nodes.check.ok": "环境正常",
+    "nodes.check.fail": "环境异常",
+    "nodes.check.never": "尚未做过环境自检",
+    "nodes.check.last": "上次自检",
+    "nodes.check.version": "版本 {version}",
     "dim.presence": "在线",
     "dim.auth": "认证",
     "dim.capability": "能力",
@@ -92,8 +97,6 @@ const I18N = {
     "detail.unauth_title": "需要登录后才能查看能力详情",
   },
   en: {
-    "nodes.title": "Execution nodes",
-    "nodes.subtitle": "Presence, auth, capability and capacity are independent; a task needs all four.",
     "nodes.empty": "No nodes registered yet.",
     "nodes.empty.hint": "Use Add node, or maw node register.",
     "nodes.error": "Failed to load nodes.",
@@ -112,6 +115,13 @@ const I18N = {
     "nodes.remove.confirm": "Remove this node?",
     "nodes.remove.confirm_yes": "Confirm remove",
     "nodes.remove.cancel": "Cancel",
+    "nodes.check": "Test environment",
+    "nodes.check.running": "Checking…",
+    "nodes.check.ok": "Environment OK",
+    "nodes.check.fail": "Environment failed",
+    "nodes.check.never": "Environment not checked yet",
+    "nodes.check.last": "Last check",
+    "nodes.check.version": "version {version}",
     "dim.presence": "Presence",
     "dim.auth": "Auth",
     "dim.capability": "Capability",
@@ -309,11 +319,12 @@ function renderToolbar(lang, options = {}, summary = "") {
     ? '<span class="field-hint">' + esc(t("nodes.add.readonly", lang)) + "</span>"
     : '<button type="button" class="button button--primary" data-node-open-create>' +
       esc(t("nodes.add.open", lang)) + "</button>";
+  const meta = summary
+    ? '<p class="nodes-toolbar__meta">' + esc(summary) + "</p>"
+    : "";
   return '<header class="nodes-toolbar">' +
     '<div class="nodes-toolbar__copy">' +
-    "<h2>" + esc(t("nodes.title", lang)) + "</h2>" +
-    '<p class="nodes-toolbar__meta">' + esc(t("nodes.subtitle", lang)) +
-    (summary ? " · " + esc(summary) : "") + "</p>" +
+    meta +
     notice +
     "</div>" +
     '<div class="nodes-toolbar__actions">' + addBtn + "</div>" +
@@ -330,11 +341,34 @@ function renderCardActions(nodeId, options, lang) {
       '<button type="button" class="nodes-card__btn" data-node-remove-cancel>' +
       esc(t("nodes.remove.cancel", lang)) + "</button></div>";
   }
+  const checking = String(options.nodeCheckPending || "") === String(nodeId);
   return '<div class="nodes-card__actions">' +
+    '<button type="button" class="nodes-card__btn" data-node-check="' + esc(nodeId) + '"' +
+    (checking ? " disabled" : "") + ">" +
+    esc(t(checking ? "nodes.check.running" : "nodes.check", lang)) + "</button>" +
     '<button type="button" class="nodes-card__btn" data-node-edit="' + esc(nodeId) + '">' +
     esc(t("nodes.edit", lang)) + "</button>" +
     '<button type="button" class="nodes-card__btn" data-node-remove="' + esc(nodeId) + '">' +
     esc(t("nodes.remove", lang)) + "</button></div>";
+}
+
+/**
+ * 上次 CLI 环境自检的摘要：版本、时间、失败原因。
+ * 没做过自检时明确说「未自检」，不要用空白冒充「正常」。
+ */
+function renderCheckStatus(lastCheck, lang) {
+  if (!lastCheck || typeof lastCheck !== "object") {
+    return { state: "never", text: t("nodes.check.never", lang) };
+  }
+  const ok = lastCheck.ok === true;
+  const version = String(lastCheck.version || "").trim();
+  const at = String(lastCheck.checked_at || "").trim();
+  const err = String(lastCheck.error || "").trim();
+  const parts = [t(ok ? "nodes.check.ok" : "nodes.check.fail", lang)];
+  if (version) parts.push(t("nodes.check.version", lang, { version }));
+  if (at) parts.push(at);
+  if (!ok && err) parts.push(err);
+  return { state: ok ? "ok" : "fail", text: parts.join(" · ") };
 }
 
 function renderNodeCard(node, options, lang, now) {
@@ -344,12 +378,18 @@ function renderNodeCard(node, options, lang, now) {
     : "";
   const autoProbe = node.auto_probe !== false;
   const interval = Number(node.heartbeat_interval_sec) >= 5 ? Number(node.heartbeat_interval_sec) : 60;
-  const model = String(node.default_model || "").trim();
+  const meta = node.meta && typeof node.meta === "object" ? node.meta : {};
+  const model = String(node.default_model || meta.default_model || "").trim();
+  const flavor = String(node.adapter || meta.cli_flavor || "").trim();
+  const permission = String(meta.permission_mode || "").trim();
   const prefs = [];
   prefs.push(autoProbe
     ? (lang === "en" ? ("heartbeat " + interval + "s") : ("心跳 " + interval + "s"))
     : (lang === "en" ? "probe off" : "探测关"));
+  if (flavor) prefs.push((lang === "en" ? "cli " : "CLI ") + flavor);
   if (model) prefs.push((lang === "en" ? "model " : "模型 ") + model);
+  if (permission) prefs.push((lang === "en" ? "perm " : "权限 ") + permission);
+  const checkText = renderCheckStatus(meta.last_check, lang);
   return '<article class="nodes-card" data-node-id="' + esc(node.id) + '">' +
     '<div class="nodes-card__head">' +
     "<div><h3 class=\"nodes-card__title\">" + esc(node.name || node.id) + "</h3>" +
@@ -364,6 +404,8 @@ function renderNodeCard(node, options, lang, now) {
     '<span class="badge badge--self_check">' + esc(capacityText(node.slots, lang)) + "</span>" +
     "</div>" +
     '<p class="nodes-card__prefs">' + esc(prefs.join(" · ")) + "</p>" +
+    '<p class="nodes-card__check" data-node-check-state="' + esc(checkText.state) + '">' +
+    esc(checkText.text) + "</p>" +
     '<div class="nodes-card__foot">' +
     (reason ? '<p class="nodes-card__reason">' + esc(reason) + "</p>" : "<span></span>") +
     renderCardActions(node.id, options, lang) +

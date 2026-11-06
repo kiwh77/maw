@@ -11,7 +11,6 @@ import (
 	"sync"
 	"testing"
 
-
 	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/httpapi/resources"
 	"github.com/kiwh77/maw/internal/localauth"
@@ -147,6 +146,16 @@ func (f *fakeProbes) Accept(_ context.Context, req resources.ProbeRequest) (reso
 	return out, nil
 }
 
+type fakeChecks struct{}
+
+func (fakeChecks) Check(_ context.Context, nodeID model.NodeID) (resources.NodeCheckResult, error) {
+	return resources.NodeCheckResult{
+		NodeID: nodeID, OK: true, Version: "fake-cli 9.9.9",
+		LatencyMS: 12, CheckedAt: "2026-11-05T00:00:00Z",
+		Checks: []resources.NodeCheckItem{{Name: "binary", OK: true, Detail: "/usr/bin/fake-cli"}},
+	}, nil
+}
+
 func newAPI(t *testing.T) (*resources.API, string, *fakeTasks) {
 	t.Helper()
 	tok, err := localauth.OpenTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
@@ -159,10 +168,11 @@ func newAPI(t *testing.T) (*resources.API, string, *fakeTasks) {
 	}
 	tasks := &fakeTasks{}
 	api := &resources.API{
-		Tasks:  tasks,
-		Nodes:  &fakeNodes{},
-		Probes: &fakeProbes{},
-		Auth:   &localauth.Authenticator{Tokens: tok},
+		Tasks:      tasks,
+		Nodes:      &fakeNodes{},
+		Probes:     &fakeProbes{},
+		NodeChecks: fakeChecks{},
+		Auth:       &localauth.Authenticator{Tokens: tok},
 	}
 	return api, plain, tasks
 }
@@ -238,6 +248,23 @@ func TestUpdateTaskRevisionMismatch(t *testing.T) {
 		map[string]string{"Idempotency-Key": "upd-task-key-00002", "If-Match": `rev-1`})
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "revision_mismatch") {
 		t.Fatalf("期望 409 revision_mismatch，得到 %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// 看板「测试环境」按钮：同步自检返回 200，且不需要 Idempotency-Key／If-Match。
+func TestCheckNodeReturnsSynchronousResult(t *testing.T) {
+	api, token, _ := newAPI(t)
+	rec := doJSON(t, api, token, http.MethodPost, "/api/v1/nodes/node-a/checks", map[string]any{}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("checks=%d %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["ok"] != true || body["version"] != "fake-cli 9.9.9" {
+		t.Fatalf("body=%v", body)
+	}
+	if _, ok := body["checks"].([]any); !ok {
+		t.Fatalf("checks 必须是数组: %v", body)
 	}
 }
 

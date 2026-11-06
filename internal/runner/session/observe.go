@@ -75,5 +75,7 @@ func (r *Runner) observeFacts(ctx context.Context, cfg Config, rec journal.Recor
 	if err := r.observer.WriteFacts(ctx, facts); err != nil {
 		// 观测失败不改变运行结论，但要计数报出：否则「没记上」会被当成「没有」。
 		r.observationFailures.Add(1)
+		return
 	}
+	r.observed.Add(1)
 }

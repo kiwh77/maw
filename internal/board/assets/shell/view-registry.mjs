@@ -10,8 +10,8 @@
 //
 // VN-705 把回顾、统计与工程设置也登记进来。这些视图与执行视图**共用同一套
 // 导航、筛选与路由**：切页不丢工程筛选，地址栏能原样恢复现场。
-// 其中观测类视图（回顾／统计）按工程物化，没有工程就没有可查的事实——
-// 这一点用 `requiresProject` 声明，由挂载层给出「先选工程」而不是空成功。
+// 其中观测类视图（回顾／统计）由服务端提供全局路由：没有工程时按「全部工程」
+// 聚合，所以不再声明 `requiresProject`。
 
 /**
  * @typedef {Object} ViewDef
@@ -21,7 +21,6 @@
  * @property {string} titleKey 全局语言簿中的标题键
  * @property {string} [navKey] 侧栏菜单名键；缺省回退 titleKey
  * @property {string} headingKey 页面主标题键（vnext 用）
- * @property {string} descKey  页面说明键（vnext 用）
  * @property {string} eyebrowKey 页面眉标键（vnext 用）
  * @property {string} symbol   导航图标字符
  * @property {string} dataKind 需要加载的数据种类（legacy 为空）
@@ -80,28 +79,28 @@ export const VIEW_GROUPS = Object.freeze([
 
 /** @type {ReadonlyArray<ViewDef>} */
 export const VIEW_DEFS = Object.freeze([
-  Object.freeze({ id: "board", group: "flow", legacy: true, titleKey: "view.board", navKey: "nav.workbench", headingKey: "heading.board", descKey: "desc.board", eyebrowKey: "eyebrow.board", symbol: "▦", dataKind: "", requiresProject: false }),
-  Object.freeze({ id: "factory", group: "flow", legacy: true, titleKey: "view.factory", headingKey: "heading.factory", descKey: "desc.factory", eyebrowKey: "eyebrow.factory", symbol: "⚒", dataKind: "", requiresProject: false }),
-  Object.freeze({ id: "topo", group: "flow", legacy: true, titleKey: "view.topo", headingKey: "heading.topo", descKey: "desc.topo", eyebrowKey: "eyebrow.topo", symbol: "⤳", dataKind: "", requiresProject: true }),
+  Object.freeze({ id: "board", group: "flow", legacy: true, titleKey: "view.board", navKey: "nav.workbench", headingKey: "heading.board", eyebrowKey: "eyebrow.board", symbol: "▦", dataKind: "", requiresProject: false }),
+  Object.freeze({ id: "factory", group: "flow", legacy: true, titleKey: "view.factory", headingKey: "heading.factory", eyebrowKey: "eyebrow.factory", symbol: "⚒", dataKind: "", requiresProject: false }),
+  Object.freeze({ id: "topo", group: "flow", legacy: true, titleKey: "view.topo", headingKey: "heading.topo", eyebrowKey: "eyebrow.topo", symbol: "⤳", dataKind: "", requiresProject: true }),
   // 深链保留：侧栏隐藏（SIDEBAR_HIDDEN_IDS / archive 组）。
-  Object.freeze({ id: "tasks", group: "archive", legacy: false, titleKey: "view.tasks", headingKey: "heading.tasks", descKey: "desc.tasks", eyebrowKey: "eyebrow.tasks", symbol: "☰", dataKind: "tasks", requiresProject: false }),
-  Object.freeze({ id: "runs", group: "archive", legacy: false, titleKey: "view.runs", headingKey: "heading.runs", descKey: "desc.runs", eyebrowKey: "eyebrow.runs", symbol: "⌁", dataKind: "runs", requiresProject: false }),
-  Object.freeze({ id: "deliveries", group: "archive", legacy: false, titleKey: "view.deliveries", headingKey: "heading.deliveries", descKey: "desc.deliveries", eyebrowKey: "eyebrow.deliveries", symbol: "✓", dataKind: "deliveries", requiresProject: false }),
-  // 统计：时间轴／热图／会话／用量（保留）+ 问题／日志（新增）。全部只读，按工程物化。
-  Object.freeze({ id: "timeline", group: "review", legacy: false, titleKey: "view.timeline", headingKey: "heading.timeline", descKey: "desc.timeline", eyebrowKey: "eyebrow.timeline", symbol: "⌚", dataKind: "timeline", requiresProject: true }),
-  Object.freeze({ id: "activity", group: "review", legacy: false, titleKey: "view.activity", headingKey: "heading.activity", descKey: "desc.activity", eyebrowKey: "eyebrow.activity", symbol: "▩", dataKind: "activity", requiresProject: true }),
-  Object.freeze({ id: "sessions", group: "review", legacy: false, titleKey: "view.sessions", headingKey: "heading.sessions", descKey: "desc.sessions", eyebrowKey: "eyebrow.sessions", symbol: "↳", dataKind: "sessions", requiresProject: true }),
-  Object.freeze({ id: "analytics", group: "review", legacy: false, titleKey: "view.analytics", headingKey: "heading.analytics", descKey: "desc.analytics", eyebrowKey: "eyebrow.analytics", symbol: "◫", dataKind: "analytics", requiresProject: true }),
-  Object.freeze({ id: "problems", group: "review", legacy: false, titleKey: "view.problems", headingKey: "heading.problems", descKey: "desc.problems", eyebrowKey: "eyebrow.problems", symbol: "!", dataKind: "problems", requiresProject: false }),
-  Object.freeze({ id: "logs", group: "review", legacy: false, titleKey: "view.logs", headingKey: "heading.logs", descKey: "desc.logs", eyebrowKey: "eyebrow.logs", symbol: "≡", dataKind: "logs", requiresProject: false }),
+  Object.freeze({ id: "tasks", group: "archive", legacy: false, titleKey: "view.tasks", headingKey: "heading.tasks", eyebrowKey: "eyebrow.tasks", symbol: "☰", dataKind: "tasks", requiresProject: false }),
+  Object.freeze({ id: "runs", group: "archive", legacy: false, titleKey: "view.runs", headingKey: "heading.runs", eyebrowKey: "eyebrow.runs", symbol: "⌁", dataKind: "runs", requiresProject: false }),
+  Object.freeze({ id: "deliveries", group: "archive", legacy: false, titleKey: "view.deliveries", headingKey: "heading.deliveries", eyebrowKey: "eyebrow.deliveries", symbol: "✓", dataKind: "deliveries", requiresProject: false }),
+  // 统计：时间轴／热图／会话／用量（保留）+ 问题／日志（新增）。全部只读；观测四类由全局路由聚合。
+  Object.freeze({ id: "timeline", group: "review", legacy: false, titleKey: "view.timeline", headingKey: "heading.timeline", eyebrowKey: "eyebrow.timeline", symbol: "⌚", dataKind: "timeline", requiresProject: false }),
+  Object.freeze({ id: "activity", group: "review", legacy: false, titleKey: "view.activity", headingKey: "heading.activity", eyebrowKey: "eyebrow.activity", symbol: "▩", dataKind: "activity", requiresProject: false }),
+  Object.freeze({ id: "sessions", group: "review", legacy: false, titleKey: "view.sessions", headingKey: "heading.sessions", eyebrowKey: "eyebrow.sessions", symbol: "↳", dataKind: "sessions", requiresProject: false }),
+  Object.freeze({ id: "analytics", group: "review", legacy: false, titleKey: "view.analytics", headingKey: "heading.analytics", eyebrowKey: "eyebrow.analytics", symbol: "◫", dataKind: "analytics", requiresProject: false }),
+  Object.freeze({ id: "problems", group: "review", legacy: false, titleKey: "view.problems", headingKey: "heading.problems", eyebrowKey: "eyebrow.problems", symbol: "!", dataKind: "problems", requiresProject: false }),
+  Object.freeze({ id: "logs", group: "review", legacy: false, titleKey: "view.logs", headingKey: "heading.logs", eyebrowKey: "eyebrow.logs", symbol: "≡", dataKind: "logs", requiresProject: false }),
   // 设置：工程清单 + 执行节点 + 受管执行策略。
-  Object.freeze({ id: "projects", group: "settings", legacy: false, titleKey: "view.projects", headingKey: "heading.projects", descKey: "desc.projects", eyebrowKey: "eyebrow.projects", symbol: "❏", dataKind: "projects", requiresProject: false }),
-  Object.freeze({ id: "nodes", group: "settings", legacy: false, titleKey: "view.nodes", headingKey: "heading.nodes", descKey: "desc.nodes", eyebrowKey: "eyebrow.nodes", symbol: "▤", dataKind: "nodes", requiresProject: false }),
-  Object.freeze({ id: "settings", group: "settings", legacy: false, titleKey: "view.settings", headingKey: "heading.settings", descKey: "desc.settings", eyebrowKey: "eyebrow.settings", symbol: "⚙", dataKind: "settings", requiresProject: false }),
+  Object.freeze({ id: "projects", group: "settings", legacy: false, titleKey: "view.projects", headingKey: "heading.projects", eyebrowKey: "eyebrow.projects", symbol: "❏", dataKind: "projects", requiresProject: false }),
+  Object.freeze({ id: "nodes", group: "settings", legacy: false, titleKey: "view.nodes", headingKey: "heading.nodes", eyebrowKey: "eyebrow.nodes", symbol: "▤", dataKind: "nodes", requiresProject: false }),
+  Object.freeze({ id: "settings", group: "settings", legacy: false, titleKey: "view.settings", headingKey: "heading.settings", eyebrowKey: "eyebrow.settings", symbol: "⚙", dataKind: "settings", requiresProject: false }),
   // 执行视图（EV-001）：按迭代聚合任务／运行／交付，是主视图而不是筛选目标。
   // 归入 flow 组：该组不进侧栏（侧栏只留置顶的工作台），所以它不占新的导航入口，
   // 用 `?view=execution` 进入；EV-003 会把默认落地页切到它。
-  Object.freeze({ id: "execution", group: "flow", legacy: false, titleKey: "view.execution", headingKey: "heading.execution", descKey: "desc.execution", eyebrowKey: "eyebrow.execution", symbol: "◈", dataKind: "execution", requiresProject: false }),
+  Object.freeze({ id: "execution", group: "flow", legacy: false, titleKey: "view.execution", headingKey: "heading.execution", eyebrowKey: "eyebrow.execution", symbol: "◈", dataKind: "execution", requiresProject: false }),
 ]);
 /** 旧视图容器 id，切到 vnext 视图时整体隐藏。 */
 export const LEGACY_CONTAINERS = Object.freeze(["columns", "topology", "factory"]);

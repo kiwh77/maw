@@ -46,6 +46,10 @@ const I18N = {
     "kind.turn": "模型轮次",
     "kind.explicit_wait": "明确等待",
     "kind.unknown": "未知／未闭合",
+    "lane.run": "运行",
+    "lane.instance": "实例",
+    "lane.ungrouped": "未归属",
+    "lane.spans": "{n} 段",
     "toolbar.window": "小时窗口",
     "toolbar.zoom": "缩放",
     "toolbar.zoom_out": "缩小",
@@ -92,6 +96,10 @@ const I18N = {
     "kind.turn": "Model turn",
     "kind.explicit_wait": "Explicit wait",
     "kind.unknown": "Unknown / open",
+    "lane.run": "Run",
+    "lane.instance": "Instance",
+    "lane.ungrouped": "Ungrouped",
+    "lane.spans": "{n} spans",
     "toolbar.window": "Hour window",
     "toolbar.zoom": "Zoom",
     "toolbar.zoom_out": "Zoom out",
@@ -262,7 +270,54 @@ export function groupLanes(bars) {
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(bar);
   }
-  return [...map.entries()].map(([id, items]) => ({ id, bars: items }));
+  // 泳道按最早起点排序；起点相同再用身份作稳定次序，刷新前后不会跳。
+  return [...map.entries()]
+    .map(([id, items]) => ({ id, bars: items }))
+    .sort((a, b) => {
+      const av = Math.min(...a.bars.map(bar => bar.clipStartMs));
+      const bv = Math.min(...b.bars.map(bar => bar.clipStartMs));
+      return av - bv || a.id.localeCompare(b.id);
+    });
+}
+
+/** 同一泳道内按类别拆成子行：四类并行区间分开画，互不遮挡。 */
+export function groupKindRows(bars) {
+  const order = [...INTERVAL_KINDS, "unknown"];
+  const map = new Map();
+  for (const bar of bars) {
+    const kind = isKnownKind(bar.kind) ? bar.kind : "unknown";
+    if (!map.has(kind)) map.set(kind, []);
+    map.get(kind).push(bar);
+  }
+  return order
+    .filter(kind => map.has(kind))
+    .map(kind => ({
+      kind,
+      bars: map.get(kind).slice().sort((a, b) =>
+        a.clipStartMs - b.clipStartMs || a.interval_id.localeCompare(b.interval_id)),
+    }));
+}
+
+/**
+ * 泳道标题：先给类别（运行／实例／未归属），再给原始身份。
+ *
+ * 原始 run_id 单独一行读者不知道是什么；这里把「是什么」与「哪一条」拆开。
+ */
+function laneLabels(id, bars, lang) {
+  const runId = bars.map(bar => bar.run_id).find(Boolean) || "";
+  const instanceId = bars.map(bar => bar.instance_id).find(Boolean) || "";
+  const kindKey = runId ? "lane.run" : (instanceId ? "lane.instance" : "lane.ungrouped");
+  const primary = t(kindKey, lang);
+  const identity = runId || instanceId || id;
+  const secondary = runId && instanceId
+    ? t("lane.instance", lang) + " " + instanceId
+    : "";
+  return {
+    primary,
+    identity,
+    secondary,
+    full: [primary, identity, secondary].filter(Boolean).join(" · "),
+  };
 }
 
 export function focusModel(bars, selectedId = null) {
@@ -338,8 +393,9 @@ export function installTimelineKeyboard(doc = (typeof document !== "undefined" ?
   return () => doc.removeEventListener("keydown", onKey, true);
 }
 
-function emptyState(lang, keys) {
-  return '<div class="empty-state"><p class="empty-state__text">' + safeText(t(keys[0], lang)) + "</p>" +
+function emptyState(lang, keys, extraClass = "") {
+  return '<div class="empty-state' + (extraClass ? " " + extraClass : "") + '">' +
+    '<p class="empty-state__text">' + safeText(t(keys[0], lang)) + "</p>" +
     '<p class="empty-state__text">' + safeText(t(keys[1], lang)) + "</p></div>";
 }
 
@@ -381,18 +437,21 @@ function formatStamp(iso, timezone) {
   }
 }
 
-function renderBar(bar, selectedId, lang) {
+function renderBar(bar, selectedId, lang, timezone = "Asia/Shanghai") {
   const kindClass = bar.fill === "hatch" ? "unknown" : bar.kind;
   const openClass = bar.open || bar.fill === "hatch" ? " timeline__bar--open" : "";
   const selected = bar.interval_id === selectedId ? ' aria-selected="true"' : "";
   const label = t("kind." + (isKnownKind(bar.kind) ? bar.kind : "unknown"), lang);
+  const span = formatStamp(bar.start_at, timezone) + " – " +
+    (bar.end_at ? formatStamp(bar.end_at, timezone) : t("detail.open", lang));
   return '<button type="button" class="timeline__bar timeline__bar--' + kindClass + openClass + '"' +
     ' data-interval-id="' + safeText(bar.interval_id) + '"' +
     ' data-kind="' + safeText(bar.kind) + '"' +
     ' style="left:' + bar.leftPct.toFixed(3) + "%;width:" + bar.widthPct.toFixed(3) + '%"' +
     ' tabindex="' + (bar.interval_id === selectedId ? "0" : "-1") + '"' +
     selected +
-    ' aria-label="' + safeText(label + " " + bar.interval_id) + '">' +
+    ' title="' + safeText(label + " · " + span) + '"' +
+    ' aria-label="' + safeText(label + " " + bar.interval_id + " · " + span) + '">' +
     "</button>";
 }
 
@@ -463,16 +522,22 @@ export function renderTimeline(state = {}, options = {}) {
   const completeness = state.cursors?.completeness || state.completeness || "";
   const showUnknownBanner = status === "unknown" || completeness === "partial" ||
     completeness === "unknown";
+  const rootStatus = showUnknownBanner && status !== "unknown" ? "unknown" : status;
 
   const toolbar = '<div class="timeline__toolbar" role="toolbar">' +
-    '<span class="field-hint">' +     safeText(t("toolbar.window", lang)) + ": " +
+    '<span class="field-hint">' + safeText(t("toolbar.window", lang)) + ": " +
     safeText(formatStamp(dateCtx.start, dateCtx.timezone)) + " – " +
     safeText(formatStamp(dateCtx.end, dateCtx.timezone)) +
     " (" + dateCtx.hours + "h · " + safeText(dateCtx.timezone) + ")</span>" +
+    '<div class="timeline__toolbar-actions">' +
     '<button type="button" class="button" data-action="prev">' + safeText(t("toolbar.prev", lang)) + "</button>" +
     '<button type="button" class="button" data-action="next">' + safeText(t("toolbar.next", lang)) + "</button>" +
     '<button type="button" class="button" data-action="zoom-out">' + safeText(t("toolbar.zoom_out", lang)) + "</button>" +
     '<button type="button" class="button" data-action="zoom-in">' + safeText(t("toolbar.zoom_in", lang)) + "</button>" +
+    "</div></div>";
+
+  const meta = '<div class="timeline__meta">' +
+    legend(lang) +
     '<span class="timeline__kbd">' + safeText(t("toolbar.kbd", lang)) + "</span>" +
     "</div>";
 
@@ -485,33 +550,56 @@ export function renderTimeline(state = {}, options = {}) {
     : "";
 
   const banner = showUnknownBanner
-    ? emptyState(lang, ["timeline.unknown", "timeline.unknown.hint"])
+    ? emptyState(lang, ["timeline.unknown", "timeline.unknown.hint"], "timeline__notice")
     : "";
 
-  if (!bars.length && status !== "unknown") {
-    return '<div class="timeline" data-status="empty">' + toolbar + legend(lang) +
-      emptyState(lang, ["timeline.empty", "timeline.empty.hint"]) + cursors + "</div>";
+  // 无区间时只呈现一个明确的空态：不渲染图例、泳道和「未选择区间」，
+  // 否则空页面上会同时出现三套互相矛盾的提示。
+  if (!bars.length) {
+    const emptyKeys = showUnknownBanner
+      ? ["timeline.unknown", "timeline.unknown.hint"]
+      : ["timeline.empty", "timeline.empty.hint"];
+    return '<div class="timeline" data-status="' + safeText(showUnknownBanner ? "unknown" : "empty") +
+      '" data-hours="' + dateCtx.hours + '" data-selected="">' +
+      toolbar + emptyState(lang, emptyKeys) + cursors + "</div>";
   }
 
   const lanesHtml = lanes.map(lane => {
     const focused = lane.bars.some(b => b.interval_id === focus.selectedId);
-    return '<div class="timeline__lane' + (focused ? " timeline__lane--focused" : "") +
+    const labels = laneLabels(lane.id, lane.bars, lang);
+    const rowHtml = groupKindRows(lane.bars).map(row => {
+      const kindLabel = t("kind." + row.kind, lang);
+      return '<div class="timeline__row" data-kind="' + safeText(row.kind) + '">' +
+        '<span class="timeline__row-label">' + safeText(kindLabel) + "</span>" +
+        '<div class="timeline__track" role="listbox" aria-label="' +
+        safeText(labels.full + " · " + kindLabel) + '">' +
+        row.bars.map(b => renderBar(b, focus.selectedId, lang, dateCtx.timezone)).join("") +
+        "</div></div>";
+    }).join("");
+    return '<section class="timeline__lane' + (focused ? " timeline__lane--focused" : "") +
       '" data-lane="' + safeText(lane.id) + '">' +
-      '<div class="timeline__lane-label">' + safeText(lane.id) + "</div>" +
-      '<div class="timeline__track" role="listbox" aria-label="' + safeText(lane.id) + '">' +
-      lane.bars.map(b => renderBar(b, focus.selectedId, lang)).join("") +
+      '<div class="timeline__lane-head">' +
+      '<div class="timeline__lane-title" title="' + safeText(labels.full) + '">' +
+      '<span class="timeline__lane-kind">' + safeText(labels.primary) + "</span>" +
+      '<span class="timeline__lane-id">' + safeText(labels.identity) + "</span>" +
       "</div>" +
+      '<span class="timeline__lane-meta">' + safeText(labels.secondary) + "</span>" +
+      '<span class="timeline__lane-count">' +
+      safeText(t("lane.spans", lang, { n: lane.bars.length })) + "</span>" +
+      "</div>" +
+      '<div class="timeline__rows">' + rowHtml + "</div>" +
       '<div class="timeline__axis"><span>' + safeText(formatAxis(dateCtx.start, dateCtx.timezone)) +
       "</span><span>" + safeText(formatAxis(dateCtx.end, dateCtx.timezone)) +
-      "</span></div></div>";
+      "</span></div></section>";
   }).join("");
 
-  const detail = options.showDetail === false ? "" : renderDetail(selected, { lang });
+  const detail = options.showDetail === false || !selected
+    ? ""
+    : renderDetail(selected, { lang });
 
-  return '<div class="timeline" data-status="' +
-    safeText(showUnknownBanner && status === "ready" ? "unknown" : (status || "ready")) +
+  return '<div class="timeline" data-status="' + safeText(rootStatus) +
     '" data-hours="' + dateCtx.hours + '" data-selected="' + safeText(focus.selectedId || "") + '">' +
-    toolbar + legend(lang) + banner +
+    toolbar + meta + banner +
     '<div class="timeline__lanes">' + lanesHtml + "</div>" +
     detail + cursors + "</div>";
 }

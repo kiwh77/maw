@@ -34,6 +34,11 @@ import (
 //
 // 自动选题关闭时仍允许本路径；窗口／中枢退出后 Runner 继续存活（独立进程组）。
 func ManagedStart(cwd, taskID, nodeID, agentFlag string, dryRun bool) (Result, error) {
+	return ManagedStartWithModel(cwd, taskID, nodeID, agentFlag, "", dryRun)
+}
+
+// ManagedStartWithModel 在 ManagedStart 基础上覆盖本次执行的模型。
+func ManagedStartWithModel(cwd, taskID, nodeID, agentFlag, modelName string, dryRun bool) (Result, error) {
 	pc, err := resolveProject(cwd)
 	if err != nil {
 		return nil, err
@@ -53,6 +58,7 @@ func ManagedStart(cwd, taskID, nodeID, agentFlag string, dryRun bool) (Result, e
 	if err != nil {
 		return nil, err
 	}
+	rt.modelOverride = strings.TrimSpace(modelName)
 	taskID = strings.TrimSpace(taskID)
 	nodeID = strings.TrimSpace(nodeID)
 	explicit := taskID != "" && nodeID != ""
@@ -427,6 +433,7 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, string, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	startedAt := time.Now().UTC()
 	rep, err := r.Run(ctx, session.Config{
 		Instance:   model.InstanceID(meta.InstanceID),
 		RunID:      model.RunID(meta.RunID),
@@ -436,6 +443,23 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, string, error) {
 		Context:    runCtx,
 		Heartbeat:  2 * time.Second,
 	})
+	// 来源没给出任何观测（passthrough 或解析失败）时补一条基线：
+	// 受管节点跑过的运行必须在统计里留下痕迹，而不是整段消失。
+	if w, ok := store.(observe.Writer); ok && rep.Observed == 0 {
+		_ = w.WriteFacts(context.Background(), observe.Facts{
+			RunID:      meta.RunID,
+			InstanceID: meta.InstanceID,
+			ProjectID:  meta.ProjectID,
+			SourceNS:   normalizeSourceNS("", filepath.Base(spec.Executable)),
+			SessionID:  "run:" + meta.RunID,
+			RecordType: "result",
+			RecordUUID: "run:" + meta.RunID,
+			RecordRef:  "runner:" + opID,
+			OccurredAt: startedAt,
+			Scope:      "run",
+			Quality:    model.QualityUnknown,
+		})
+	}
 	// 执行结束（无论成败）都把事实快照落盘，op 目录因此自解释。
 	return rep, true, writeSessionReport(opDir, opID, meta, rep, err), err
 }

@@ -34,6 +34,11 @@ type API struct {
 // notifications/{id}/acks，而不是 /doAck。
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// 全局统计路由：顶部工程为「全部工程」时，四类观测事实按全工程聚合。
+	mux.HandleFunc("GET /api/v1/timeline", a.handleTimeline)
+	mux.HandleFunc("GET /api/v1/activity", a.handleActivity)
+	mux.HandleFunc("GET /api/v1/sessions", a.handleSessions)
+	mux.HandleFunc("GET /api/v1/analytics", a.handleStats)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/timeline", a.handleTimeline)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/activity", a.handleActivity)
 	mux.HandleFunc("GET /api/v1/projects/{project_id}/sessions", a.handleSessions)

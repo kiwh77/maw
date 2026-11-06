@@ -8,6 +8,7 @@ import ProjectSelect from './components/ProjectSelect.vue'
 import VnextHost from './components/VnextHost.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import NodeEditorModal from './components/NodeEditorModal.vue'
+import ProjectEditorModal from './components/ProjectEditorModal.vue'
 import JoinPromptButton from './components/JoinPromptButton.vue'
 import BoardView from './views/BoardView.vue'
 import FactoryView from './views/FactoryView.vue'
@@ -133,9 +134,6 @@ const themeValue = readTheme()
           <div>
             <div class="eyebrow">{{ board.t(def?.eyebrowKey || 'eyebrow.board') }}</div>
             <h1 id="page-h1">{{ board.t(def?.headingKey || 'heading.board') }}</h1>
-            <p class="page-description" id="page-desc">
-              {{ board.t(def?.descKey || 'desc.board') }}
-            </p>
           </div>
           <JoinPromptButton v-if="showJoinPrompt" variant="join" />
         </div>
@@ -151,5 +149,6 @@ const themeValue = readTheme()
     </main>
     <TaskDrawer />
     <NodeEditorModal />
+    <ProjectEditorModal />
   </div>
 </template>

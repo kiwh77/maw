@@ -94,7 +94,6 @@ select.theme-select { font-size: 10px; height: 28px; max-width: 100px; padding-t
 .page-heading { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-bottom: 12px; flex-shrink: 0; }
 .eyebrow { font: 10px var(--mono); letter-spacing: 1.5px; color: var(--muted); margin-bottom: 3px; }
 h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.7px; }
-.page-description { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
 .join-button { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); border-radius: var(--radius); padding: 7px 10px; font-size: 11px; font-weight: 600; white-space: nowrap; transition: background .15s; }
 .join-button:hover { background: var(--accent-hover); }
 .join-button .symbol { margin-right: 6px; font: 12px var(--mono); }
@@ -246,7 +245,7 @@ code, .kv dd, .list-plain { font-family: var(--mono); }
   .content { padding: 20px 16px 0; } .topbar { height: 48px; padding: 0 16px; }
   .breadcrumb .dim, .breadcrumb .slash { display: none; }
   .page-heading { margin-bottom: 10px; align-items: flex-start; } h1 { font-size: 20px; }
-  .page-description { max-width: 190px; font-size: 10px; } .join-button { padding: 7px; font-size: 10px; } .join-button .symbol { display: none; }
+  .join-button { padding: 7px; font-size: 10px; } .join-button .symbol { display: none; }
   /* 窄屏放不下五列：改三列两行，每行首项不画左侧分隔线，行间靠 row-gap。 */
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .stat { padding: 0 8px; } .stat:nth-child(3n+1) { border-left: 0; padding-left: 0; }

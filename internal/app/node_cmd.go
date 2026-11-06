@@ -19,6 +19,13 @@ type NodeRegisterInput struct {
 	Slots     int
 	// ArgvJSON 是启动参数 JSON 数组，例如 ["/usr/bin/env","echo","ok"]。
 	ArgvJSON string
+	// CLI 是内置预设名（claude / codex / cursor / traecli / codebuddy / dsh）。
+	// 给定时自动生成非交互 argv、任务卡提示与权限档；与 ArgvJSON 互斥。
+	CLI string
+	// Model 是节点默认模型；启动时可用 managed start --model 覆盖。
+	Model string
+	// Permission 是权限档：safe（默认，最小权限）或 unattended（跳过确认）。
+	Permission string
 	// System 为真时写入 meta.system_role，供系统 Agent 选用。
 	System bool
 	DryRun bool
@@ -74,9 +81,26 @@ func NodeRegister(cwd string, in NodeRegisterInput) (Result, error) {
 			projectID = pc.ID()
 		}
 	}
+	cliName := strings.ToLower(strings.TrimSpace(in.CLI))
+	permission := strings.ToLower(strings.TrimSpace(in.Permission))
+	if permission == "" {
+		permission = "safe"
+	}
+	if permission != "safe" && permission != "unattended" {
+		return nil, errx.New("--permission 只支持 safe 或 unattended", "例如 --permission unattended")
+	}
 	var argv []string
 	rawCmd := strings.TrimSpace(in.ArgvJSON)
-	if rawCmd != "" {
+	if cliName != "" && rawCmd != "" {
+		return nil, errx.New("--cli 与 --cmd 不能同时使用", "用 --cli 自动生成 argv，或用 --cmd 自定义")
+	}
+	if cliName != "" {
+		var err error
+		argv, err = buildCLIArgv(cliName, permission)
+		if err != nil {
+			return nil, err
+		}
+	} else if rawCmd != "" {
 		if err := json.Unmarshal([]byte(rawCmd), &argv); err != nil {
 			return nil, errx.New("--cmd 必须是 JSON 数组: "+err.Error(),
 				`例如 --cmd '["/usr/bin/env","echo","hi"]'`)
@@ -84,10 +108,28 @@ func NodeRegister(cwd string, in NodeRegisterInput) (Result, error) {
 		if len(argv) < 1 {
 			return nil, errx.New("--cmd 不能为空数组", `例如 --cmd '["/bin/echo","ok"]'`)
 		}
+	} else {
+		return nil, errx.New("需要 --cli 或 --cmd", "例如 maw node register --id claude-1 --cli claude --model sonnet")
 	}
 	meta := localCLINodeMeta(argv, in.System)
 	if flavor := cliFlavorFromID(id, label); flavor != "" {
 		meta["cli_flavor"] = flavor
+	}
+	if cliName != "" {
+		p, _ := cliPresetFor(cliName)
+		meta["cli_flavor"] = p.Flavor
+		meta["permission_mode"] = permission
+		// 预设 argv 的末项是任务提示；模型与 dsh patch 在启动时插到它前面。
+		meta["prompt_last"] = true
+		meta["task_card"] = true
+		meta["auto_probe"] = true
+		meta["heartbeat_interval_sec"] = 60
+	}
+	if modelName := strings.TrimSpace(in.Model); modelName != "" {
+		if cliName == "" {
+			return nil, errx.New("--model 需要配合 --cli 使用", "例如 maw node register --id codex-1 --cli codex --model gpt-5")
+		}
+		meta["default_model"] = modelName
 	}
 	if in.DryRun {
 		return Result{
@@ -143,9 +185,9 @@ func NodeRemove(cwd, nodeID string, dryRun bool) (Result, error) {
 func localCLINodeMeta(argv []string, system bool) map[string]any {
 	now := time.Now().UTC().Format(time.RFC3339)
 	meta := map[string]any{
-		"adapter_kind":     "local_cli",
-		"accept_new":       true,
-		"entry_state":      "ready",
+		"adapter_kind": "local_cli",
+		"accept_new":   true,
+		"entry_state":  "ready",
 		// 看板四维认证态认 ready／needs-*／unknown；ok 会被当成 unknown。
 		"auth_state":       "ready",
 		"connection_state": "fresh",

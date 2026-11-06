@@ -346,6 +346,66 @@ func main() {
 	statusCmd.AddCommand(statusReportCmd)
 	root.AddCommand(statusCmd)
 
+	statsCmd := &cobra.Command{Use: "stats", Short: i18n.T("cmd.stats.short")}
+	statsReportCmd := &cobra.Command{
+		Use:   "report",
+		Short: i18n.T("cmd.stats.report.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			task, _ := cmd.Flags().GetString("task")
+			agent, _ := cmd.Flags().GetString("agent")
+			project, _ := cmd.Flags().GetString("project")
+			client, _ := cmd.Flags().GetString("client")
+			modelName, _ := cmd.Flags().GetString("model")
+			session, _ := cmd.Flags().GetString("session")
+			source, _ := cmd.Flags().GetString("source")
+			turns, _ := cmd.Flags().GetInt("turns")
+			duration, _ := cmd.Flags().GetInt("duration")
+			quality, _ := cmd.Flags().GetString("quality")
+			startedAt, _ := cmd.Flags().GetString("started-at")
+			var input, output, cacheRead, cacheWrite *int64
+			if cmd.Flags().Changed("input-tokens") {
+				v, _ := cmd.Flags().GetInt64("input-tokens")
+				input = &v
+			}
+			if cmd.Flags().Changed("output-tokens") {
+				v, _ := cmd.Flags().GetInt64("output-tokens")
+				output = &v
+			}
+			if cmd.Flags().Changed("cache-read-tokens") {
+				v, _ := cmd.Flags().GetInt64("cache-read-tokens")
+				cacheRead = &v
+			}
+			if cmd.Flags().Changed("cache-write-tokens") {
+				v, _ := cmd.Flags().GetInt64("cache-write-tokens")
+				cacheWrite = &v
+			}
+			printRes(app.StatsReport(cwd, app.StatsReportInput{
+				ProjectID: project, Actor: agent, TaskID: task,
+				Client: client, Model: modelName, SessionID: session, SourceNS: source,
+				Turns: turns, InputTokens: input, OutputTokens: output,
+				CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+				DurationSeconds: duration, StartedAt: startedAt, Quality: quality,
+			}))
+		},
+	}
+	statsReportCmd.Flags().String("task", "", i18n.T("flag.task"))
+	statsReportCmd.Flags().String("agent", "", i18n.T("flag.agent"))
+	statsReportCmd.Flags().String("project", "", i18n.T("flag.project"))
+	statsReportCmd.Flags().String("client", "", i18n.T("flag.stats_client"))
+	statsReportCmd.Flags().String("model", "", i18n.T("flag.stats_model"))
+	statsReportCmd.Flags().String("session", "", i18n.T("flag.stats_session"))
+	statsReportCmd.Flags().String("source", "", i18n.T("flag.stats_source"))
+	statsReportCmd.Flags().Int("turns", 1, i18n.T("flag.stats_turns"))
+	statsReportCmd.Flags().Int("duration", 0, i18n.T("flag.stats_duration"))
+	statsReportCmd.Flags().Int64("input-tokens", 0, i18n.T("flag.stats_input_tokens"))
+	statsReportCmd.Flags().Int64("output-tokens", 0, i18n.T("flag.stats_output_tokens"))
+	statsReportCmd.Flags().Int64("cache-read-tokens", 0, i18n.T("flag.stats_cache_read"))
+	statsReportCmd.Flags().Int64("cache-write-tokens", 0, i18n.T("flag.stats_cache_write"))
+	statsReportCmd.Flags().String("quality", "", i18n.T("flag.stats_quality"))
+	statsReportCmd.Flags().String("started-at", "", i18n.T("flag.stats_started_at"))
+	statsCmd.AddCommand(statsReportCmd)
+	root.AddCommand(statsCmd)
+
 	// wait：等 deps 或等任务终态，超时用退出码 2 与「参数/环境错误」区分开。
 	waitCmd := &cobra.Command{
 		Use:   "wait",
@@ -524,10 +584,14 @@ func main() {
 			project, _ := cmd.Flags().GetString("project")
 			slots, _ := cmd.Flags().GetInt("slots")
 			cmdJSON, _ := cmd.Flags().GetString("cmd")
+			cliName, _ := cmd.Flags().GetString("cli")
+			modelName, _ := cmd.Flags().GetString("model")
+			permission, _ := cmd.Flags().GetString("permission")
 			system, _ := cmd.Flags().GetBool("system")
 			printRes(app.NodeRegister(cwd, app.NodeRegisterInput{
 				ID: id, Label: label, ProjectID: project, Slots: slots,
-				ArgvJSON: cmdJSON, System: system, DryRun: dryRun,
+				ArgvJSON: cmdJSON, CLI: cliName, Model: modelName, Permission: permission,
+				System: system, DryRun: dryRun,
 			}))
 		},
 	}
@@ -536,6 +600,9 @@ func main() {
 	nodeRegCmd.Flags().String("project", "", "归属工程 id（默认当前仓）")
 	nodeRegCmd.Flags().Int("slots", 1, "槽位上限")
 	nodeRegCmd.Flags().String("cmd", "", `启动 argv JSON，如 ["/bin/echo","ok"]`)
+	nodeRegCmd.Flags().String("cli", "", "内置 CLI 预设：claude / codex / cursor / traecli / codebuddy / dsh")
+	nodeRegCmd.Flags().String("model", "", "节点默认模型（启动时可用 managed start --model 覆盖）")
+	nodeRegCmd.Flags().String("permission", "safe", "权限档：safe（默认）或 unattended")
 	nodeRegCmd.Flags().Bool("system", false, "标记为系统节点候选")
 	_ = nodeRegCmd.MarkFlagRequired("id")
 	nodeCmd.AddCommand(nodeRegCmd)
@@ -653,12 +720,14 @@ func main() {
 			task, _ := cmd.Flags().GetString("task")
 			node, _ := cmd.Flags().GetString("node")
 			agent, _ := cmd.Flags().GetString("agent")
-			printRes(app.ManagedStart(cwd, task, node, agent, dryRun))
+			modelName, _ := cmd.Flags().GetString("model")
+			printRes(app.ManagedStartWithModel(cwd, task, node, agent, modelName, dryRun))
 		},
 	}
 	managedStartCmd.Flags().String("task", "", i18n.T("flag.task"))
 	managedStartCmd.Flags().String("node", "", i18n.T("flag.node"))
 	managedStartCmd.Flags().String("agent", "", i18n.T("flag.agent"))
+	managedStartCmd.Flags().String("model", "", "覆盖节点默认模型（仅本次执行）")
 	managedCmd.AddCommand(managedStartCmd)
 	managedCmd.AddCommand(&cobra.Command{
 		Use:   "status",

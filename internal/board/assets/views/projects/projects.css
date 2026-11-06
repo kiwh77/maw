@@ -222,3 +222,117 @@
     visibility: collapse;
   }
 }
+
+/* ---------- 编辑模态框 ---------- */
+
+.projects-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: color-mix(in srgb, var(--bg, #0b0d10) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.projects-modal {
+  position: fixed;
+  z-index: 81;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 0;
+  background: var(--panel, #14181e);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius, 6px) + 2px);
+  box-shadow: 0 16px 48px color-mix(in srgb, #000 35%, transparent);
+}
+
+.projects-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.projects-modal__head h2 {
+  margin: 0;
+  font-size: var(--font-title, 18px);
+  color: var(--text);
+}
+
+.projects-modal__close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: var(--radius, 6px);
+}
+
+.projects-modal__close:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.projects-modal__body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.projects-modal__id {
+  font-family: var(--mono);
+}
+
+.projects-modal__section {
+  margin: 4px 0 0;
+  font-size: var(--font-body, 14px);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* 两列排在宽屏；窄屏回落单列，避免标签与输入互相挤压。 */
+.projects-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.projects-modal__full {
+  grid-column: 1 / -1;
+}
+
+.projects-modal .field {
+  margin-bottom: 0;
+}
+
+.projects-modal .input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.projects-modal__error {
+  margin: 0;
+  font-size: var(--font-meta, 12px);
+  color: var(--danger, var(--text));
+}
+
+.projects-modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 640px) {
+  .projects-modal__grid { grid-template-columns: 1fr; }
+  .projects-modal__full { grid-column: auto; }
+}

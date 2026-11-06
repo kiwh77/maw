@@ -1,31 +1,26 @@
-/* 设置页的视图局部样式（VN-725）。
+/* 设置页（系统执行策略）的局部样式。
  *
- * 只放共享组件覆盖不到的排版：表单容器宽度、错误列表、动作区。
- * 颜色一律取 tokens，不写死色值——深浅主题靠 token 换，不靠这里分支。
+ * 页面只保留三块：顶部状态、策略表、相关入口。颜色一律取 tokens，
+ * 深浅主题靠 token 切换，不在这里写死色值。
  */
 
-.settings-head h1 {
-  margin: 0 0 var(--space-tight, 4px);
-  font-size: var(--font-title, 20px);
-  color: var(--text);
-}
-
+/* 顶部：作用域、自动模式、只读标记与一句话说明并排，窄屏换行不挤压。 */
 .settings-save-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-tight, 8px);
   margin: var(--space-tight, 4px) 0 var(--space-block, 16px);
 }
 
-.settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-tight, 8px);
-  max-width: 560px;
+.settings-save-status .field-hint {
+  margin: 0;
 }
 
-/* 分区（EV-002）：标题、说明、字段、说明链四层，靠间距分开，不靠分割线堆叠。 */
 .settings-section {
-  margin: 0 0 var(--space-block, 16px);
+  margin: 0 0 var(--space-block, 24px);
   padding: 0;
-  max-width: 560px;
+  max-width: 720px;
 }
 
 .settings-section__title {
@@ -36,76 +31,42 @@
 }
 
 .settings-section__desc {
-  margin: 0 0 var(--space-tight, 8px);
+  margin: 0 0 var(--space-tight, 12px);
 }
 
-/* 说明链：入口／归属／边界。两列用 minmax(0,1fr)，窄屏下长句换行而不是撑破页面。 */
-.settings-facts {
-  display: grid;
-  gap: var(--space-tight, 4px);
-  margin: var(--space-tight, 8px) 0 0;
+/* 策略表是唯一一份当前值：表格撑满内容区，说明列允许长句换行。 */
+.settings-current {
+  width: 100%;
 }
 
-.settings-fact {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: var(--space-tight, 8px);
-  align-items: baseline;
+.settings-current caption {
+  text-align: left;
+  margin-bottom: var(--space-tight, 8px);
 }
 
-.settings-fact dt {
-  font-size: var(--font-small, 12px);
+.settings-current .note {
   color: var(--text-dim);
-}
-
-.settings-fact dd {
-  margin: 0;
-  font-size: var(--font-small, 12px);
-  color: var(--text);
   overflow-wrap: anywhere;
 }
 
-.settings-agents {
-  margin-top: var(--space-tight, 8px);
-}
-
-/* 系统 Agent 开关状态：徽标与一句话并排，窄屏换行不挤压。 */
-.settings-agents__state {
+/* 相关入口只声明位置，不放控件；一行一条，扫读即可。 */
+.settings-entries {
+  margin: 0;
+  padding-left: 18px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-tight, 8px);
-  margin: 0 0 var(--space-tight, 8px);
+  flex-direction: column;
+  gap: var(--space-tight, 4px);
+  font-size: var(--font-small, 12px);
+  color: var(--text-dim);
+  line-height: 1.6;
 }
 
-.settings-agents__state .field-hint {
+.settings-entries li {
   margin: 0;
 }
 
-.settings-agents__does {
-  margin: 0 0 var(--space-tight, 8px);
-}
-
-.settings-agents__list {
-  margin: var(--space-tight, 4px) 0 0;
-  padding-left: 18px;
-  font-size: var(--font-small, 12px);
-  color: var(--text-dim);
-}
-
-.settings-agents__list li {
-  margin: 2px 0;
-}
-
-.settings-fieldset {
-  margin: 0 0 var(--space-block, 16px);
-  padding: 0;
-  border: 0;
-}
-
-.settings-fieldset legend {
-  padding: 0;
-  margin-bottom: var(--space-tight, 4px);
+.settings-agents {
+  width: 100%;
 }
 
 .settings-errors {
@@ -120,54 +81,12 @@
   margin-top: var(--space-block, 16px);
 }
 
-/* 概念表是「当前生效值」快照，字段区是「可改／当前只读」的字段。
-   两块读同一份服务端值，靠标题与分隔把职责分开，不让人读成两份配置。 */
-.settings-current caption {
-  text-align: left;
-  margin-bottom: var(--space-tight, 8px);
-}
-
-.settings-form__caption {
-  margin: 0 0 var(--space-block, 16px);
-  padding-bottom: var(--space-tight, 8px);
-  border-bottom: 1px solid var(--line);
-}
-
-/* 只读是一等状态（WORKBENCH_UI_CONTRACT §7）：共享组件已把 readonly 输入
-   的文字／底色改成 muted，这里再去掉边框与控件高度，让它读起来是「一段带标签的
-   当前值」，而不是一个被灰掉、看着还能点的输入框。值仍留在 input 里（浏览器
-   用例要核对回填），保存按钮与只读说明负责讲清「不能写」。 */
-.settings-form[data-readonly="1"] .input[readonly] {
-  width: 100%;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  color: var(--muted);
-  background: transparent;
-  font-variant-numeric: tabular-nums;
-  opacity: 1;
-  cursor: default;
-}
-
-.settings-form[data-readonly="1"] .input[readonly]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* 窄屏：输入框铺满，动作按钮不断字，说明链改成上下两行。 */
 @media (max-width: 720px) {
-  .settings-form,
   .settings-section {
     max-width: none;
   }
 
   .settings-actions .button {
     flex: 1 1 auto;
-  }
-
-  .settings-fact {
-    grid-template-columns: 1fr;
-    gap: 0;
   }
 }

@@ -10,6 +10,9 @@ export {
 
 const TASKS_SOURCE = '/api/board'
 
+/** 节点是系统级资源：同一台机器上的 CLI 对任何工程都可用，不走工程过滤。 */
+const NODES_SOURCE = '/api/v1/nodes'
+
 const PROJECT_RESOURCES = {
   timeline: 'timeline',
   activity: 'activity',
@@ -17,8 +20,8 @@ const PROJECT_RESOURCES = {
   analytics: 'analytics',
 } as const
 
-/** 控制类资源：服务端只有按工程的路由，没有全局 /api/v1/nodes 等。 */
-const CONTROL_RESOURCES = ['nodes', 'runs', 'deliveries'] as const
+/** 工程级控制资源：服务端只有按工程的路由，没有全局列表。 */
+const CONTROL_RESOURCES = ['runs', 'deliveries'] as const
 type ControlResource = (typeof CONTROL_RESOURCES)[number]
 
 export function projectResourcePath(kind: string, projectId: string) {
@@ -27,6 +30,15 @@ export function projectResourcePath(kind: string, projectId: string) {
   const id = String(projectId || '').trim()
   if (!id) return ''
   return `/api/v1/projects/${encodeURIComponent(id)}/${resource}`
+}
+
+/** 观测资源地址：有工程走工程路由，没有工程（「全部工程」）走全局聚合路由。 */
+export function resourcePath(kind: string, projectId: string) {
+  const resource = PROJECT_RESOURCES[kind as keyof typeof PROJECT_RESOURCES]
+  if (!resource) return ''
+  const id = String(projectId || '').trim()
+  if (!id) return `/api/v1/${resource}`
+  return projectResourcePath(kind, id)
 }
 
 export function controlResourcePath(kind: ControlResource, projectId: string) {
@@ -58,6 +70,20 @@ export type RemovalOutcome = {
   message?: string
   unauthenticated?: boolean
 }
+
+/** 一次 CLI 环境自检的同步结果（POST /api/v1/nodes/{id}/checks）。 */
+export type NodeCheckReport = {
+  node_id: string
+  ok: boolean
+  version?: string
+  latency_ms: number
+  checked_at: string
+  checks: Array<{ name: string; ok: boolean; detail?: string }>
+  error?: string
+  meta?: Record<string, unknown>
+}
+
+export type NodeCheckOutcome = RemovalOutcome & { report?: NodeCheckReport }
 
 /** 会话写请求的双提交 Cookie（契约 §7.1）。 */
 const CSRF_COOKIE = 'maw_csrf'
@@ -136,7 +162,7 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
   }
 
   /** 把契约的 items 对齐成视图认识的资源名字段。 */
-  function withNamedList(kind: ControlResource, payload: Record<string, unknown> | JsonFail) {
+  function withNamedList(kind: string, payload: Record<string, unknown> | JsonFail) {
     if (!payload || (payload as JsonFail).unavailable === true) return payload
     const body = payload as Record<string, unknown>
     if (!Array.isArray(body[kind]) && Array.isArray(body.items)) {
@@ -186,7 +212,7 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
 
   function projectSource(kind: string) {
     return async (route: RouteLike) => {
-      const url = projectResourcePath(kind, route?.project || '')
+      const url = resourcePath(kind, route?.project || '')
       if (!url) return { unavailable: true, status: 0 }
       return getJSON(url, { auth: true })
     }
@@ -252,7 +278,8 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
       if (!tasks || !runs || !deliveries) return { unavailable: true as const, status: 0 }
       return { tasks, runs, deliveries }
     },
-    nodes: controlSource('nodes'),
+    // 节点是系统级资源：选中任何工程都读同一份全局节点，不再按工程合并。
+    nodes: async () => withNamedList('nodes', await getJSON(NODES_SOURCE, { auth: true })),
     runs: controlSource('runs'),
     deliveries: controlSource('deliveries'),
     timeline: projectSource('timeline'),
@@ -465,6 +492,54 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
         }
       }
       return { ok: true, status: res.status }
+    },
+
+    /**
+     * 同步自检节点 CLI 环境（POST /api/v1/nodes/{id}/checks）。
+     *
+     * 服务端会真的起一次 `<cli> --version` 并回写节点 meta；返回的 report
+     * 直接用于提示文案，列表重载后卡片上的版本／四维状态也会同步更新。
+     */
+    async checkNode(nodeId: string): Promise<NodeCheckOutcome> {
+      const id = String(nodeId || '').trim()
+      if (!id) return { ok: false, status: 0, code: 'invalid_node_id' }
+      if (!doFetch) return { ok: false, status: 0, code: 'network_error' }
+      const authed = await ensureSession()
+      if (!authed) return { ok: false, status: 401, code: 'unauthenticated', unauthenticated: true }
+      const csrf = readCookie(win, CSRF_COOKIE)
+      if (!csrf) return { ok: false, status: 403, code: 'csrf_failed' }
+      let res: Response
+      try {
+        res = await doFetch('/api/v1/nodes/' + encodeURIComponent(id) + '/checks', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrf,
+          },
+          credentials: 'same-origin',
+          body: '{}',
+        })
+      } catch {
+        return { ok: false, status: 0, code: 'network_error' }
+      }
+      let payload: Record<string, unknown> = {}
+      try {
+        payload = (await res.json()) as Record<string, unknown>
+      } catch {
+        payload = {}
+      }
+      if (!res.ok) {
+        const detail = (payload?.error || null) as { code?: string; message?: string } | null
+        return {
+          ok: false,
+          status: res.status,
+          code: detail?.code,
+          message: detail?.message,
+          unauthenticated: res.status === 401,
+        }
+      }
+      return { ok: true, status: res.status, report: payload as NodeCheckReport }
     },
 
     async updateProject(

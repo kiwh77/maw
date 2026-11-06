@@ -23,7 +23,6 @@
 
 const I18N = {
   zh: {
-    "execution.subtitle": "按迭代看这一批题：任务、运行、交付分开列，详情点行打开抽屉。",
     "execution.loading": "正在读取执行视图…",
     "execution.error": "执行视图加载失败。",
     "execution.error.hint": "任务、运行或交付有一类没取到，就不当作空结果；确认本机中枢在运行后重试。",
@@ -68,7 +67,6 @@ const I18N = {
     "value.no": "否",
   },
   en: {
-    "execution.subtitle": "One iteration at a time: tasks, runs and deliveries listed apart; click a row for the drawer.",
     "execution.loading": "Loading execution view…",
     "execution.error": "Failed to load the execution view.",
     "execution.error.hint": "If any of tasks, runs or deliveries is missing, this is not an empty result. Check the local hub and retry.",
@@ -392,7 +390,6 @@ export function renderExecution(state = {}, options = {}) {
   // 跨工程看时才在标签上补工程名：单工程里那个后缀是噪声。
   const multiProject = new Set(groups.map(item => item.projectId)).size > 1;
   const heading = '<div class="execution-head">' +
-    '<p class="field-hint">' + esc(t("execution.subtitle", lang)) + "</p>" +
     '<p class="field-hint" data-iteration-total="' + esc(groups.length) + '">' +
     esc(groups.length + " " + t("execution.iteration.count", lang) + " · " +
       (Array.isArray(state.tasks) ? state.tasks.length : 0) + " " + t("execution.task.count", lang)) + "</p></div>";

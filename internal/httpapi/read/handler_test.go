@@ -3,6 +3,7 @@ package read_test
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -271,6 +272,35 @@ func TestNodesRunsOperationsDeliveriesReadOnly(t *testing.T) {
 	f.api.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed && rec.Code != http.StatusNotFound {
 		t.Fatalf("写方法不得被只读树受理：%d", rec.Code)
+	}
+}
+
+func TestNodesListIsSystemWide(t *testing.T) {
+	f := newFixture(t)
+	const otherProject = "fedcba9876543210"
+	f.write(t, func(tx *sql.Tx) error {
+		if err := db.UpsertNode(tx, &db.Node{
+			ID: "node-a", ProjectID: projectID, Label: "A", SlotLimit: 1,
+		}); err != nil {
+			return err
+		}
+		return db.UpsertNode(tx, &db.Node{
+			ID: "node-b", ProjectID: otherProject, Label: "B", SlotLimit: 1,
+		})
+	})
+
+	body := decodeOK(t, f.get(t, "/api/v1/nodes"))
+	items, _ := body["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("系统级节点应包含所有工程，得到 %v", body["items"])
+	}
+	seen := make(map[string]string, len(items))
+	for _, raw := range items {
+		row, _ := raw.(map[string]any)
+		seen[fmt.Sprint(row["node_id"])] = fmt.Sprint(row["project_id"])
+	}
+	if seen["node-a"] != projectID || seen["node-b"] != otherProject {
+		t.Fatalf("节点未跨工程返回：%v", seen)
 	}
 }
 

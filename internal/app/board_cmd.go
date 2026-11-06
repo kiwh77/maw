@@ -151,9 +151,10 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 	// 工程登记写资源：看板「工程」页的移除走这一条，与 CLI 同一套用例。
 	// 节点写口接到本机 nodes 表（通用 local_cli），结束 501。
 	resAPI := &httpresources.API{
-		Projects: projectRemovalPort{cwd: cwd},
-		Nodes:    hubDBNodes{gdb: gdb},
-		Auth:     auth,
+		Projects:   projectRemovalPort{cwd: cwd},
+		Nodes:      hubDBNodes{gdb: gdb},
+		NodeChecks: hubNodeChecks{gdb: gdb},
+		Auth:       auth,
 	}
 	resH := resAPI.Handler()
 
@@ -230,6 +231,7 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 
 	runtimeView := func() map[string]any {
 		view := map[string]any{
+			"scope":   "system",
 			"enabled": false, "managed_execution_limit": 1, "config_version": 1,
 		}
 		if pc, err := resolveProject(cwd); err == nil {
@@ -722,6 +724,9 @@ func v1Route(path string) v1HandlerKind {
 		return v1Events
 	case "/api/v1/system-jobs":
 		return v1System
+	case "/api/v1/timeline", "/api/v1/activity", "/api/v1/sessions", "/api/v1/analytics":
+		// 「全部工程」的全局统计路由：没有工程段，不能落到只读任务树。
+		return v1Observability
 	}
 	if strings.HasPrefix(path, "/api/v1/projects/") {
 		rest := strings.TrimPrefix(path, "/api/v1/projects/")
@@ -742,6 +747,17 @@ func v1Route(path string) v1HandlerKind {
 	return v1Read
 }
 
+// checkpointAggregate 是全部工程检查点的合并视图。
+//
+// 合并口径：游标取最大（全局事实水位），complete_before 取最小（所有工程都
+// 追平的最远位置），完整度只在全部工程都 complete 时才是 complete。
+type checkpointAggregate struct {
+	Cursor         int64
+	CompleteBefore int64
+	Completeness   projection.Completeness
+	Dirty          bool
+}
+
 // checkpointTimeline 用库里的投影检查点回答「投影水位到哪了」。
 //
 // 为什么不去重建投影：投影是内存权威、可全量重建，但重建需要事实流水线
@@ -750,6 +766,8 @@ func v1Route(path string) v1HandlerKind {
 type checkpointTimeline struct {
 	// Load 读一次检查点；nil 表示该工程还没有检查点。
 	Load func(ctx context.Context, projectID string) (*db.ProjectionState, error)
+	// LoadAll 聚合全部工程的检查点；工程为空（「全部工程」）时使用。
+	LoadAll func(ctx context.Context) (*checkpointAggregate, error)
 }
 
 func newCheckpointTimeline(store query.Store) checkpointTimeline {
@@ -764,21 +782,88 @@ func newCheckpointTimeline(store query.Store) checkpointTimeline {
 			})
 			return st, err
 		},
+		LoadAll: func(ctx context.Context) (*checkpointAggregate, error) {
+			_ = ctx
+			var (
+				rows           int
+				cursor         int64
+				completeBefore int64
+				completeRows   int64
+				partialRows    int64
+				dirtyRows      int64
+			)
+			err := store.Read(func(tx *sql.Tx) error {
+				return tx.QueryRow(`SELECT COUNT(*),
+  COALESCE(MAX(cursor), 0), COALESCE(MIN(complete_before), 0),
+  COALESCE(SUM(CASE WHEN json_extract(meta_json, '$.completeness') = 'complete' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN json_extract(meta_json, '$.completeness') = 'partial' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN dirty_from IS NOT NULL OR dirty_to IS NOT NULL THEN 1 ELSE 0 END), 0)
+FROM projection_state WHERE projection = ?`, projection.Name).Scan(
+					&rows, &cursor, &completeBefore, &completeRows, &partialRows, &dirtyRows)
+			})
+			if err != nil {
+				return nil, err
+			}
+			if rows == 0 {
+				return nil, nil
+			}
+			completeness := projection.CompletenessUnknown
+			switch {
+			case completeRows == int64(rows):
+				completeness = projection.CompletenessComplete
+			case completeRows+partialRows > 0:
+				completeness = projection.CompletenessPartial
+			}
+			return &checkpointAggregate{
+				Cursor:         cursor,
+				CompleteBefore: completeBefore,
+				Completeness:   completeness,
+				Dirty:          dirtyRows > 0,
+			}, nil
+		},
 	}
 }
 
 // Timeline 实现 httpobservability.TimelineSource。
 func (t checkpointTimeline) Timeline(ctx context.Context, q httpobservability.TimelineQuery) (httpobservability.TimelineData, error) {
-	if strings.TrimSpace(q.ProjectID) == "" {
-		return httpobservability.TimelineData{
-			Unsupported: []httpobservability.Unsupported{{
-				Capability: "timeline.project",
-				Reason:     "project_required",
-				Detail:     "时间轴按工程维度物化，必须指定 project_id",
-			}},
-		}, nil
-	}
 	out := httpobservability.TimelineData{}
+	if strings.TrimSpace(q.ProjectID) == "" {
+		// 「全部工程」：合并各工程检查点，水位取最保守的公共边界。
+		if t.LoadAll == nil {
+			out.Missing = append(out.Missing, httpobservability.Missing{
+				Section: "timeline", Reason: "projection_source_not_configured",
+				Detail: "未配置全局投影检查点来源，无法给出全部工程的水位",
+			})
+			return out, nil
+		}
+		agg, err := t.LoadAll(ctx)
+		if err != nil {
+			return httpobservability.TimelineData{}, err
+		}
+		if agg == nil {
+			out.Missing = append(out.Missing, httpobservability.Missing{
+				Section: "timeline", Reason: "projection_not_built",
+				Detail: "全部工程都还没有时间轴检查点；区间与水位均未知，不能用 0 表示",
+			})
+			return out, nil
+		}
+		out.Cursors = projection.Cursors{
+			StateCursor:      agg.Cursor,
+			ProjectionCursor: agg.CompleteBefore,
+			Completeness:     agg.Completeness,
+		}
+		out.Missing = append(out.Missing, httpobservability.Missing{
+			Section: "timeline.intervals", Reason: "projection_not_rebuilt",
+			Detail: "本进程未重放事实流水线：水位来自检查点，区间集合为空不代表没有活动",
+		})
+		if agg.Dirty {
+			out.Missing = append(out.Missing, httpobservability.Missing{
+				Section: "timeline.intervals", Reason: "projection_dirty_range",
+				Detail: "有工程标记了脏范围，受影响区间需要重建",
+			})
+		}
+		return out, nil
+	}
 	if t.Load == nil {
 		out.Missing = append(out.Missing, httpobservability.Missing{
 			Section: "timeline", Reason: "projection_source_not_configured",

@@ -111,6 +111,41 @@ func (a *API) handleProjectNodes(w http.ResponseWriter, r *http.Request) {
 	a.listProject(w, r, listNodes)
 }
 
+// handleNodes 返回系统级节点列表（不按工程过滤）。
+//
+// 节点是全局执行资源，同一台机器上的 CLI 对任何工程都可用；
+// 看板不应因为选了某个工程就只剩该工程登记的节点。
+func (a *API) handleNodes(w http.ResponseWriter, r *http.Request) {
+	if rejectLegacyPagination(w, r) {
+		return
+	}
+	var body map[string]any
+	err := a.withReader(func(rd *query.Reader, _ *sql.Tx) error {
+		limit, err := parseLimit(r)
+		if err != nil {
+			return err
+		}
+		page, err := rd.Nodes(query.NodeQuery{
+			Limit:  limit,
+			Cursor: strings.TrimSpace(r.URL.Query().Get("cursor")),
+		})
+		if err != nil {
+			return err
+		}
+		// 节点不属于某个工程，revision 固定为 0；watermark 仍随投影返回。
+		body = pageBody(page, 0)
+		return nil
+	})
+	if isSent(err) {
+		return
+	}
+	if err != nil {
+		mapQueryErr(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, body)
+}
+
 func (a *API) handleProjectRuns(w http.ResponseWriter, r *http.Request) {
 	a.listProject(w, r, listRuns)
 }

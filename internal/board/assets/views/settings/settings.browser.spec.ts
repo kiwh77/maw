@@ -57,8 +57,8 @@ async function mount(page, html, theme = "dark") {
   );
 }
 
-test.describe("VN-725 工程策略与保留设置", () => {
-  test("VN-725 深色主题下四个概念分开呈现", async ({ page }) => {
+test.describe("VN-725 系统执行策略", () => {
+  test("VN-725 深色主题下概念与保留值分开呈现", async ({ page }) => {
     const view = await loadView();
     const policy = view.normalizePolicy(POLICY);
     await mount(page, view.renderSettings({ status: "ready", policy, save: "idle" }, { lang: "zh" }));
@@ -70,8 +70,10 @@ test.describe("VN-725 工程策略与保留设置", () => {
     // 默认关闭：自动模式那行是「关闭」，不是「已开启」
     await expect(page.locator('tr[data-concept="auto"] .badge')).toHaveText("关闭");
     await expect(page.locator('tr[data-concept="ref"]')).toContainText("仅供参考");
-    // 表单四个输入都在，且没有密码框
-    await expect(page.locator("form input.input")).toHaveCount(4);
+    await expect(page.locator('tr[data-concept="retention_days"] td.num')).toHaveText("30");
+    await expect(page.locator('tr[data-concept="retention_runs"] td.num')).toHaveText("50");
+    // 系统策略页只读：没有第二套表单，也不出现密码框
+    await expect(page.locator("form")).toHaveCount(0);
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
     await expect(page.locator("[data-no-secret]")).toContainText("本页不含令牌");
   });
@@ -96,7 +98,7 @@ test.describe("VN-725 工程策略与保留设置", () => {
     const policy = view.normalizePolicy(POLICY);
     await mount(page, view.renderSettings({ status: "ready", policy }, { lang: "en" }));
 
-    await expect(page.locator(".settings-form")).toBeVisible();
+    await expect(page.locator(".settings-section").first()).toBeVisible();
     await expect(page.locator("[data-no-secret]")).toContainText("no token");
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -114,26 +116,19 @@ test.describe("VN-725 工程策略与保留设置", () => {
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
-    await expect(page.locator("form input.input").first()).toBeVisible();
+    await expect(page.locator("table.settings-current")).toBeVisible();
   });
 
-  test("VN-725 键盘可依次到达四个输入与提交按钮", async ({ page }) => {
+  test("VN-725 只读页不产生误导性的可聚焦输入", async ({ page }) => {
     const view = await loadView();
     const policy = view.normalizePolicy(POLICY);
     await mount(page, view.renderSettings({ status: "ready", policy, save: "dirty" }, { lang: "zh" }));
 
-    const order = [];
-    for (let i = 0; i < 5; i += 1) {
-      await page.keyboard.press("Tab");
-      order.push(await page.evaluate(() => {
-        const el = document.activeElement;
-        return el ? (el.id || el.getAttribute("type") || el.tagName.toLowerCase()) : "";
-      }));
-    }
-    expect(order.slice(0, 4)).toEqual([
-      "settings-limit", "settings-capacity", "settings-retentionDays", "settings-retentionRuns",
-    ]);
-    expect(order[4]).toBe("submit");
+    // 没有写入口时，页面不该出现「看起来能改」的输入或保存按钮。
+    await expect(page.locator("input")).toHaveCount(0);
+    await expect(page.locator("form")).toHaveCount(0);
+    await expect(page.locator(".settings-actions")).toHaveCount(0);
+    await expect(page.locator("[data-readonly-reason]")).toContainText("只作展示");
   });
 
   test("VN-725 冲突态可看见重新载入入口与说明", async ({ page }) => {
@@ -141,7 +136,7 @@ test.describe("VN-725 工程策略与保留设置", () => {
     const policy = view.normalizePolicy(POLICY);
     await mount(page, view.renderSettings({ status: "ready", policy, save: "conflict" }, { lang: "zh" }));
 
-    await expect(page.locator('[data-save="conflict"]')).toContainText("设置已被其他人更新");
+    await expect(page.locator('[data-save-conflict="1"]')).toContainText("设置已被其他人更新");
     await expect(page.locator('button[data-action="reload"]')).toBeVisible();
   });
 

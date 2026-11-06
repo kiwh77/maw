@@ -307,3 +307,35 @@ test("E2E-102 未选工程时指向工程下拉，而不是说这段时间没有
   assert.ok(unknown.includes("不完整"));
   assert.ok(!unknown.includes("还没有选择工程"));
 });
+
+// 同一次执行里，阶段驻留 / CLI 运行 / 模型轮次 / 明确等待各占一行，
+// 不再挤在同一条轨道上互相遮挡。
+test("同一次执行内四类区间分四行", async () => {
+  const mod = await load();
+  const ctx = mod.createDateContext({ start: "2026-10-23T01:00:00Z", hours: 3, timezone: "UTC" });
+  const html = mod.renderTimeline({ intervals: sample() }, { lang: "zh", dateContext: ctx });
+  const lane = (html.match(/<section class="timeline__lane[^"]*" data-lane="run_1">[\s\S]*?<\/section>/) || [""])[0];
+  assert.ok(lane, "应渲染 run_1 泳道");
+  const kinds = [...lane.matchAll(/timeline__row" data-kind="([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(kinds, ["task_phase", "cli_process", "turn", "explicit_wait"]);
+  assert.match(lane, /timeline__lane-kind">运行/, "泳道先说明这是运行");
+  assert.match(lane, /timeline__lane-id">run_1/, "再给出原始身份");
+});
+
+// 无区间时只保留一套空态，不与图例、空泳道、未选择详情叠在一起。
+test("空页只呈现一个空态", async () => {
+  const mod = await load();
+  const ctx = mod.createDateContext({ start: "2026-10-23T01:00:00Z", hours: 3, timezone: "UTC" });
+  const html = mod.renderTimeline({
+    status: "ready",
+    intervals: [],
+    cursors: { state_cursor: 0, projection_cursor: 0, completeness: "complete" },
+  }, { lang: "zh", dateContext: ctx });
+  assert.ok(html.includes('data-status="empty"'));
+  assert.equal((html.match(/<div class="empty-state/g) || []).length, 1, "只应有一个空态");
+  assert.ok(!html.includes("timeline__legend-item"), "空页不渲染图例");
+  assert.ok(!html.includes("timeline__lanes"), "空页不渲染空泳道");
+  assert.ok(!html.includes("timeline__detail"), "空页不渲染未选择详情");
+  assert.ok(html.includes("timeline__cursors"), "水位说明仍保留");
+});
+

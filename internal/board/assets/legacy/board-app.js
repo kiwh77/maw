@@ -15,7 +15,6 @@ const I18N = {
     "lang": "Language",
     "all_projects": "All projects",
     "heading.board": "Task board",
-    "heading.desc": "Track task flow and coordinate every Agent.",
     "copy.join": "Copy project join prompt",
     "aria.stats": "Task stats for current filters",
     "filter.project": "Project",
@@ -231,7 +230,6 @@ const I18N = {
     "lang": "语言",
     "all_projects": "全部工程",
     "heading.board": "任务看板",
-    "heading.desc": "跟踪任务流转，协调每一个 Agent。",
     "copy.join": "复制工程接入提示词",
     "aria.stats": "当前筛选范围任务统计",
     "filter.project": "工程",
@@ -490,7 +488,6 @@ function applyStaticI18n() {
     ["workspace-label", "label.workspace"],
     ["subtitle", "connecting"],
     ["page-h1", "heading.board"],
-    ["page-desc", "heading.desc"],
     ["f-copy-join", "copy.join"],
     ["view-board", "view.board"],
     ["view-topo", "view.topo"],
@@ -818,6 +815,11 @@ function buildTaskPrompt(task) {
   lines.push("8. 合入后若仍有 ready 任务，继续 maw next 领取并执行下一题，循环直至无题可领或用户叫停。");
   lines.push("9. 全局看板：maw board --serve（默认 http://127.0.0.1:7420/）。");
   lines.push("");
+  lines.push("## 统计上报");
+  lines.push("- 完成前（里程碑时也可）运行：maw stats report --turns <轮次> --input-tokens <输入> --output-tokens <输出>");
+  lines.push("- 拿不到 token 就省略 token 参数；轮次与执行时长仍会记录。");
+  lines.push("- 不写这一段，看板统计无法归属本次执行的轮次／用量。");
+  lines.push("");
   lines.push("## 协议红线");
   lines.push("- 状态库在本机 ~/.maw/maw.db；本仓库 .multiagent/ 仅存配置与蓝图。");
   lines.push("- 换人或中断前：maw handoff；本会话无更多可领任务时再 maw unregister。");
@@ -859,6 +861,10 @@ function buildProjectJoinPrompt(projectId) {
   lines.push("4. 进入输出的 worktree，只改该任务 write_scope；maw progress / maw submit；完成后可自行 maw merge --yes。");
   lines.push("5. 合入后若仍有 ready，继续 maw next 领下一题并执行，循环直至无题可领。");
   lines.push("6. 看板：maw board --serve");
+  lines.push("");
+  lines.push("## 统计上报");
+  lines.push("- 完成前运行：maw stats report --turns <轮次> --input-tokens <输入> --output-tokens <输出>");
+  lines.push("- 拿不到 token 就省略 token 参数；轮次与执行时长仍会记录。");
   lines.push("");
   lines.push("## 协议红线");
   lines.push("- 状态库 ~/.maw/maw.db；只在 maw worktree 内工作；合入用 maw merge --yes（可自行执行）。");

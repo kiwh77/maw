@@ -1,10 +1,12 @@
 package resources
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/localauth"
@@ -13,11 +15,12 @@ import (
 
 // API 是任务／节点配置写资源。依赖必须注入；本包不打开数据库。
 type API struct {
-	Tasks    Tasks
-	Nodes    Nodes
-	Probes   Probes
-	Projects Projects
-	Auth     *localauth.Authenticator
+	Tasks      Tasks
+	Nodes      Nodes
+	Probes     Probes
+	NodeChecks NodeChecks
+	Projects   Projects
+	Auth       *localauth.Authenticator
 }
 
 // Handler 返回可挂载的 /api/v1 写树（不含根路由装配）。
@@ -32,6 +35,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/projects/{project_id}/nodes", a.handleRegisterNode)
 	mux.HandleFunc("/api/v1/nodes/{node_id}", a.handleUpdateNode)
 	mux.HandleFunc("/api/v1/nodes/{node_id}/probes", a.handleProbeNode)
+	mux.HandleFunc("/api/v1/nodes/{node_id}/checks", a.handleCheckNode)
 	mux.HandleFunc("/api/v1/projects/{project_id}", a.handleProject)
 	// 写树兜底：未知写路径回 JSON not_found，不再让 404 落到纯文本页。
 	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, _ *http.Request) {
@@ -90,15 +94,15 @@ func (a *API) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name         *string  `json:"name"`
-		Path         *string  `json:"path"`
-		MainBranch   *string  `json:"main_branch"`
-		MaxParallel  *int     `json:"max_parallel"`
-		AutoEnabled  *bool    `json:"auto_enabled"`
-		Limit        *int     `json:"limit"`
+		Name         *string   `json:"name"`
+		Path         *string   `json:"path"`
+		MainBranch   *string   `json:"main_branch"`
+		MaxParallel  *int      `json:"max_parallel"`
+		AutoEnabled  *bool     `json:"auto_enabled"`
+		Limit        *int      `json:"limit"`
 		AllowedNodes *[]string `json:"allowed_nodes"`
-		WorkerNode   *string  `json:"worker_node"`
-		LLMNode      *string  `json:"llm_node"`
+		WorkerNode   *string   `json:"worker_node"`
+		LLMNode      *string   `json:"llm_node"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -410,6 +414,43 @@ func (a *API) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 			"resource":     "/api/v1/nodes/" + nodeID + "/probes",
 		},
 		"idempotent_replay": out.Replay,
+	})
+}
+
+// handleCheckNode 同步执行一次 CLI 环境自检（看板「测试环境」按钮）。
+//
+// 与 /probes 的异步受理不同，这里真的会启动 CLI 做 --version 探测，
+// 并把结果写回节点 meta；界面拿到 200 即可直接渲染，不需要轮询 Operation。
+func (a *API) handleCheckNode(w http.ResponseWriter, r *http.Request) {
+	if !requireWriteMethod(w, r, http.MethodPost) {
+		return
+	}
+	nodeID := r.PathValue("node_id")
+	if !model.NodeID(nodeID).Valid() {
+		writeErr(w, http.StatusUnprocessableEntity, "invalid_node_id", "node_id 非法", nil)
+		return
+	}
+	if a.NodeChecks == nil {
+		writeNotWired(w, "节点环境自检")
+		return
+	}
+	// 单次自检最长 20s：最坏情况是二进制能起但挂住，超时按失败回写。
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	out, err := a.NodeChecks.Check(ctx, model.NodeID(nodeID))
+	if err != nil {
+		mapUseCaseErr(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, map[string]any{
+		"node_id":    out.NodeID,
+		"ok":         out.OK,
+		"version":    out.Version,
+		"latency_ms": out.LatencyMS,
+		"checked_at": out.CheckedAt,
+		"checks":     out.Checks,
+		"error":      out.Error,
+		"meta":       out.Meta,
 	})
 }
 

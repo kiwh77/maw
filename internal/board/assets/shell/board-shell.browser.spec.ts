@@ -70,7 +70,7 @@ const BASE_HTML = `<!DOCTYPE html>
     </header>
     <div class="content">
       <div class="page-heading"><div class="eyebrow">OPERATIONS / BOARD</div>
-        <h1 id="page-h1">Task board</h1><p id="page-desc"></p></div>
+        <h1 id="page-h1">Task board</h1></div>
       <section class="stats" id="stats"></section>
       <div class="toolbar">
         <div class="filters" id="filters">
@@ -500,15 +500,13 @@ test.describe("VN-705 挂载回顾统计与设置入口", () => {
     expect(route.project).toBe("p-harness");
   });
 
-  test("VN-705 未选工程时给出「先选工程」而不是空表", async ({ page }) => {
-    await mountFromSource(page, { path: "/?view=activity", payloads: {} });
+  test("VN-705 未选工程时统计页按「全部工程」取数，不要求先选工程", async ({ page }) => {
+    await mountFromSource(page, { path: "/?view=timeline", payloads: { timeline: TIMELINE_PARTIAL } });
 
-    const notice = page.locator('#vnext-view .vnext-notice[data-state="no_project"]');
-    await expect(notice).toBeVisible();
-    await expect(notice).toContainText("先选择一个工程");
-    await expect(page.locator("#vnext-view table")).toHaveCount(0);
-    // 一个数据请求都不该发出去。
-    expect(await page.evaluate(() => (window as any).__dataCalls)).toEqual([]);
+    // 不再出现「先选工程」：没有工程时走服务端全局聚合路由。
+    await expect(page.locator('#vnext-view .vnext-notice[data-state="no_project"]')).toHaveCount(0);
+    await expect(page.locator("#vnext-view .timeline__bar")).toHaveCount(2);
+    expect(await page.evaluate(() => (window as any).__dataCalls)).toContain("timeline");
   });
 
   test("VN-705 来源能力缺失时降级文案与空态一致", async ({ page }) => {
@@ -542,20 +540,20 @@ test.describe("VN-705 挂载回顾统计与设置入口", () => {
     await expect(page.locator("#vnext-view .timeline__cursors")).toContainText("12");
   });
 
-  test("VN-705 静态导出下设置页只读：保留数值、禁用保存并说明原因", async ({ page }) => {
+  test("VN-705 静态导出下设置页只读：策略值保留、没有第二套表单", async ({ page }) => {
     await mountFromSource(page, {
       path: "/?view=settings",
       readOnly: true,
       payloads: { settings: SETTINGS_POLICY },
     });
 
-    await expect(page.locator("#vnext-view form[data-readonly=\"1\"]")).toHaveCount(1);
-    const submit = page.locator('#vnext-view form button[type="submit"]');
-    await expect(submit).toBeDisabled();
-    await expect(page.locator('#vnext-view [data-readonly-notice="settings"]')).toContainText("没有开放策略写入入口");
-    // 策略值照常显示：只读不改内容（数值在输入框里，用 value 断言）。
-    await expect(page.locator("#vnext-view #settings-limit")).toHaveValue("2");
-    await expect(page.locator("#vnext-view #settings-limit")).toBeEditable();
+    // 只读由视图自己声明一次，挂载层不再追加同义提示。
+    await expect(page.locator("#vnext-view [data-readonly-reason='1']")).toContainText("只作展示");
+    await expect(page.locator("#vnext-view form")).toHaveCount(0);
+    await expect(page.locator("#vnext-view input")).toHaveCount(0);
+    await expect(page.locator("#vnext-view [data-readonly-notice='settings']")).toHaveCount(0);
+    // 策略值照常显示：只读不改内容。
+    await expect(page.locator("#vnext-view tr[data-concept='limit'] td.num")).toHaveText("2");
     expect(await page.evaluate(() => (window as any).__shell.readOnly())).toBe(true);
   });
 
@@ -566,9 +564,9 @@ test.describe("VN-705 挂载回顾统计与设置入口", () => {
       payloads: { settings: SETTINGS_POLICY },
     });
 
-    await expect(page.locator("#vnext-view form").first()).toBeVisible();
-    await expect(page.locator("#vnext-view form button[type=\"submit\"]")).toBeEnabled();
-    await expect(page.locator('#vnext-view [data-readonly-notice="settings"]')).toHaveCount(0);
+    await expect(page.locator("#vnext-view table.settings-current")).toBeVisible();
+    await expect(page.locator("#vnext-view [data-readonly-reason='1']")).toHaveCount(0);
+    await expect(page.locator("#vnext-view [data-readonly-notice='settings']")).toHaveCount(0);
     // 设置组不是筛选目标：看板 chrome 必须整体隐藏。
     const chrome = await page.evaluate(() => ({
       stats: Boolean(document.getElementById("stats")?.hidden),

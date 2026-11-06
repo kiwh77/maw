@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +64,8 @@ type Runtime struct {
 	pc       *projCtx
 	stateDir string
 	selfBin  string
+	// modelOverride 仅用于本次进程的显式启动覆盖；自动派发保持空。
+	modelOverride string
 }
 
 // NewRuntime 从工程上下文装配运行时。selfBin 为空时用当前可执行文件。
@@ -180,6 +183,16 @@ func (rt *Runtime) PrepareRunnerArtifacts(opDir string, op dispatch.Operation) e
 	if !ok {
 		return nil
 	}
+	// 本地 CLI 节点：任务卡落到任务 worktree，并把 CLI 的 cwd 指到那里。
+	// 显式 launch_spec/launch_cmd 不注入任务卡，避免改变运维自定义入口的语义。
+	explicit := os.Getenv(managedLaunchSpecEnv) != "" || os.Getenv(managedLaunchCmdEnv) != ""
+	if !explicit {
+		if node, ok := rt.assignedNode(op); ok && metaBool(node.Meta, "task_card", false) {
+			if err := rt.prepareTaskWorkspace(op, opDir, node, &spec); err != nil {
+				return err
+			}
+		}
+	}
 	specPath := filepath.Join(opDir, launchSpecFile)
 	if _, statErr := os.Stat(specPath); statErr == nil {
 		return nil
@@ -262,6 +275,28 @@ func (rt *Runtime) managedLaunchSpec(op dispatch.Operation) (model.LaunchSpec, b
 
 // argvFromAssignedNode 从本 Run 的节点槽占用找到节点，再读 meta.argv。
 func (rt *Runtime) argvFromAssignedNode(op dispatch.Operation) ([]string, bool) {
+	n, ok := rt.assignedNode(op)
+	if !ok || n.Meta == nil {
+		return nil, false
+	}
+	raw, ok := n.Meta["argv"]
+	if !ok {
+		return nil, false
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
+	}
+	var argv []string
+	if err := json.Unmarshal(b, &argv); err != nil || len(argv) == 0 {
+		return nil, false
+	}
+	argv = withModelArgs(argv, n.Meta, rt.modelOverride)
+	return argv, true
+}
+
+// assignedNode 从本 Run 的节点槽占用反查节点行。
+func (rt *Runtime) assignedNode(op dispatch.Operation) (*db.Node, bool) {
 	if rt == nil || rt.pc == nil || strings.TrimSpace(rt.pc.GlobalDB) == "" {
 		return nil, false
 	}
@@ -269,13 +304,13 @@ func (rt *Runtime) argvFromAssignedNode(op dispatch.Operation) ([]string, bool) 
 	if runID == "" {
 		return nil, false
 	}
-	var argv []string
+	var node *db.Node
 	err := db.WithReadTx(rt.pc.GlobalDB, func(tx *sql.Tx) error {
 		leases, e := db.ListActiveLeases(tx, string(op.ProjectID))
 		if e != nil {
 			return e
 		}
-		var nodeID string
+		nodeID := ""
 		for _, lease := range leases {
 			if lease == nil || lease.RunID != runID {
 				continue
@@ -290,36 +325,25 @@ func (rt *Runtime) argvFromAssignedNode(op dispatch.Operation) ([]string, bool) 
 			return nil
 		}
 		n, e := db.GetNode(tx, nodeID)
-		if e != nil || n == nil || n.Meta == nil {
-			return e
-		}
-		raw, ok := n.Meta["argv"]
-		if !ok {
-			return nil
-		}
-		b, e := json.Marshal(raw)
 		if e != nil {
 			return e
 		}
-		if e := json.Unmarshal(b, &argv); e != nil {
-			return e
-		}
-		argv = withDefaultModelArgs(argv, n.Meta)
+		node = n
 		return nil
 	})
-	if err != nil || len(argv) == 0 {
+	if err != nil || node == nil {
 		return nil, false
 	}
-	return argv, true
+	return node, true
 }
 
-// withDefaultModelArgs 在尚未显式带模型参数时，按节点 default_model 注入 CLI 旗标。
-func withDefaultModelArgs(argv []string, meta map[string]any) []string {
+// withModelArgs 在尚未显式带模型参数时注入模型旗标。
+// 预设 argv 的任务提示在末项，模型参数插到它前面，避免被 CLI 当成提示文本。
+func withModelArgs(argv []string, meta map[string]any, override string) []string {
 	if len(argv) == 0 || meta == nil {
 		return argv
 	}
-	modelName, _ := meta["default_model"].(string)
-	modelName = strings.TrimSpace(modelName)
+	modelName := effectiveModel(meta, override)
 	if modelName == "" {
 		return argv
 	}
@@ -329,13 +353,166 @@ func withDefaultModelArgs(argv []string, meta map[string]any) []string {
 		}
 	}
 	flavor, _ := meta["cli_flavor"].(string)
-	out := append([]string{}, argv...)
-	switch strings.ToLower(strings.TrimSpace(flavor)) {
-	case "codex":
-		return append(out, "-m", modelName)
-	default:
-		return append(out, "--model", modelName)
+	if strings.EqualFold(strings.TrimSpace(flavor), "dsh") {
+		// dsh 没有 --model；模型由 prepareTaskWorkspace 写 profile patch 注入。
+		return argv
 	}
+	args := modelArgsFor(flavor, modelName)
+	if len(args) == 0 {
+		return argv
+	}
+	out := append([]string{}, argv...)
+	if metaBool(meta, "prompt_last", false) && len(out) >= 2 {
+		idx := len(out) - 1
+		withArgs := append([]string{}, out[:idx]...)
+		withArgs = append(withArgs, args...)
+		withArgs = append(withArgs, out[idx:]...)
+		return withArgs
+	}
+	return append(out, args...)
+}
+
+// effectiveModel 优先取本次启动覆盖，其次取节点默认模型。
+func effectiveModel(meta map[string]any, override string) string {
+	if m := strings.TrimSpace(override); m != "" {
+		return m
+	}
+	if meta == nil {
+		return ""
+	}
+	m, _ := meta["default_model"].(string)
+	return strings.TrimSpace(m)
+}
+
+// prepareTaskWorkspace 把任务卡落到任务 worktree，作为本地 CLI 的执行目录。
+//
+// 领取后的任务必须先有目录与 TASK.md：否则 CLI 即使被拉起，也只能在空目录里空转，
+// 或者回到主仓改动 write_scope 之外的文件。
+func (rt *Runtime) prepareTaskWorkspace(op dispatch.Operation, opDir string, node *db.Node, spec *model.LaunchSpec) error {
+	if rt == nil || rt.pc == nil || spec == nil {
+		return nil
+	}
+	projectID := strings.TrimSpace(string(op.ProjectID))
+	if projectID == "" {
+		projectID = rt.pc.ID()
+	}
+	task, all, err := rt.taskForInstance(projectID, string(op.Instance))
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		// 没有实例身份的系统操作不写任务卡，保持原有启动语义。
+		return nil
+	}
+	agent := strings.TrimSpace(task.Owner)
+	if agent == "" {
+		agent = "system-agent-1"
+	}
+	wtRel := strings.TrimSpace(task.Worktree)
+	branch := strings.TrimSpace(task.Branch)
+	if wtRel == "" {
+		wtRel = filepath.Join(".worktrees", agent)
+	}
+	if branch == "" {
+		branch = "agent/" + agent + "/" + task.ID
+	}
+
+	fresh := task.Status == string(model.TaskClaimed)
+	wt, err := ensureClaimWorktree(rt.pc, wtRel, branch, fresh)
+	if err != nil {
+		return err
+	}
+	if fresh {
+		// claimed 表示「已归属、尚未开工」；目录就绪后才推进到 in_progress。
+		if err := advanceClaim(rt.pc, task.ID, agent); err != nil {
+			return err
+		}
+	}
+	if task, all, err = rt.taskForInstance(projectID, string(op.Instance)); err != nil {
+		return err
+	}
+	if task == nil {
+		return errx.New("任务在准备执行目录时已不存在: "+string(op.Instance), "maw task list")
+	}
+	if err := writeTaskCardWithDeps(wt, task, agent, all); err != nil {
+		return err
+	}
+	if err := rt.bindTaskWorkspace(projectID, task.ID, branch, wtRel); err != nil {
+		return err
+	}
+	spec.Cwd = wt
+	return rt.applyDshModelPatch(node, spec, wt)
+}
+
+// taskForInstance 用实例身份反查任务行，并同时返回全量任务（写任务卡时需要 deps）。
+func (rt *Runtime) taskForInstance(projectID, instanceID string) (*db.Task, []*db.Task, error) {
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return nil, nil, nil
+	}
+	var all []*db.Task
+	var found *db.Task
+	err := db.WithReadTx(rt.pc.GlobalDB, func(tx *sql.Tx) error {
+		var e error
+		all, e = db.ListTasks(tx, projectID)
+		if e != nil {
+			return e
+		}
+		for _, t := range all {
+			if strings.TrimSpace(t.InstanceID) == instanceID {
+				found = t
+				break
+			}
+		}
+		return nil
+	})
+	return found, all, err
+}
+
+func (rt *Runtime) bindTaskWorkspace(projectID, taskID, branch, worktree string) error {
+	return db.WithTx(rt.pc.GlobalDB, func(tx *sql.Tx) error {
+		return db.BindTaskWorkspace(tx, projectID, taskID, branch, worktree)
+	})
+}
+
+// applyDshModelPatch 用 dsh 的 profile patch 覆盖默认模型（dsh 没有 --model 旗标）。
+func (rt *Runtime) applyDshModelPatch(node *db.Node, spec *model.LaunchSpec, wt string) error {
+	if node == nil || node.Meta == nil {
+		return nil
+	}
+	flavor, _ := node.Meta["cli_flavor"].(string)
+	if !strings.EqualFold(strings.TrimSpace(flavor), "dsh") {
+		return nil
+	}
+	modelName := effectiveModel(node.Meta, rt.modelOverride)
+	if modelName == "" {
+		return nil
+	}
+	for _, a := range spec.Argv {
+		if a == "--patch" {
+			return nil
+		}
+	}
+	dir := filepath.Join(wt, ".maw")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "dsh-model.yml")
+	content := "- id: agent-default-model\n  config:\n    model: " + strconv.Quote(modelName) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return err
+	}
+	args := []string{"--patch", path}
+	if metaBool(node.Meta, "prompt_last", false) && len(spec.Argv) >= 1 {
+		idx := len(spec.Argv) - 1
+		next := append([]string{}, spec.Argv[:idx]...)
+		next = append(next, args...)
+		next = append(next, spec.Argv[idx:]...)
+		spec.Argv = next
+	} else {
+		spec.Argv = append(spec.Argv, args...)
+	}
+	return nil
 }
 
 // nodeIDFromLeaseKey 解析 node:<id>#<slot>。

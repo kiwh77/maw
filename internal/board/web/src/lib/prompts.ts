@@ -219,6 +219,15 @@ export function buildTaskPrompt(
     lines.push('8. After merge, if ready tasks remain, keep calling maw next until none left or the user stops you.')
     lines.push('9. Board: maw board --serve (default http://127.0.0.1:7420/).')
     lines.push('')
+    lines.push('## Stats report')
+    lines.push(
+      '- Before finishing (and at milestones) run: maw stats report --turns <n> --input-tokens <in> --output-tokens <out>',
+    )
+    lines.push(
+      '- If token counts are unavailable, omit the token flags; turns and duration are still recorded.',
+    )
+    lines.push('- Without this the board analytics cannot attribute this execution’s turns/usage.')
+    lines.push('')
     lines.push('## Protocol red lines')
     lines.push('- DB ~/.maw/maw.db; work only in maw worktrees; merge with maw merge --yes.')
     lines.push('- Before handoff: maw handoff; unregister only when no more claimable tasks.')
@@ -230,6 +239,13 @@ export function buildTaskPrompt(
     lines.push('7. 完成 submit 后可自行合入：maw merge --yes；禁止直接 git merge / rebase / push 主干。')
     lines.push('8. 合入后若仍有 ready 任务，继续 maw next 领取并执行下一题，循环直至无题可领或用户叫停。')
     lines.push('9. 全局看板：maw board --serve（默认 http://127.0.0.1:7420/）。')
+    lines.push('')
+    lines.push('## 统计上报')
+    lines.push(
+      '- 完成前（里程碑时也可）运行：maw stats report --turns <轮次> --input-tokens <输入> --output-tokens <输出>',
+    )
+    lines.push('- 拿不到 token 就省略 token 参数；轮次与执行时长仍会记录。')
+    lines.push('- 不写这一段，看板统计无法归属本次执行的轮次／用量。')
     lines.push('')
     lines.push('## 协议红线')
     lines.push('- 状态库在本机 ~/.maw/maw.db；本仓库 .multiagent/ 仅存配置与蓝图。')
@@ -306,6 +322,18 @@ export function buildProjectJoinPrompt(
       : '5. 合入后若仍有 ready，继续 maw next 领下一题并执行，循环直至无题可领。',
   )
   lines.push(lang === 'en' ? '6. Board: maw board --serve' : '6. 看板：maw board --serve')
+  lines.push('')
+  if (lang === 'en') {
+    lines.push('## Stats report')
+    lines.push(
+      '- Before finishing run: maw stats report --turns <n> --input-tokens <in> --output-tokens <out>',
+    )
+    lines.push('- Omit token flags when unknown; turns and duration are still recorded.')
+  } else {
+    lines.push('## 统计上报')
+    lines.push('- 完成前运行：maw stats report --turns <轮次> --input-tokens <输入> --output-tokens <输出>')
+    lines.push('- 拿不到 token 就省略 token 参数；轮次与执行时长仍会记录。')
+  }
   lines.push('')
   lines.push(lang === 'en' ? '## Protocol red lines' : '## 协议红线')
   lines.push(

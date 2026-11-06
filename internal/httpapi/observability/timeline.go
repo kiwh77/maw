@@ -34,11 +34,8 @@ func (a *API) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
+	// 空工程表示「全部工程」：全局路由不带 project_id，由数据源聚合。
 	projectID := strings.TrimSpace(r.PathValue("project_id"))
-	if projectID == "" {
-		mapErr(w, &ErrNotFound{Resource: "project", Message: "缺少工程身份"})
-		return
-	}
 	limit, err := parseLimit(q)
 	if err != nil {
 		mapErr(w, err)

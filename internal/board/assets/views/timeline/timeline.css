@@ -1,6 +1,8 @@
 /* 分层执行时间轴（VN-741）——只用共享 token，不另起色板。 */
 
 .timeline {
+  /* 泳道行标签统一宽度，轨道与下方时间轴才能对齐。 */
+  --timeline-row-label: 64px;
   font-family: var(--sans);
   font-size: var(--font-body);
   line-height: var(--line-body);
@@ -19,14 +21,31 @@
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin: var(--space-block) 0;
+  justify-content: space-between;
+  margin: 0 0 12px;
+}
+
+.timeline__toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.timeline__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 var(--space-block);
 }
 
 .timeline__legend {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin: 0 0 var(--space-block);
+  margin: 0;
   list-style: none;
   padding: 0;
 }
@@ -61,17 +80,25 @@
   );
 }
 
+/* 有数据但不完整时，用一条紧凑提示，不占整块空态高度。 */
+.timeline__notice {
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  align-items: flex-start;
+  text-align: left;
+}
+
 .timeline__lanes {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .timeline__lane {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: var(--space-card);
+  padding: 10px 12px 8px;
 }
 
 .timeline__lane:focus-within,
@@ -81,17 +108,71 @@
   outline-offset: 1px;
 }
 
-.timeline__lane-label {
+.timeline__lane-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.timeline__lane-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.timeline__lane-kind {
   font-size: var(--font-meta);
   color: var(--muted);
+}
+
+.timeline__lane-id {
   font-family: var(--mono);
-  margin-bottom: 8px;
-  word-break: break-all;
+  font-size: var(--font-meta);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline__lane-meta {
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.timeline__lane-count {
+  font-size: var(--font-meta);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.timeline__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 四类区间各占一行，同屏可见且不会互相遮挡。 */
+.timeline__row {
+  display: grid;
+  grid-template-columns: var(--timeline-row-label) 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline__row-label {
+  font-size: var(--font-meta);
+  color: var(--faint);
+  line-height: 1.2;
 }
 
 .timeline__track {
   position: relative;
-  height: 28px;
+  height: 20px;
   background: var(--panel);
   border-radius: var(--radius-tight);
   overflow: hidden;
@@ -99,8 +180,8 @@
 
 .timeline__bar {
   position: absolute;
-  top: 4px;
-  height: 20px;
+  top: 2px;
+  height: 16px;
   border-radius: var(--radius-key);
   min-width: 2px;
   box-sizing: border-box;
@@ -136,7 +217,7 @@
   font-size: var(--font-meta);
   color: var(--faint);
   font-family: var(--mono);
-  margin-top: 6px;
+  margin: 4px 0 0 calc(var(--timeline-row-label) + 8px);
 }
 
 .timeline__detail {
@@ -170,8 +251,24 @@
 
 @media (max-width: 700px) {
   /* 窄屏也不在视图内补内边距：外层 .content 已经按断点收窄（28px → 16px）。 */
+  .timeline {
+    --timeline-row-label: 52px;
+  }
+
   .timeline__toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .timeline__toolbar-actions {
+    margin-left: 0;
+  }
+
+  .timeline__meta {
+    align-items: flex-start;
+  }
+
+  .timeline__lane-head {
+    flex-wrap: wrap;
   }
 }

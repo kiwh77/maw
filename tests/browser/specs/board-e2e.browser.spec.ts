@@ -93,7 +93,7 @@ test.describe('B 组：看板真实渲染', () => {
     await expect(page.locator('#vnext-nav .nav-item[data-view="tasks"]')).toHaveClass(/active/);
   });
 
-  test('B-03 13 个视图都能渲染出标题、说明与正文', async ({ page }) => {
+  test('B-03 13 个视图都能渲染出标题与正文，页面头部不再挂说明文案', async ({ page }) => {
     const errors = collectErrors(page);
     const problems: string[] = [];
     for (const view of VIEWS) {
@@ -101,11 +101,11 @@ test.describe('B 组：看板真实渲染', () => {
       await page.waitForTimeout(400);
       const info = await page.evaluate(() => ({
         h1: (document.querySelector('#page-h1')?.textContent || '').trim(),
-        desc: (document.querySelector('#page-desc')?.textContent || '').trim(),
+        descCount: document.querySelectorAll('#page-desc, .page-description').length,
         body: (document.querySelector('.content')?.textContent || '').replace(/\s+/g, ' ').trim(),
       }));
       if (!info.h1) problems.push(`${view}: 缺 h1`);
-      if (!info.desc) problems.push(`${view}: 缺说明`);
+      if (info.descCount) problems.push(`${view}: 页面头部仍有说明文案`);
       if (info.body.length < 40) problems.push(`${view}: 正文过短(${info.body.length})`);
       if (/unavailable|undefined|\[object Object\]/.test(info.body)) problems.push(`${view}: 出现异常占位文本`);
     }
