@@ -12,6 +12,7 @@ import (
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/engine/dispatch"
+	"github.com/kiwh77/maw/internal/engine/matching"
 	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/systemagent"
 )
@@ -46,6 +47,9 @@ type serveLeaderBundle struct {
 	watcher  *systemagent.Watcher
 	dispatch bool
 	system   bool
+	// producer 为 true 表示 auto_select 已开启：即使两个既有开关全关，
+	// leader 仍要起循环来跑生产者（三开关互不推导）。
+	producer bool
 }
 
 // serveLeaderOutcome 记录每个工程的处置结果：尝试了什么、有没有起 goroutine、为什么跳过。
@@ -115,8 +119,8 @@ func startServeLeaders(ctx context.Context, deps serveLeaderDeps) []serveLeaderO
 				case buildErr != nil:
 					o.Reason = "build_error"
 					deps.logf("serve leader: project=%s 装配失败: %v\n", p.ID, buildErr)
-				case b == nil || b.runner == nil || (!b.dispatch && !b.system):
-					// 两个开关全关：一条循环都不该跑，也不该留下空转的 leader 占着锁。
+				case b == nil || b.runner == nil || (!b.dispatch && !b.system && !b.producer):
+					// 三个开关全关：一条循环都不该跑，也不该留下空转的 leader 占着锁。
 					o.Reason = "no_switches"
 				default:
 					o.Started = true
@@ -253,27 +257,112 @@ func buildServeLeaderBundle(pc *projCtx, cfg config.SystemAgent, onError func(er
 	if pc.Config != nil {
 		systemOn = pc.Config.SystemAgentEnabled()
 	}
+	autoSelect := pc.Config != nil && pc.Config.Managed.AutoSelect
 
 	leader := &dispatch.Leader{Coord: coord, Dispatch: auto, OnError: onError}
-	b := &serveLeaderBundle{dispatch: auto}
-	if systemOn {
+	b := &serveLeaderBundle{dispatch: auto, producer: autoSelect}
+	// 自愈轮询与自动选题都需要编排器；后者即便 system_agent.enabled=false
+	// 也必须能 RunJobID，所以装配条件是两个开关的并集。
+	if systemOn || autoSelect {
 		orch, err := buildOrchestratorWithCoord(pc, cfg, coord)
 		if err != nil {
-			// 单个工程编排器装配失败不该拖垮其它工程：保留派发循环，只丢自愈。
+			// 单个工程编排器装配失败不该拖垮其它工程：保留派发循环，只丢自愈/生产。
 			fmt.Fprintf(os.Stderr, "serve leader: project=%s build orchestrator: %v\n", pc.ID(), err)
 		} else {
-			w := buildServeWatcher(pc, cfg, orch)
-			b.watcher = w
-			leader.System = func(ctx context.Context) error {
-				_, _, err := w.PollOnce(ctx)
-				return err
+			if systemOn {
+				w := buildServeWatcher(pc, cfg, orch)
+				b.watcher = w
+				leader.System = func(ctx context.Context) error {
+					_, _, err := w.PollOnce(ctx)
+					return err
+				}
+				leader.SystemInterval = time.Duration(cfg.PollIntervalSec) * time.Second
 			}
-			leader.SystemInterval = time.Duration(cfg.PollIntervalSec) * time.Second
+			if autoSelect {
+				leader.Producer = buildAutoSelectProducer(pc, cfg, store, rt, orch, limit)
+			}
 		}
 	}
 	b.system = leader.System != nil
 	b.runner = leader
 	return b, nil
+}
+
+// buildAutoSelectProducer 装配 auto_select 生产者回调。
+//
+// 选题判定复用 matching.Match 与 systemDispatchProjection，不另立一套「可派发」规则；
+// 上限沿用本工程受管硬上限，因此「无空槽」由匹配层原样给出。执行直接调
+// Orchestrator.RunJobID（不检查 Config.Enabled），保证 system_agent.enabled=false
+// 时生产的作业仍能在同周期被执行并产生 Run。
+func buildAutoSelectProducer(pc *projCtx, cfg config.SystemAgent, store *db.Store,
+	rt *Runtime, orch *systemagent.Orchestrator, limit int) func(context.Context) error {
+	proj := systemDispatchProjection{store: store, rt: rt, workerNode: cfg.WorkerNode}
+	deps := defaultServeLeaderDeps(pc.GlobalDB)
+	ports := systemagent.NewStoreProducerPorts(store, cfg,
+		func() ([]systemagent.ProducerProject, error) {
+			rows, err := deps.projects()
+			if err != nil {
+				return nil, err
+			}
+			out := make([]systemagent.ProducerProject, 0, len(rows))
+			for _, r := range rows {
+				out = append(out, systemagent.ProducerProject{ID: r.ID, Path: r.Path})
+			}
+			return out, nil
+		},
+		func(projectID string) (string, bool, error) {
+			ctx := context.Background()
+			policy, err := proj.Policy(ctx, projectID)
+			if err != nil {
+				return "", false, err
+			}
+			tasks, err := proj.Tasks(ctx, projectID)
+			if err != nil {
+				return "", false, err
+			}
+			nodes, err := proj.Nodes(ctx, projectID)
+			if err != nil {
+				return "", false, err
+			}
+			active, err := proj.ActiveManaged(ctx, projectID)
+			if err != nil {
+				return "", false, err
+			}
+			if limit > 0 {
+				policy.AutoExecution.ManagedExecutionLimit = limit
+			}
+			// auto_select 是独立的选题授权：它只决定要不要生产 dispatch_ready，
+			// 不改变 auto_enabled 对派发消费循环的语义。这里把匹配策略的开关
+			// 换成 auto_select 已开启这一事实，其余门禁（上限、节点就绪、证据
+			// 时效、依赖、写盘冲突）仍全部由 matching.Match 判定，不绕过匹配。
+			policy.AutoExecution.Enabled = true
+			if policy.AutoExecution.ManagedExecutionLimit < 1 {
+				policy.AutoExecution.ManagedExecutionLimit = 1
+			}
+			dec, err := matching.Match(matching.Request{
+				Policy: policy, Tasks: tasks, Nodes: nodes, ActiveManaged: active,
+			})
+			if err != nil {
+				return "", false, err
+			}
+			return dec.TaskID, dec.Matched, nil
+		},
+		func(ctx context.Context, jobID string) error {
+			return orch.RunJobID(ctx, jobID)
+		},
+	)
+	producer := &systemagent.Producer{
+		Config: systemagent.ProducerConfig{
+			AutoSelect:  true,
+			CooldownSec: cfg.CooldownoutSec,
+			MaxAttempts: cfg.MaxAttempts,
+		},
+		Ports: ports,
+	}
+	return func(ctx context.Context) error {
+		_, err := producer.Produce(ctx)
+		return err
+	}
 }
 
 // defaultServeLeaderDeps 是生产装配：工程清单来自全局库，事件写回同一库。

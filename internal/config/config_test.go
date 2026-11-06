@@ -124,3 +124,43 @@ func TestDispatchAndSystemAgentSwitchesAreIndependent(t *testing.T) {
 		t.Fatalf("nil config 不应有自动行为，得到 dispatch=%v system=%v", dispatch, system)
 	}
 }
+
+// TestAutoSelectDefaultsOffAndIsIndependent 钉住 SH-401 的第三个开关：
+// auto_select 默认关闭，且与 auto_enabled / system_agent.enabled 互不推导。
+func TestAutoSelectDefaultsOffAndIsIndependent(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	write := func(body string) *Config {
+		t.Helper()
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		return cfg
+	}
+
+	// 默认全关：auto_select 不得因任何默认值变成 true。
+	cfg := write("[project]\nmain_branch = \"main\"\n")
+	if cfg.Managed.AutoSelect {
+		t.Fatal("auto_select 默认必须关闭（契约 §9 默认全关）")
+	}
+	cfg = write("[managed]\nauto_enabled = true\nlimit = 1\n\n[system_agent]\nenabled = true\n")
+	if cfg.Managed.AutoSelect {
+		t.Fatal("打开其它两个开关不得顺手打开 auto_select")
+	}
+
+	// 单独开启 auto_select：另外两个开关保持关闭，auto_enabled 语义不变。
+	cfg = write("[managed]\nauto_enabled = false\nauto_select = true\nlimit = 1\n")
+	if !cfg.Managed.AutoSelect {
+		t.Fatal("显式 auto_select=true 应被读到")
+	}
+	if dispatch, _ := cfg.DispatchEnabled(); dispatch {
+		t.Fatal("开启 auto_select 不得改变 auto_enabled（派发消费）语义")
+	}
+	if cfg.SystemAgentEnabled() {
+		t.Fatal("开启 auto_select 不得打开系统 Agent")
+	}
+}

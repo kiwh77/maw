@@ -36,6 +36,10 @@ type Leader struct {
 	Clock func() time.Time
 	// OnError 观测单步错误（不会因此退出循环）。
 	OnError func(error)
+	// Producer 是自动选题生产者回调，每轮先跑一次；默认关闭时由调用方不注入。
+	// 与 Dispatch / System 两个开关互不推导：即使两者全关，只要生产者被注入
+	// 就仍按 auto_select 自己的开关工作，且错误不会让 leader 退出。
+	Producer func(ctx context.Context) error
 }
 
 // Run 持锁循环直到 ctx 取消；抢锁失败时返回 ErrCoordinatorActive。
@@ -70,6 +74,13 @@ func (l *Leader) Run(ctx context.Context) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
+		}
+		// 先生产再消费：本轮入队并被执行的 dispatch_ready 产生的新操作，
+		// 能在同一轮的 drain 里被推进，不必等下一次轮询。
+		if l.Producer != nil {
+			if err := l.Producer(ctx); err != nil && !isCtxErr(err) {
+				l.report(err)
+			}
 		}
 		if l.Dispatch {
 			if err := l.drain(ctx); err != nil {

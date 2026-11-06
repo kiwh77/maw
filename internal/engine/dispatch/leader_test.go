@@ -238,3 +238,63 @@ func TestLeaderAutoOffDoesNotStepQueue(t *testing.T) {
 		t.Fatalf("auto 关闭时操作应保持 pending，实际 %s", got)
 	}
 }
+
+// TestLeaderRunsProducerEveryRound 钉住 SH-401 的接线：生产者回调每轮都跑，
+// 且与 Dispatch/System 两个开关互不推导——两者全关也不影响生产者。
+func TestLeaderRunsProducerEveryRound(t *testing.T) {
+	clock := newFakeClock()
+	q := newFakeQueue(clock.Now)
+	c := newTestCoordinator(t, Config{
+		StateDir: t.TempDir(),
+		Queue:    q,
+		Intents:  NewFileStore(t.TempDir()),
+		Launcher: &fakeLauncher{},
+		LockFunc: (&sharedLock{}).lock,
+	}, clock)
+	var calls int32
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	err := (&Leader{
+		Coord: c, Dispatch: false, Idle: time.Millisecond,
+		Producer: func(context.Context) error {
+			atomic.AddInt32(&calls, 1)
+			return nil
+		},
+	}).Run(ctx)
+	if err != nil {
+		t.Fatalf("leader 应随 ctx 超时正常退出，实际 %v", err)
+	}
+	if atomic.LoadInt32(&calls) < 1 {
+		t.Fatal("生产者回调应在每轮被调用")
+	}
+}
+
+// TestLeaderProducerErrorReportedWithoutExit 覆盖生产者错误：经 OnError 上报，
+// 但循环不退出（错误不是进程停下的证据）。
+func TestLeaderProducerErrorReportedWithoutExit(t *testing.T) {
+	clock := newFakeClock()
+	q := newFakeQueue(clock.Now)
+	c := newTestCoordinator(t, Config{
+		StateDir: t.TempDir(),
+		Queue:    q,
+		Intents:  NewFileStore(t.TempDir()),
+		Launcher: &fakeLauncher{},
+		LockFunc: (&sharedLock{}).lock,
+	}, clock)
+	var reported int32
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	err := (&Leader{
+		Coord: c, Dispatch: false, Idle: time.Millisecond,
+		Producer: func(context.Context) error {
+			return errors.New("auto select: enqueue failed")
+		},
+		OnError: func(error) { atomic.AddInt32(&reported, 1) },
+	}).Run(ctx)
+	if err != nil {
+		t.Fatalf("生产者错误不应让 leader 退出，实际 %v", err)
+	}
+	if atomic.LoadInt32(&reported) < 1 {
+		t.Fatal("生产者错误应经 OnError 上报")
+	}
+}
