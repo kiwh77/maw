@@ -25,6 +25,12 @@ const (
 	staleLockAge          = 30 * time.Minute
 	// runUnverifiedWindow 是「非终态 Run 心跳缺失」的判定阈值，与 Agent 心跳窗口同值。
 	runUnverifiedWindow = agentHeartbeatWindow
+	// dispatchOpStallThreshold 是 pending 派发操作失去租约后的停滞阈值（契约 §2）。
+	dispatchOpStallThreshold = 30 * time.Minute
+	// depDeadlockThreshold 是「全部 ready 题被未完成依赖堵住」的停滞阈值。
+	depDeadlockThreshold = 30 * time.Minute
+	// RepeatedFailureWindow 是「同一实例反复失败」的统计窗口；证据采集方按它取 Run。
+	RepeatedFailureWindow = 30 * time.Minute
 )
 
 // SignalKind 是系统级信号的类别，与 system_jobs.kind 是两套概念：
@@ -37,6 +43,12 @@ const (
 	SignalMergingStalled   SignalKind = "merging_stalled"
 	SignalStaleLock        SignalKind = "stale_lock"
 	SignalRunUnverified    SignalKind = "run_unverified"
+	// 以下五类是「队列卡死」类信号（契约 §2，SH-304）：一律只上报，不产出作业。
+	SignalDispatchOpStalled SignalKind = "dispatch_op_stalled"
+	SignalClaimedNotStarted SignalKind = "claimed_not_started"
+	SignalDepDeadlock       SignalKind = "dep_deadlock"
+	SignalNoCapableNode     SignalKind = "no_capable_node"
+	SignalRepeatedFailure   SignalKind = "repeated_failure"
 )
 
 // Signal 是一次系统级观察的结果。
@@ -62,7 +74,8 @@ type Signal struct {
 // Key 返回信号的稳定去重键，冷却与去重都按它，而不是按 job 的 task+kind。
 func (s Signal) Key() string {
 	id := s.TaskID
-	if s.Kind == SignalStaleLock || s.Kind == SignalRunUnverified {
+	switch s.Kind {
+	case SignalStaleLock, SignalRunUnverified, SignalRepeatedFailure:
 		id = s.ResourceKey
 	}
 	return string(s.Kind) + ":" + s.ProjectID + ":" + id
@@ -135,6 +148,85 @@ type UnverifiedRunSource interface {
 	UnverifiedRuns() []UnverifiedRunFact
 }
 
+// StalledOperationFact 是一条停留过久的派发 / 取消操作证据。
+type StalledOperationFact struct {
+	ProjectID   string
+	OperationID string
+	Kind        string
+	Result      string
+	// LeaseExpiresAt 是协调者租约到期时刻；零值表示从未被领取。
+	LeaseExpiresAt time.Time
+	CreatedAt      time.Time
+}
+
+// ClaimedTaskFact 是一条「已领取但没开跑」的任务证据。
+type ClaimedTaskFact struct {
+	ProjectID string
+	TaskID    string
+	// Heartbeat 是任务最近心跳；零值表示从未心跳。
+	Heartbeat time.Time
+	// RunPhase 是同一任务实例最近一次 Run 的阶段；空串表示没有对应 Run。
+	RunPhase string
+}
+
+// DependencyDeadlockFact 是一条依赖死锁证据：依赖环，或全部 ready 题都被未完成依赖堵住。
+type DependencyDeadlockFact struct {
+	ProjectID string
+	// Cycle 非空表示存在依赖环，元素按环序排列；空表示不是环。
+	Cycle []string
+	// BlockedSince 是「全部 ready 题被依赖堵住」的起始时刻；零值表示证据不足。
+	BlockedSince time.Time
+	// BlockedTasks 是受堵的 ready 题编号，供看板定位。
+	BlockedTasks []string
+}
+
+// NoCapableNodeFact 是一条「有 ready 题但没有可用节点」的证据。
+type NoCapableNodeFact struct {
+	ProjectID string
+	TaskID    string
+	// Reason 是匹配层给出的节点级原因码（如 no_candidate_node / capability_unknown）。
+	Reason string
+}
+
+// FailureFact 是一个任务实例在窗口内的失败计数。
+type FailureFact struct {
+	ProjectID  string
+	TaskID     string
+	InstanceID string
+	// Failures 是窗口内 failed 的 Run 次数；窗口由 RepeatedFailureWindow 定义。
+	Failures int
+	// LastFailure 是最近一次失败时刻；零值表示没有可用时间证据。
+	LastFailure time.Time
+}
+
+// 以下五个可选接口与 UnverifiedRunSource 同构：新增证据只加接口，
+// 不改 SignalFacts，也不打断既有装配实现；未实现时对应信号不产出。
+
+// StalledOperationSource 提供 pending 操作证据。
+type StalledOperationSource interface {
+	StalledOperations() []StalledOperationFact
+}
+
+// ClaimedNotStartedSource 提供「已领取但没开跑」证据。
+type ClaimedNotStartedSource interface {
+	ClaimedNotStarted() []ClaimedTaskFact
+}
+
+// DependencyDeadlockSource 提供依赖死锁证据。
+type DependencyDeadlockSource interface {
+	DependencyDeadlocks() []DependencyDeadlockFact
+}
+
+// NoCapableNodeSource 提供「有 ready 题但无可用节点」证据。
+type NoCapableNodeSource interface {
+	NoCapableNodes() []NoCapableNodeFact
+}
+
+// RepeatedFailureSource 提供窗口内的失败计数证据。
+type RepeatedFailureSource interface {
+	RecentFailures() []FailureFact
+}
+
 // SignalFacts 是 DetectSystemSignals 唯一的证据来源。
 type SignalFacts interface {
 	// Projects 返回需要判定「是否全员离线」的工程 ID 列表。
@@ -149,7 +241,7 @@ type SignalFacts interface {
 	HeldLocks() []HeldLockFact
 }
 
-// DetectSystemSignals 识别四类系统级信号，是纯函数：只读注入的证据、配置与时间，
+// DetectSystemSignals 识别系统级信号，是纯函数：只读注入的证据、配置与时间，
 // 不改任何状态、不入队、不执行命令。返回的信号是否入队交给 EnqueueSignals 决定。
 func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Time) []Signal {
 	if facts == nil {
@@ -288,11 +380,171 @@ func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Tim
 			})
 		}
 	}
+	// 6) 派发操作停滞：pending 且租约过期超阈值（从未领取则从创建时刻算）。
+	//    只上报，绝不代执行——操作是否该被回收由协调者自己决定。
+	if src, ok := facts.(StalledOperationSource); ok {
+		for _, op := range src.StalledOperations() {
+			if !dispatchOpStalled(op, now) {
+				continue
+			}
+			emit(Signal{
+				Kind:        SignalDispatchOpStalled,
+				ProjectID:   op.ProjectID,
+				ResourceKey: op.OperationID,
+				Reason: fmt.Sprintf("操作 %s（%s）处于 pending 且租约已过期超过 %s，仅上报",
+					op.OperationID, op.Kind, dispatchOpStallThreshold),
+				JobKind: "",
+				Decision: map[string]any{
+					"report_only":    true,
+					"operation_id":   op.OperationID,
+					"operation_kind": op.Kind,
+				},
+			})
+		}
+	}
+
+	// 7) 已领取没开跑：任务 in_progress 但心跳缺失/过期，且没有 running 的 Run。
+	//    只上报，不自动回 ready——回退要由人确认，避免把正在启动的 Run 判死。
+	if src, ok := facts.(ClaimedNotStartedSource); ok {
+		for _, t := range src.ClaimedNotStarted() {
+			if !claimedNotStarted(t, now) {
+				continue
+			}
+			reason := "任务 in_progress 但超过 " + agentHeartbeatWindow.String() + " 无心跳"
+			if t.Heartbeat.IsZero() {
+				reason = "任务 in_progress 但从未心跳"
+			}
+			if t.RunPhase == "" {
+				reason += "，且无对应 Run"
+			} else {
+				reason += "，且 Run 非 running（" + t.RunPhase + "）"
+			}
+			emit(Signal{
+				Kind:      SignalClaimedNotStarted,
+				ProjectID: t.ProjectID,
+				TaskID:    t.TaskID,
+				Reason:    reason + "，仅上报",
+				JobKind:   "",
+				Decision: map[string]any{
+					"report_only": true,
+					"task_id":     t.TaskID,
+					"run_phase":   t.RunPhase,
+				},
+			})
+		}
+	}
+
+	// 8) 依赖死锁：存在依赖环，或全部 ready 题被未完成依赖堵住超过阈值。只上报。
+	if src, ok := facts.(DependencyDeadlockSource); ok {
+		for _, d := range src.DependencyDeadlocks() {
+			var reason string
+			switch {
+			case len(d.Cycle) > 0:
+				reason = "任务依赖成环：" + strings.Join(d.Cycle, " -> ") + "，仅上报"
+			case !d.BlockedSince.IsZero() && now.Sub(d.BlockedSince) > depDeadlockThreshold:
+				reason = fmt.Sprintf("全部 ready 题被未完成依赖堵住超过 %s（%s），仅上报",
+					depDeadlockThreshold, strings.Join(d.BlockedTasks, ","))
+			default:
+				continue
+			}
+			decision := map[string]any{"report_only": true}
+			if len(d.Cycle) > 0 {
+				decision["cycle"] = d.Cycle
+			}
+			if len(d.BlockedTasks) > 0 {
+				decision["blocked_tasks"] = d.BlockedTasks
+			}
+			emit(Signal{
+				Kind:        SignalDepDeadlock,
+				ProjectID:   d.ProjectID,
+				ResourceKey: d.ProjectID,
+				Reason:      reason,
+				JobKind:     "",
+				Decision:    decision,
+			})
+		}
+	}
+
+	// 9) 有 ready 题但无可用节点：只上报，不自动放宽匹配或改能力声明。
+	if src, ok := facts.(NoCapableNodeSource); ok {
+		for _, n := range src.NoCapableNodes() {
+			reason := "ready 题无可用节点"
+			if n.Reason != "" {
+				reason += "：" + n.Reason
+			}
+			emit(Signal{
+				Kind:      SignalNoCapableNode,
+				ProjectID: n.ProjectID,
+				TaskID:    n.TaskID,
+				Reason:    reason + "，仅上报，不放宽匹配",
+				JobKind:   "",
+				Decision: map[string]any{
+					"report_only": true,
+					"task_id":     n.TaskID,
+					"reason":      n.Reason,
+				},
+			})
+		}
+	}
+
+	// 10) 反复失败：同一实例在窗口内 failed 次数达到 max_attempts。只上报，不自动重派。
+	maxAttempts := cfg.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 3
+	}
+	if src, ok := facts.(RepeatedFailureSource); ok {
+		for _, f := range src.RecentFailures() {
+			if f.Failures < maxAttempts {
+				continue
+			}
+			emit(Signal{
+				Kind:        SignalRepeatedFailure,
+				ProjectID:   f.ProjectID,
+				TaskID:      f.TaskID,
+				ResourceKey: f.InstanceID,
+				Reason: fmt.Sprintf("实例 %s 在 %s 内失败 %d 次（阈值 %d），仅上报，不自动重派",
+					f.InstanceID, RepeatedFailureWindow, f.Failures, maxAttempts),
+				JobKind: "",
+				Decision: map[string]any{
+					"report_only":  true,
+					"instance_id":  f.InstanceID,
+					"failures":     f.Failures,
+					"max_attempts": maxAttempts,
+				},
+			})
+		}
+	}
 	return out
 }
 
+// dispatchOpStalled 判定一条 pending 操作是否停滞：租约过期超过阈值；
+// 从未被领取（租约零值）时按创建时刻计算，避免永远 pending 的操作无声无息。
+func dispatchOpStalled(op StalledOperationFact, now time.Time) bool {
+	if !strings.EqualFold(strings.TrimSpace(op.Result), "pending") {
+		return false
+	}
+	since := op.LeaseExpiresAt
+	if since.IsZero() {
+		since = op.CreatedAt
+	}
+	if since.IsZero() {
+		return false
+	}
+	return now.Sub(since) > dispatchOpStallThreshold
+}
+
+// claimedNotStarted 判定「已领取但没开跑」：心跳缺失或超窗口，且 Run 不是 running。
+func claimedNotStarted(t ClaimedTaskFact, now time.Time) bool {
+	if strings.EqualFold(strings.TrimSpace(t.RunPhase), "running") {
+		return false
+	}
+	if t.Heartbeat.IsZero() {
+		return true
+	}
+	return now.Sub(t.Heartbeat) > agentHeartbeatWindow
+}
+
 // runUnverified 判定一条 Run 证据是否属于「未核实的占用」。
-//
 // 本轮已核实过的一律跳过；finished 是确定结束，不产出；unknown 无现场可依，
 // 直接产出；其余非终态按最后更新是否超过阈值判定（零值按证据不足处理）。
 func runUnverified(f UnverifiedRunFact, now time.Time) bool {
