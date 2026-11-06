@@ -64,6 +64,54 @@ const (
 	SystemKindDispatchReady = "dispatch_ready"
 )
 
+const (
+	// DefaultSystemJobLease 是 running 作业的默认租约：超时未写终态视为工作进程已失联。
+	DefaultSystemJobLease = 10 * time.Minute
+	// 失败后退避：30s * 2^(attempts-1)，封顶 10 分钟（见 SH-201）。
+	systemJobBackoffBase = 30 * time.Second
+	systemJobBackoffCap  = 10 * time.Minute
+	// 一次领取最多扫描多少条候选；退避中的旧作业会被跳过，不阻塞后面的新作业。
+	systemJobClaimScan = 100
+)
+
+// systemJobBackoff 返回第 attempts 次失败后要等的时长。
+func systemJobBackoff(attempts int) time.Duration {
+	if attempts <= 0 {
+		return 0
+	}
+	d := systemJobBackoffBase
+	for i := 1; i < attempts; i++ {
+		d *= 2
+		if d >= systemJobBackoffCap {
+			return systemJobBackoffCap
+		}
+	}
+	return d
+}
+
+// systemJobDue 判断一条 queued 作业是否已过退避窗口。
+//
+// 退避基准是 updated_at：RequeueSystemJob / ReapStaleSystemJobs 都会把它写成
+// 「这次失败发生的时刻」。时间戳解析失败时按可领取处理——宁可早跑一次，
+// 也不要把一条作业永久卡死。
+func systemJobDue(attempts int, updatedAt string, now time.Time) bool {
+	if attempts <= 0 {
+		return true
+	}
+	ts, err := time.Parse(time.RFC3339, updatedAt)
+	if err != nil {
+		return true
+	}
+	return !now.Before(ts.Add(systemJobBackoff(attempts)))
+}
+
+func normalizeNow(now time.Time) time.Time {
+	if now.IsZero() {
+		return time.Now().UTC()
+	}
+	return now.UTC()
+}
+
 // InsertSystemJob 插入作业；与 UNIQUE(project,kind,task,trigger) 冲突时返回 (nil, nil) 表示幂等跳过。
 func InsertSystemJob(tx *sql.Tx, j *SystemJob) (*SystemJob, error) {
 	if j == nil {
@@ -120,13 +168,18 @@ FROM system_jobs WHERE job_id = ?`, jobID)
 }
 
 // ClaimNextSystemJob 原子领取一条 queued 作业（按创建时间）。
-func ClaimNextSystemJob(tx *sql.Tx, worker string, kinds []string) (*SystemJob, error) {
+//
+// 失败过的作业要等过退避窗口（30s * 2^(attempts-1)，封顶 10 分钟）才能再领；
+// 退避基准是 updated_at，即上一次失败/回收的时刻。now 由调用方注入，
+// 让编排器的 Clock 决定「现在」，测试不必真等 30 秒。
+func ClaimNextSystemJob(tx *sql.Tx, worker string, kinds []string, now time.Time) (*SystemJob, error) {
 	worker = strings.TrimSpace(worker)
 	if worker == "" {
 		worker = "system"
 	}
+	now = normalizeNow(now)
 	q := `
-SELECT job_id FROM system_jobs
+SELECT job_id, attempts, updated_at FROM system_jobs
 WHERE status = ?`
 	args := []any{SystemJobQueued}
 	if len(kinds) > 0 {
@@ -135,28 +188,135 @@ WHERE status = ?`
 			args = append(args, k)
 		}
 	}
-	q += ` ORDER BY created_at ASC LIMIT 1`
-	var id string
-	if err := tx.QueryRow(q, args...).Scan(&id); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	now := UTCNow()
-	res, err := tx.Exec(`
-UPDATE system_jobs
-SET status = ?, locked_by = ?, locked_at = ?, attempts = attempts + 1, updated_at = ?
-WHERE job_id = ? AND status = ?`,
-		SystemJobRunning, worker, now, now, id, SystemJobQueued)
+	q += ` ORDER BY created_at ASC LIMIT ?`
+	args = append(args, systemJobClaimScan)
+
+	rows, err := tx.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return nil, nil
+	var candidates []string
+	for rows.Next() {
+		var (
+			id        string
+			attempts  int
+			updatedAt string
+		)
+		if err := rows.Scan(&id, &attempts, &updatedAt); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if !systemJobDue(attempts, updatedAt, now) {
+			continue
+		}
+		candidates = append(candidates, id)
 	}
-	return GetSystemJob(tx, id)
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	_ = rows.Close()
+
+	for _, id := range candidates {
+		res, err := tx.Exec(`
+UPDATE system_jobs
+SET status = ?, locked_by = ?, locked_at = ?, attempts = attempts + 1, updated_at = ?
+WHERE job_id = ? AND status = ?`,
+			SystemJobRunning, worker, formatTS(now), formatTS(now), id, SystemJobQueued)
+		if err != nil {
+			return nil, err
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			continue
+		}
+		return GetSystemJob(tx, id)
+	}
+	return nil, nil
+}
+
+// ReapStaleSystemJobs 回收租约超时的 running 作业。
+//
+// 进程崩溃后作业会永远停在 running。超租约（lease<=0 时用 10 分钟）的作业：
+//   - attempts 还没到 max_attempts → 回 queued，等退避窗口后重跑；
+//   - attempts 已达 max_attempts → 记 failed 终态，不再重跑。
+//
+// 两种情况都会在 result 里留下 reaped_from=running 与回收时刻，供看板与
+// 统计区分「正常结束」和「失联回收」。
+func ReapStaleSystemJobs(tx *sql.Tx, now time.Time, lease time.Duration) (int, error) {
+	if lease <= 0 {
+		lease = DefaultSystemJobLease
+	}
+	now = normalizeNow(now)
+	cutoff := formatTS(now.Add(-lease))
+
+	rows, err := tx.Query(`
+SELECT job_id, attempts, max_attempts, result_json FROM system_jobs
+WHERE status = ? AND locked_at IS NOT NULL AND locked_at <> '' AND locked_at < ?`,
+		SystemJobRunning, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	type staleJob struct {
+		id       string
+		attempts int
+		max      int
+		result   map[string]any
+	}
+	var stale []staleJob
+	for rows.Next() {
+		var (
+			id       string
+			attempts int
+			max      int
+			raw      string
+		)
+		if err := rows.Scan(&id, &attempts, &max, &raw); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		result := map[string]any{}
+		_ = json.Unmarshal([]byte(raw), &result)
+		stale = append(stale, staleJob{id: id, attempts: attempts, max: max, result: result})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	_ = rows.Close()
+
+	reaped := 0
+	for _, s := range stale {
+		result := s.result
+		if result == nil {
+			result = map[string]any{}
+		}
+		result["reaped_from"] = SystemJobRunning
+		result["reaped_at"] = formatTS(now)
+
+		status := SystemJobQueued
+		if s.attempts >= s.max {
+			status = SystemJobFailed
+		}
+		finished := any(nil)
+		if status == SystemJobFailed {
+			finished = formatTS(now)
+		}
+		res, err := tx.Exec(`
+UPDATE system_jobs
+SET status = ?, result_json = ?, updated_at = ?, finished_at = ?,
+    locked_by = '', locked_at = NULL
+WHERE job_id = ? AND status = ?`,
+			status, mustJSON(result), formatTS(now), finished, s.id, SystemJobRunning)
+		if err != nil {
+			return reaped, err
+		}
+		n, _ := res.RowsAffected()
+		if n > 0 {
+			reaped++
+		}
+	}
+	return reaped, nil
 }
 
 // FinishSystemJob 写终态。

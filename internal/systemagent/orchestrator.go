@@ -115,12 +115,13 @@ func (o *Orchestrator) Step(ctx context.Context) (int, error) {
 	if worker == "" {
 		worker = "system-agent"
 	}
+	now := o.now()
 	ran := 0
 	for i := 0; i < n; i++ {
 		var job *db.SystemJob
 		err := o.Store.Write(func(tx *sql.Tx) error {
 			var e error
-			job, e = db.ClaimNextSystemJob(tx, worker, kinds)
+			job, e = db.ClaimNextSystemJob(tx, worker, kinds, now)
 			return e
 		})
 		if err != nil {

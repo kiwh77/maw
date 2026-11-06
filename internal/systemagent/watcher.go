@@ -25,6 +25,11 @@ type Watcher struct {
 	// SignalFacts 可选：系统级信号的证据源。为 nil 时 PollOnce 完全跳过信号检测，
 	// 既有 task.blocked 入队路径不变；由装配卡注入读库 / 读事件的真实实现。
 	SignalFacts SignalFacts
+	// JobLease 是 running 作业的租约；<=0 时用 db.DefaultSystemJobLease（10 分钟）。
+	// 每轮先回收超租约作业，避免进程崩溃后作业永远停在 running。
+	JobLease time.Duration
+	// OnError 可选：Run 每轮遇到非锁错误时回调。默认只继续循环、不退出进程。
+	OnError func(error)
 }
 
 func (w *Watcher) now() time.Time {
@@ -50,6 +55,11 @@ func (w *Watcher) PollOnce(ctx context.Context) (enqueued, ran int, err error) {
 		if release != nil {
 			defer release()
 		}
+	}
+	// 每轮先回收超租约作业：进程崩溃留下的 running 不会永远占着作业。
+	// 回收只改 system_jobs 自身状态，不产生新的动作负担。
+	if _, err := w.reapStaleJobs(); err != nil {
+		return 0, 0, err
 	}
 	n, err := w.ingestBlocked(ctx)
 	if err != nil {
@@ -80,9 +90,9 @@ func (w *Watcher) Run(ctx context.Context) error {
 	defer t.Stop()
 	for {
 		if _, _, err := w.PollOnce(ctx); err != nil {
-			// 锁竞争等可忽略，继续
-			if !isLockErr(err) {
-				// 非锁错误也继续跑，避免守护进程退出
+			// 锁竞争等可忽略，继续；其它错误交给宿主回调，但守护进程不退出。
+			if !isLockErr(err) && w.OnError != nil {
+				w.OnError(err)
 			}
 		}
 		select {
@@ -91,6 +101,20 @@ func (w *Watcher) Run(ctx context.Context) error {
 		case <-t.C:
 		}
 	}
+}
+
+func (w *Watcher) reapStaleJobs() (int, error) {
+	lease := w.JobLease
+	if lease <= 0 {
+		lease = db.DefaultSystemJobLease
+	}
+	var reaped int
+	err := w.Store.Write(func(tx *sql.Tx) error {
+		var e error
+		reaped, e = db.ReapStaleSystemJobs(tx, w.now(), lease)
+		return e
+	})
+	return reaped, err
 }
 
 func isLockErr(err error) bool {
