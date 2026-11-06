@@ -19,6 +19,15 @@ import (
 // 对应的任务就不能被打回可重派——否则另一个 Agent 会拿到同一份工作目录，
 // 和可能还在写盘的旧进程撞在一起。这类任务只下线 Agent，保留占用等人处置。
 func expireStaleAgents(tx *sql.Tx, pc *projCtx) error {
+	return expireStaleAgentsAt(tx, pc, time.Now().UTC())
+}
+
+// expireStaleAgentsAt 用给定时刻判定过期，供常驻巡检注入时钟测试。
+//
+// 所有写（Agent、事件、任务行、租约）都在调用方给的同一个事务里；任一写失败
+// 立即返回错误，由事务整体回滚，绝不允许「Agent 已下线但任务还挂在它名下」
+// 这种半状态落库。TTL 语义、占用判定与收尾链路都不因主动巡检而改变。
+func expireStaleAgentsAt(tx *sql.Tx, pc *projCtx, now time.Time) error {
 	if pc == nil || pc.Config == nil {
 		return nil
 	}
@@ -26,7 +35,7 @@ func expireStaleAgents(tx *sql.Tx, pc *projCtx) error {
 	if ttl <= 0 {
 		ttl = 900
 	}
-	cutoff := time.Now().UTC().Add(-time.Duration(ttl) * time.Second)
+	cutoff := now.UTC().Add(-time.Duration(ttl) * time.Second)
 	agents, err := db.ListAgents(tx, pc.ID())
 	if err != nil {
 		return err
@@ -55,9 +64,11 @@ func expireStaleAgents(tx *sql.Tx, pc *projCtx) error {
 		if err := db.UpsertAgent(tx, a); err != nil {
 			return err
 		}
-		_ = db.AppendEvent(tx, pc.ID(), "system", "agent_expired", "", map[string]any{
+		if err := db.AppendEvent(tx, pc.ID(), "system", "agent_expired", "", map[string]any{
 			"agent": agentID, "ttl_sec": ttl, "last_seen": lastSeen,
-		})
+		}); err != nil {
+			return err
+		}
 		tasks, err := db.ListTasks(tx, pc.ID())
 		if err != nil {
 			return err
@@ -66,17 +77,23 @@ func expireStaleAgents(tx *sql.Tx, pc *projCtx) error {
 			if t == nil || t.Owner != agentID || !machine.ActiveOwner[t.Status] {
 				continue
 			}
-			if run := occupyingRun(tx, pc.ID(), t.InstanceID); run != nil {
+			run, err := occupyingRun(tx, pc.ID(), t.InstanceID)
+			if err != nil {
+				return err
+			}
+			if run != nil {
 				// 人工领取（CLI 自领）也建 Run，但它从不启动 Runner：这种 Run 没有进程
 				// 在写盘，心跳过期后必须收尾放行，否则题目永久停在 claimed（挂尸）。
 				// 有进程证据的受管 Run 仍按上面的硬边界保留占用。
 				if !runHasNoProcessEvidence(tx, run) {
-					_ = db.AppendEvent(tx, pc.ID(), "system", "agent_expired_occupancy_kept", t.ID, map[string]any{
+					if err := db.AppendEvent(tx, pc.ID(), "system", "agent_expired_occupancy_kept", t.ID, map[string]any{
 						"agent": agentID, "run_id": run.ID, "generation": int(run.Generation),
 						"phase": string(run.Phase), "reconciliation": string(run.Reconciliation),
 						"process_stop_confirmed": run.ProcessStopConfirmed,
 						"reason":                 "run_still_occupying",
-					})
+					}); err != nil {
+						return err
+					}
 					continue
 				}
 				released, err := abandonRunWithoutProcess(tx, pc.ID(), run)
@@ -86,16 +103,20 @@ func expireStaleAgents(tx *sql.Tx, pc *projCtx) error {
 				if !released {
 					// 阶段不在可收尾链路上（例如已进入 running 却没有启动时间），
 					// 不硬改状态，保留占用等人核实。
-					_ = db.AppendEvent(tx, pc.ID(), "system", "agent_expired_occupancy_kept", t.ID, map[string]any{
+					if err := db.AppendEvent(tx, pc.ID(), "system", "agent_expired_occupancy_kept", t.ID, map[string]any{
 						"agent": agentID, "run_id": run.ID, "generation": int(run.Generation),
 						"phase": string(run.Phase), "reason": "run_phase_not_abandonable",
-					})
+					}); err != nil {
+						return err
+					}
 					continue
 				}
-				_ = db.AppendEvent(tx, pc.ID(), "system", "agent_expired_run_released", t.ID, map[string]any{
+				if err := db.AppendEvent(tx, pc.ID(), "system", "agent_expired_run_released", t.ID, map[string]any{
 					"agent": agentID, "run_id": run.ID, "generation": int(run.Generation),
 					"from_phase": string(run.Phase), "reason": "no_process_evidence",
-				})
+				}); err != nil {
+					return err
+				}
 			}
 			from := t.Status
 			if err := machine.AssertTransition(t.Status, "ready"); err != nil {
@@ -104,10 +125,14 @@ func expireStaleAgents(tx *sql.Tx, pc *projCtx) error {
 				t.BlockedReason = "agent_expired:" + agentID
 				t.Owner = ""
 				t.Revision++
-				_ = db.UpsertTask(tx, t)
-				_ = db.AppendEvent(tx, pc.ID(), "system", "status_changed", t.ID, map[string]any{
+				if err := db.UpsertTask(tx, t); err != nil {
+					return err
+				}
+				if err := db.AppendEvent(tx, pc.ID(), "system", "status_changed", t.ID, map[string]any{
 					"from": from, "to": "blocked", "reason": "agent_expired",
-				})
+				}); err != nil {
+					return err
+				}
 				continue
 			}
 			t.Status = "ready"
@@ -116,10 +141,14 @@ func expireStaleAgents(tx *sql.Tx, pc *projCtx) error {
 			t.Worktree = ""
 			t.BlockedReason = ""
 			t.Revision++
-			_ = db.UpsertTask(tx, t)
-			_ = db.AppendEvent(tx, pc.ID(), "system", "status_changed", t.ID, map[string]any{
+			if err := db.UpsertTask(tx, t); err != nil {
+				return err
+			}
+			if err := db.AppendEvent(tx, pc.ID(), "system", "status_changed", t.ID, map[string]any{
 				"from": from, "to": "ready", "reason": "agent_expired",
-			})
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -128,23 +157,23 @@ func expireStaleAgents(tx *sql.Tx, pc *projCtx) error {
 // occupyingRun 返回该任务实例上仍计入占用的 Run；没有则返回 nil。
 //
 // 「仍计入占用」只认 model.Run.Occupies 一套判定，这里不另立条件。
-func occupyingRun(tx *sql.Tx, projectID, instanceID string) *db.Run {
+func occupyingRun(tx *sql.Tx, projectID, instanceID string) (*db.Run, error) {
 	if instanceID == "" {
-		return nil
+		return nil, nil
 	}
 	runs, err := db.ListRuns(tx, projectID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	for _, r := range runs {
 		if r == nil || r.InstanceID != instanceID || r.ID == "" {
 			continue
 		}
 		if r.Occupies() {
-			return r
+			return r, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // runHasNoProcessEvidence 判断该 Run 是否「从未启动受管进程、也没有产物」。

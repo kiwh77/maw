@@ -123,6 +123,66 @@ func TestExpireReleasesManualRunAfterRetry(t *testing.T) {
 	}
 }
 
+// TestExpireWriteFailureReturnsErrorAndRollsBack 覆盖 SH-202 第三条验收：
+// 写事件／写任务行失败必须向上返回，且整笔事务回滚，库里不能留下
+// 「Agent 已 offline、任务却还挂着 owner」这种半状态。
+func TestExpireWriteFailureReturnsErrorAndRollsBack(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		trigger string
+	}{
+		{
+			name: "AppendEvent 失败",
+			trigger: `CREATE TEMP TRIGGER fail_event_write BEFORE INSERT ON events
+BEGIN SELECT RAISE(ABORT, 'injected: event write failed'); END`,
+		},
+		{
+			name: "UpsertTask 失败",
+			trigger: `CREATE TEMP TRIGGER fail_task_write BEFORE UPDATE ON tasks
+BEGIN SELECT RAISE(ABORT, 'injected: task write failed'); END`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			task := f.seedTask("VN-HF", "ready", "", []string{"mod_hf/**"})
+			if _, _, err := claimManual(f.pc, "cursor-stale", ".worktrees/cursor-stale"); err != nil {
+				t.Fatalf("manual claim: %v", err)
+			}
+			staleAgent(t, f, "cursor-stale", task.ID)
+
+			err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+				if _, e := tx.Exec(tc.trigger); e != nil {
+					t.Fatalf("install trigger: %v", e)
+				}
+				return expireStaleAgents(tx, f.pc)
+			})
+			if err == nil {
+				t.Fatal("写库失败必须向上返回错误，不能静默吞掉")
+			}
+
+			// 事务已回滚：Agent 仍是 working，任务仍归它，且没有过期事件。
+			var status, owner, taskStatus string
+			if e := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+				if e := tx.QueryRow(`SELECT status FROM agents WHERE id = ?`, "cursor-stale").Scan(&status); e != nil {
+					return e
+				}
+				return tx.QueryRow(`SELECT status, owner FROM tasks WHERE id = ?`, task.ID).Scan(&taskStatus, &owner)
+			}); e != nil {
+				t.Fatalf("读回状态: %v", e)
+			}
+			if status != "working" {
+				t.Fatalf("回滚后 Agent 不应已经 offline，实际 %s", status)
+			}
+			if taskStatus != string(model.TaskClaimed) || owner != "cursor-stale" {
+				t.Fatalf("回滚后任务应仍为 claimed 且保留 owner，实际 status=%s owner=%s", taskStatus, owner)
+			}
+			if n := countEventsByType(t, f, "agent_expired"); n != 0 {
+				t.Fatalf("回滚后不应留下 agent_expired 事件，实际 %d", n)
+			}
+		})
+	}
+}
+
 func expire(t *testing.T, f *fixture) error {
 	t.Helper()
 	return db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {

@@ -30,6 +30,10 @@ type Watcher struct {
 	JobLease time.Duration
 	// OnError 可选：Run 每轮遇到非锁错误时回调。默认只继续循环、不退出进程。
 	OnError func(error)
+	// Housekeeping 可选：每轮先跑的主动巡检（过期心跳、作业回收等），由宿主注入。
+	// 错误向上返回给 PollOnce，由 Run 的 OnError 记录；静默吞掉会让巡检形同虚设。
+	// 为 nil 时行为与引入前完全一致。
+	Housekeeping func(ctx context.Context) error
 }
 
 func (w *Watcher) now() time.Time {
@@ -54,6 +58,13 @@ func (w *Watcher) PollOnce(ctx context.Context) (enqueued, ran int, err error) {
 		}
 		if release != nil {
 			defer release()
+		}
+	}
+	// 主动巡检不依赖任何 worker 调 next：中枢活着就得发现过期的心跳。
+	// 放在最前面，错误直接返回本轮结果，不吞、不跳过后续判断。
+	if w.Housekeeping != nil {
+		if err := w.Housekeeping(ctx); err != nil {
+			return 0, 0, err
 		}
 	}
 	// 每轮先回收超租约作业：进程崩溃留下的 running 不会永远占着作业。

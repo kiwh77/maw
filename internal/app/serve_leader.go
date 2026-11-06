@@ -202,8 +202,11 @@ func (r *leadLoopErrorRecorder) report(projectID string, err error) {
 // 与 CLI 的 SystemWatch 一样必须注入真实证据源：SignalFacts 为 nil 时 PollOnce
 // 会完全跳过系统级信号检测，常驻循环就永远发现不了卡住的任务/离线节点。
 // leader 已持有本工程的 coordinator.lock，这里不再让 Watcher 自己抢锁。
+//
+// Housekeeping 让过期心跳巡检不依赖任何 worker 调 maw next：中枢常驻就能发现
+// 掉线的 Agent。时钟统一走 w.Clock（测试可注入确定性时刻）。
 func buildServeWatcher(pc *projCtx, cfg config.SystemAgent, orch *systemagent.Orchestrator) *systemagent.Watcher {
-	return &systemagent.Watcher{
+	w := &systemagent.Watcher{
 		Store:        orch.Store,
 		Config:       cfg,
 		Orchestrator: orch,
@@ -211,6 +214,14 @@ func buildServeWatcher(pc *projCtx, cfg config.SystemAgent, orch *systemagent.Or
 		LeaderLock:   nil,
 		SignalFacts:  newHubSignalFacts(pc.GlobalDB, cfg),
 	}
+	// 延迟读取 w.Clock：调用方在构造后再注入 Clock 也能生效；未注入时用真实时间。
+	w.Housekeeping = leadHousekeeping(func() time.Time {
+		if w.Clock != nil {
+			return w.Clock().UTC()
+		}
+		return time.Now().UTC()
+	}, defaultLeadHousekeepingDeps(pc.GlobalDB))
+	return w
 }
 
 // buildServeLeaderBundle 为单个工程装配常驻循环：本工程的 Runtime／库／队列／开关。
