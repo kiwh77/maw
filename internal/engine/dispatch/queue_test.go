@@ -26,21 +26,26 @@ func openTestStore(t *testing.T) *db.Store {
 }
 
 // seedDispatchOperation 插入一个 run 和一个归属它的 dispatch 操作。
-func seedDispatchOperation(t *testing.T, store *db.Store, runID model.RunID, opID model.OperationID, instance model.InstanceID, generation int) {
+// 可选传入工程 ID，供多工程隔离用例各自播种；不传时沿用默认的单工程夹具。
+func seedDispatchOperation(t *testing.T, store *db.Store, runID model.RunID, opID model.OperationID, instance model.InstanceID, generation int, projectID ...model.ProjectID) {
 	t.Helper()
+	project := model.ProjectID("0123456789abcdef")
+	if len(projectID) > 0 {
+		project = projectID[0]
+	}
 	now := db.UTCNow()
 	err := store.Write(func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO runs(run_id, project_id, instance_id, version_no, generation,
     phase, reconciliation_state, created_at, updated_at)
 VALUES(?, ?, ?, ?, ?, 'gate', 'idle', ?, ?)`,
-			string(runID), "0123456789abcdef", string(instance), 1, generation, now, now)
+			string(runID), string(project), string(instance), 1, generation, now, now)
 		if err != nil {
 			return err
 		}
 		_, err = tx.Exec(`INSERT INTO operations(operation_id, project_id, kind, run_id, instance_id,
     idempotency_key, request_digest, result, created_at, updated_at)
 VALUES(?, ?, 'dispatch', ?, ?, ?, ?, 'pending', ?, ?)`,
-			string(opID), "0123456789abcdef", string(runID), string(instance), "idem-"+string(opID),
+			string(opID), string(project), string(runID), string(instance), "idem-"+string(opID),
 			"digest-"+string(opID), now, now)
 		return err
 	})
@@ -127,6 +132,117 @@ func TestDBQueueRejectPending(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("持有中的操作不应被撤回")
+	}
+}
+
+const (
+	testProjectA = model.ProjectID("0123456789abcdef")
+	testProjectB = model.ProjectID("fedcba9876543210")
+)
+
+// seedTwoProjects 在全局库里各放一条属于不同工程的 pending dispatch 操作。
+func seedTwoProjects(t *testing.T, store *db.Store) {
+	t.Helper()
+	seedDispatchOperation(t, store, "run_a001", "op_a001", "ti_aaaaaa", 1, testProjectA)
+	seedDispatchOperation(t, store, "run_b002", "op_b002", "ti_bbbbbb", 2, testProjectB)
+}
+
+func TestDBQueuePendingScopedByProject(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+	seedTwoProjects(t, store)
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		queue   *DBQueue
+		wantIDs []model.OperationID
+	}{
+		{"工程 A", NewDBQueue(store, testProjectA), []model.OperationID{"op_a001"}},
+		{"工程 B", NewDBQueue(store, testProjectB), []model.OperationID{"op_b002"}},
+		// 不指定工程：与引入隔离前一致，仍是全库视图。
+		{"未指定工程", NewDBQueue(store), []model.OperationID{"op_a001", "op_b002"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ops, err := tc.queue.Pending(ctx)
+			if err != nil {
+				t.Fatalf("Pending: %v", err)
+			}
+			if len(ops) != len(tc.wantIDs) {
+				t.Fatalf("待办数期望 %d，实际 %d: %+v", len(tc.wantIDs), len(ops), ops)
+			}
+			for i, want := range tc.wantIDs {
+				if ops[i].OperationID != want {
+					t.Fatalf("第 %d 条期望 %s，实际 %+v", i, want, ops[i])
+				}
+			}
+		})
+	}
+}
+
+func TestDBQueueClaimScopedByProject(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+	seedTwoProjects(t, store)
+	ctx := context.Background()
+	qa := NewDBQueue(store, testProjectA)
+	qb := NewDBQueue(store, testProjectB)
+
+	// A 的协调者不能领走 B 排队的操作。
+	ok, err := qa.Claim(ctx, "op_b002", "coord-a", 30*time.Second)
+	if err != nil || ok {
+		t.Fatalf("跨工程领取应失败: ok=%v err=%v", ok, err)
+	}
+	// A 的操作仍可被 A 领取。
+	ok, err = qa.Claim(ctx, "op_a001", "coord-a", 30*time.Second)
+	if err != nil || !ok {
+		t.Fatalf("本工程领取应成功: ok=%v err=%v", ok, err)
+	}
+	// B 的操作没有被 A 误占，B 的协调者仍能领走。
+	ok, err = qb.Claim(ctx, "op_b002", "coord-b", 30*time.Second)
+	if err != nil || !ok {
+		t.Fatalf("B 领取自己的操作应成功: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestDBQueueCompleteAndRejectScopedByProject(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+	seedTwoProjects(t, store)
+	ctx := context.Background()
+	qa := NewDBQueue(store, testProjectA)
+	qb := NewDBQueue(store, testProjectB)
+
+	// A 不能替 B 写终态。
+	if err := qa.Complete(ctx, "op_b002", "coord-a", model.ResultApplied); err == nil {
+		t.Fatal("跨工程完成应被拒绝")
+	}
+	// A 不能撤回 B 排队的操作。
+	ok, err := qa.RejectPending(ctx, "op_b002")
+	if err != nil || ok {
+		t.Fatalf("跨工程撤回应返回 false: ok=%v err=%v", ok, err)
+	}
+	// B 的操作仍完好，且可由 B 自己撤回。
+	ops, err := qb.Pending(ctx)
+	if err != nil || len(ops) != 1 || ops[0].OperationID != "op_b002" {
+		t.Fatalf("B 的待办被误改: %+v err=%v", ops, err)
+	}
+	ok, err = qb.RejectPending(ctx, "op_b002")
+	if err != nil || !ok {
+		t.Fatalf("B 撤回自己的操作应成功: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestDBQueueRejectsMalformedProjectScope(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+	seedTwoProjects(t, store)
+	q := NewDBQueue(store, model.ProjectID("not-a-project-id"))
+	if _, err := q.Pending(context.Background()); err == nil {
+		t.Fatal("非法工程 ID 应显式报错，不能静默产出空队列")
+	}
+	if _, err := q.Claim(context.Background(), "op_a001", "coord-a", time.Second); err == nil {
+		t.Fatal("非法工程 ID 下 Claim 应报错")
 	}
 }
 

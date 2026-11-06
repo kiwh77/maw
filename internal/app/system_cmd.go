@@ -279,7 +279,9 @@ func buildOrchestratorWithCoord(pc *projCtx, cfg config.SystemAgent, coord *disp
 // 投影只读库与配置；推进复用协调者（serve 内传 leader 的实例，CLI 路径自建）。
 func newSystemDispatcher(pc *projCtx, cfg config.SystemAgent, store *db.Store, rt *Runtime, coord *dispatch.Coordinator) (*systemagent.Dispatcher, error) {
 	if coord == nil {
-		c, err := rt.BuildCoordinator(dispatch.NewDBQueue(store))
+		// 全局状态库由多工程共用；队列必须绑定本工程，否则 CLI 自建的协调者
+		// 会领走别的工程排队的 dispatch 操作，把 op 目录写进本工程 runtime。
+		c, err := rt.BuildCoordinator(dispatch.NewDBQueue(store, model.ProjectID(pc.ID())))
 		if err != nil {
 			return nil, err
 		}
@@ -671,7 +673,9 @@ func startServeLoops(cwd string) {
 		fmt.Fprintf(os.Stderr, "serve leader: open store: %v\n", err)
 		return
 	}
-	coord, err := rt.BuildCoordinator(dispatch.NewDBQueue(store))
+	// serve leader 只推进本工程的派发队列：协调锁已在 <state>/<project>/ 下，
+	// 但库是全局的，不绑定工程时两个工程各开 serve 会互相消费对方的 operation。
+	coord, err := rt.BuildCoordinator(dispatch.NewDBQueue(store, model.ProjectID(pc.ID())))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "serve leader: coordinator: %v\n", err)
 		return
