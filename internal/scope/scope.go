@@ -92,5 +92,5 @@ func AssertFilesInScope(files, patterns []string, taskID string) error {
 	if len(bad) > 8 {
 		list = strings.Join(bad[:8], ", ") + "..."
 	}
-	return i18n.E("err.out_of_scope_files", "next.narrow_diff", taskID, list)
+	return i18n.E("err.out_of_scope_files", "next.request_change_or_narrow", taskID, list)
 }

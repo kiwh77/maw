@@ -168,7 +168,7 @@ func (s *Service) claimTx(tx *sql.Tx, req Request) (*Outcome, error) {
 	if req.RequestedTask != nil {
 		cs.task, cs.inst, err = specifiedTarget(tx, projectID, *req.RequestedTask, all)
 	} else {
-		cs.task, err = selectTarget(all, shared, string(req.AgentID))
+		cs.task, err = selectTarget(tx, projectID, all, shared, string(req.AgentID))
 		if err == nil {
 			cs.inst, err = db.GetInstance(tx, cs.task.InstanceID)
 		}
@@ -255,6 +255,7 @@ func (s *Service) claimManaged(tx *sql.Tx, req Request, cs *claimState, version 
 	}); err != nil {
 		return nil, err
 	}
+	_ = stickAgentLane(tx, string(req.ProjectID), string(req.AgentID), schedule.LaneOf(cs.task))
 	// CLI 自领的 Operation 不再等协调者：本事务内落 applied，语义是「这次领取已登记」，
 	// 而不是「还有一个待启动的 Runner」。
 	if req.SettleDispatchOperation {
@@ -264,6 +265,21 @@ func (s *Service) claimManaged(tx *sql.Tx, req Request, cs *claimState, version 
 	}
 	res.Revision = model.Revision(cs.task.Revision)
 	return res, nil
+}
+
+// stickAgentLane 领取成功后把 Agent 粘到任务所在子队列；Agent 未注册则忽略。
+func stickAgentLane(tx *sql.Tx, projectID, agent, lane string) error {
+	if agent == "" {
+		return nil
+	}
+	err := db.SetAgentBoundLane(tx, projectID, agent, lane)
+	if err == nil {
+		return nil
+	}
+	if _, ok := err.(*db.AgentNotFound); ok {
+		return nil
+	}
+	return err
 }
 
 // claimUnbound 是未绑定受管节点的人工领取：只占目录，不占节点槽、不建 Run。
@@ -313,6 +329,7 @@ func (s *Service) claimUnbound(tx *sql.Tx, req Request, cs *claimState, version 
 	}); err != nil {
 		return nil, err
 	}
+	_ = stickAgentLane(tx, string(req.ProjectID), string(req.AgentID), schedule.LaneOf(cs.task))
 	return &Outcome{
 		TaskID: cs.task.ID, Instance: cs.inst.InstanceID, Version: version,
 		Revision: model.Revision(cs.task.Revision), Generation: gen,
@@ -432,11 +449,31 @@ func checkClaimable(cs *claimState, expected *model.Revision) error {
 	return nil
 }
 
-// selectTarget 在 ready 任务里按调度规则选题；找不到时区分 no_ready 与 conflict。
-func selectTarget(all []*db.Task, shared []db.SharedFileRow, agent string) (*db.Task, error) {
-	if pick := schedule.PickNextReadyForShared(all, agent, shared); pick != nil {
+// selectTarget 在 ready 任务里按子队列粘性 + 调度规则选题；找不到时区分 no_ready 与 conflict。
+func selectTarget(tx *sql.Tx, projectID string, all []*db.Task, shared []db.SharedFileRow, agent string) (*db.Task, error) {
+	bound, err := db.AgentBoundLane(tx, projectID, agent)
+	if err != nil {
+		return nil, err
+	}
+	lane := bound
+	if lane == "" {
+		selected, head := schedule.SelectLane(all, shared)
+		if head == nil {
+			return selectTargetFailure(all, shared)
+		}
+		lane = selected
+	}
+	if pick := schedule.PickNextReadyInLane(all, agent, lane, shared, true); pick != nil {
 		return pick, nil
 	}
+	if bound != "" {
+		return nil, model.PortFailuref(model.PortErrNoReady,
+			"子队列 %s 暂无可领取任务（不自动跳队）", bound)
+	}
+	return selectTargetFailure(all, shared)
+}
+
+func selectTargetFailure(all []*db.Task, shared []db.SharedFileRow) (*db.Task, error) {
 	ready := 0
 	var blocked []string
 	for _, t := range all {

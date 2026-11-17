@@ -100,6 +100,7 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 				msg = e.Msg
 			}
 			envFail := gitops.IsEnvFailure(msg)
+			dirtyFail := gitops.IsDirtyTree(msg)
 			skipped := false
 			_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 				t, _ := db.GetTask(tx, pc.ID(), tid)
@@ -122,8 +123,8 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 					return nil
 				}
 				from := t.Status
-				if envFail {
-					// A8：环境失败 → blocked，不累加 attempts，不进 conflict
+				if envFail || dirtyFail {
+					// A8：环境失败 / 脏树 → blocked（可恢复），不累加 attempts，不进 conflict
 					t.PrevStatus = from
 					t.Status = "blocked"
 					t.BlockedReason = msg
@@ -132,9 +133,15 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 					}
 					t.Revision++
 					_ = db.UpsertTask(tx, t)
-					_ = db.AppendEvent(tx, pc.ID(), who, "gate_env_failed", tid, map[string]any{"error": msg, "phase": "merge"})
+					evType := "gate_env_failed"
+					reason := "env_failure"
+					if dirtyFail && !envFail {
+						evType = "gate_failed"
+						reason = "dirty_tree"
+					}
+					_ = db.AppendEvent(tx, pc.ID(), who, evType, tid, map[string]any{"error": msg, "phase": "merge", "recoverable": true})
 					_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", tid, map[string]any{
-						"from": from, "to": "blocked", "reason": "env_failure",
+						"from": from, "to": "blocked", "reason": reason,
 					})
 					return nil
 				}
@@ -157,7 +164,7 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 			_ = os.WriteFile(filepath.Join(noteDir, tid+"-conflict.md"), []byte("# Conflict: "+tid+"\n\n"+msg+"\n"), 0o644)
 			// conflict/blocked 保留题分支供修复；残留由 maw prune 在 agent offline / 题终态后回收
 			st := "conflict"
-			if envFail {
+			if envFail || dirtyFail {
 				st = "blocked"
 			}
 			if skipped {
@@ -195,8 +202,7 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 			owner := t.Owner
 			from := t.Status
 			t.Status = "done"
-			t.Worktree = ""
-			t.BlockedReason = "" // conflict/blocked 残留不得带到已完成题
+			finalizeTerminalFields(t) // 清空 blocked_reason/branch/worktree，归档历史
 			t.Revision++
 			_ = db.UpsertTask(tx, t)
 			_ = db.AppendEvent(tx, pc.ID(), who, "merged", tid, map[string]any{

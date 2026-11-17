@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/i18n"
@@ -66,11 +67,43 @@ func Block(cwd, message, taskID string) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	followups := suggestedFollowupsForBlock(message)
+	if len(followups) > 0 {
+		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+			t, e := db.GetTask(tx, pc.ID(), taskID)
+			if e != nil || t == nil {
+				return e
+			}
+			if t.Extra == nil {
+				t.Extra = map[string]any{}
+			}
+			t.Extra["suggested_followups"] = followups
+			t.Revision++
+			return db.UpsertTask(tx, t)
+		})
+	}
 	_, _ = refreshBoard(pc)
+	next := i18n.T("next.task_unblock", taskID)
+	if len(followups) > 0 {
+		next = followups[0]
+	}
 	return Result{
 		"ok": true, "task_id": taskID, "delivery_id": out.DeliveryID,
-		"project_id": pc.ID(), "next": i18n.T("next.task_unblock", taskID),
+		"project_id": pc.ID(), "suggested_followups": followups, "next": next,
 	}, nil
+}
+
+// suggestedFollowupsForBlock 根据 block 文案给出可执行下一步（越界 / 并题）。
+func suggestedFollowupsForBlock(message string) []string {
+	low := strings.ToLower(message)
+	var out []string
+	if strings.Contains(low, "write_scope") || strings.Contains(message, "写盘") ||
+		strings.Contains(message, "越界") || strings.Contains(low, "out of scope") ||
+		strings.Contains(message, "不在") && strings.Contains(low, "scope") {
+		out = append(out, "maw request-change --add '<path/**>' -m 'expand scope'")
+		out = append(out, "maw task cancel <id> --reason out_of_scope --superseded-by <new>")
+	}
+	return out
 }
 
 func Unblock(cwd, taskID string) (Result, error) {

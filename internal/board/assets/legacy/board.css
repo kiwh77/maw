@@ -77,6 +77,31 @@ select.theme-select { font-size: 10px; height: 28px; max-width: 100px; padding-t
 .breadcrumb .dim { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .breadcrumb .slash { color: var(--faint); }
 .breadcrumb strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .page-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.4px;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ui-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 80;
+  transform: translateX(-50%);
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  font: 12px/1.45 var(--sans);
+  pointer-events: none;
+}
 .project-select { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: min(420px, 52vw); }
 .project-select__label { font-size: 11px; color: var(--muted); letter-spacing: .04em; white-space: nowrap; }
 .project-select__control {

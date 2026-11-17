@@ -69,16 +69,16 @@ maw project rm <id|名称>        # --force 连现场一起清
 
 **铁律**
 
-- 只改任务 `write_scope`；状态在 `~/.maw/maw.db`
+- 只改任务 `write_scope`；越界用 `maw request-change --add 'path/**'`；状态在 `~/.maw/maw.db`
 - 非领取任务接入看板时必须 `maw status report` 及时上报（开工/里程碑/收工），勿沉默
 - 每个 Agent 一个持久 worktree：`.worktrees/{agent}`；题间复用，不新建目录
 - **`maw submit` 前必须 `git commit`**（仅 scope 内）；未提交的 staged/unstaged 会被 submit 直接拒绝，避免 merge 报 `working tree dirty` 进 conflict
 - submit 后可自行 `maw merge --yes`；禁止直接 git merge/rebase/push 主干
 - 合入后若仍有 ready，继续 `maw next` 领下一题，直至无题可领或用户叫停
-- `maw next`（≥0.3.5）对同一 Agent **上下文亲和**：优先同链/同模块续题，拆题按 Lane 成簇（见 maw-task-list）
+- `maw next` **子队列粘性**：任务 `lane` 为硬边界；首题自动粘住，可用 `--lane` / `--release-lane`；队内 priority 优先，亲和仅同分打破
 - `maw next`（≥0.3.6）**不卡并行槽**：有可激活 ready 即派活；写盘重叠仍串行
 - `plan apply` 默认增量合并；`--reset` 才会清空该工程任务表后重灌
-- 题已 `done` 仍见 dirty 文案：多为旧 `blocked_reason` 残留，以合入记录为准
+- 题已 `done`/`cancelled` 仍见 dirty 文案：旧版残留；新版 merge/cancel 会清空并归档到 `extra.block_history`。蓝图外 blocked：`maw task cancel <id> --superseded-by <新题>`
 - 人工领取保留 **实例／版本／来源**（`manual_next`）；令牌不得进入提示词、仓库或事件
 - 旁路（`maw status report`）只上报**自己的**观察，**不得夺取 managed Run**
 - 受管路径：`maw managed start --task … --node …`（默认关闭自动派发）；协议落后 → `maw init --upgrade`

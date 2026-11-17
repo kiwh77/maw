@@ -24,6 +24,7 @@ declare module '*/assets/shell/view-registry.mjs' {
   export const VIEW_GROUPS: ReadonlyArray<Record<string, unknown>>
   export const SIDEBAR_HIDDEN_GROUPS: readonly string[]
   export const SIDEBAR_PINNED_IDS: readonly string[]
+  export const SIDEBAR_HIDDEN_IDS: readonly string[]
   export const LEGACY_CONTAINERS: readonly string[]
   export const LEGACY_TOGGLES: Readonly<Record<string, string>>
   export function createRegistry(defs?: ReadonlyArray<Record<string, unknown>>): any

@@ -199,12 +199,19 @@ func main() {
 			agent, _ := cmd.Flags().GetString("agent")
 			logPath, _ := cmd.Flags().GetString("log-path")
 			claim, _ := cmd.Flags().GetBool("claim")
-			printRes(app.NextWith(cwd, agent, app.NextOptions{DryRun: dryRun, LogPath: logPath, Claim: claim}))
+			lane, _ := cmd.Flags().GetString("lane")
+			releaseLane, _ := cmd.Flags().GetBool("release-lane")
+			printRes(app.NextWith(cwd, agent, app.NextOptions{
+				DryRun: dryRun, LogPath: logPath, Claim: claim,
+				Lane: lane, ReleaseLane: releaseLane,
+			}))
 		},
 	}
 	nextCmd.Flags().String("agent", "", i18n.T("flag.agent"))
 	nextCmd.Flags().String("log-path", "", i18n.T("flag.log_path"))
 	nextCmd.Flags().Bool("claim", false, i18n.T("flag.claim"))
+	nextCmd.Flags().String("lane", "", i18n.T("flag.lane"))
+	nextCmd.Flags().Bool("release-lane", false, i18n.T("flag.release_lane"))
 	root.AddCommand(nextCmd)
 
 	progCmd := &cobra.Command{
@@ -229,6 +236,23 @@ func main() {
 	}
 	subCmd.Flags().String("task", "", i18n.T("flag.task"))
 	root.AddCommand(subCmd)
+
+	reqChangeCmd := &cobra.Command{
+		Use:   "request-change",
+		Short: i18n.T("cmd.request_change.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			task, _ := cmd.Flags().GetString("task")
+			msg, _ := cmd.Flags().GetString("message")
+			adds, _ := cmd.Flags().GetStringSlice("add")
+			printRes(app.RequestChange(cwd, app.RequestChangeOptions{
+				TaskID: task, Add: adds, Message: msg, DryRun: dryRun,
+			}))
+		},
+	}
+	reqChangeCmd.Flags().String("task", "", i18n.T("flag.task"))
+	reqChangeCmd.Flags().StringP("message", "m", "", i18n.T("flag.message"))
+	reqChangeCmd.Flags().StringSlice("add", nil, i18n.T("flag.scope_add"))
+	root.AddCommand(reqChangeCmd)
 
 	revCmd := &cobra.Command{
 		Use:  "review [task_id]",
@@ -634,7 +658,7 @@ func main() {
 	nodeCmd.AddCommand(nodeModelsCmd)
 	root.AddCommand(nodeCmd)
 
-	taskCmd := &cobra.Command{Use: "task"}
+	taskCmd := &cobra.Command{Use: "task", Short: i18n.T("cmd.task.short")}
 	taskCmd.AddCommand(&cobra.Command{Use: "list", Run: func(cmd *cobra.Command, args []string) { printRes(app.TaskList(cwd)) }})
 	taskCmd.AddCommand(&cobra.Command{
 		Use:  "show [id]",
@@ -646,6 +670,21 @@ func main() {
 		Args: cobra.ExactArgs(1),
 		Run:  func(cmd *cobra.Command, args []string) { printRes(app.Unblock(cwd, args[0])) },
 	})
+	taskCancelCmd := &cobra.Command{
+		Use:   "cancel [id]",
+		Short: i18n.T("cmd.task.cancel.short"),
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			reason, _ := cmd.Flags().GetString("reason")
+			superseded, _ := cmd.Flags().GetString("superseded-by")
+			printRes(app.TaskCancel(cwd, args[0], app.CancelOptions{
+				Reason: reason, SupersededBy: superseded,
+			}))
+		},
+	}
+	taskCancelCmd.Flags().String("reason", "", i18n.T("flag.cancel_reason"))
+	taskCancelCmd.Flags().String("superseded-by", "", i18n.T("flag.superseded_by"))
+	taskCmd.AddCommand(taskCancelCmd)
 	root.AddCommand(taskCmd)
 
 	iterationCmd := &cobra.Command{Use: "iteration", Short: i18n.T("cmd.iteration.short")}

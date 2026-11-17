@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import UiIcon from './UiIcon.vue'
 import { useBoard } from '../stores/board'
 
 const board = useBoard()
+const emit = defineEmits<{ close: []; navigate: [] }>()
 /** 置顶入口：工作台＝无 view 参数的默认页（看板），切走后从这里一键回来。 */
 const pinnedNav = computed(() => board.registry.sidebarPinned())
 const navGroups = computed(() => board.registry.sidebarNavModel())
@@ -15,16 +17,23 @@ const agents = computed(() => {
     return status === 'working' || status === 'busy' || a.working === true
   })
 })
+function agentName(a: Record<string, unknown>) {
+  return typeof a.name === 'string' && a.name.trim() ? a.name : String(a.id || 'Agent')
+}
 const viewId = computed(() => board.state.route.view)
 
 function selectView(id: string) {
   board.navigate(id)
+  emit('navigate')
 }
 </script>
 
 <template>
   <aside class="sidebar" id="app-shell-aside" aria-label="Projects & Agents">
     <div class="brand">
+      <button type="button" class="quiet-button sidebar-close"
+        :aria-label="board.state.lang === 'zh' ? '收起菜单' : 'Close navigation'"
+        @click="emit('close')"><UiIcon name="close" /></button>
       <span class="brand-mark" aria-hidden="true">›_</span>
       <div>
         <div class="brand-name">maw<span style="color:var(--accent)">.</span></div>
@@ -42,7 +51,7 @@ function selectView(id: string) {
         :aria-current="viewId === item.id ? 'page' : undefined"
         @click="selectView(item.id)"
       >
-        <span class="symbol" aria-hidden="true">{{ item.symbol }}</span>
+        <UiIcon :name="String(item.id)" />
         <span>{{ label(item) }}</span>
       </button>
       <template v-for="group in navGroups" :key="group.id">
@@ -57,7 +66,7 @@ function selectView(id: string) {
           :aria-current="viewId === item.id ? 'page' : undefined"
           @click="selectView(item.id)"
         >
-          <span class="symbol" aria-hidden="true">{{ item.symbol }}</span>
+          <UiIcon :name="String(item.id)" />
           <span>{{ label(item) }}</span>
         </button>
       </template>
@@ -71,10 +80,12 @@ function selectView(id: string) {
           {{ board.state.lang === 'zh' ? '暂无工作中 Agent' : 'No working agents' }}
         </p>
         <div v-for="(a, i) in agents" :key="String(a.id || i)" class="agent-row">
-          {{ a.name || a.id || 'agent' }}
+          <span class="agent-dot st-working" aria-hidden="true" />
+          <span class="agent-row__name" :title="agentName(a)">{{ agentName(a) }}</span>
+          <span v-if="a.task_id" class="agent-row__task">{{ a.task_id }}</span>
         </div>
       </div>
     </section>
-    <div class="sidebar-foot"><span>⌘</span> multi-agent / worktree</div>
+    <div class="sidebar-foot">maw · Agent Workbench</div>
   </aside>
 </template>

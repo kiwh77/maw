@@ -177,7 +177,7 @@ func TestManualClaimLosesRaceInsideWindow(t *testing.T) {
 	const id = "VN-W1"
 	f.seedTask(id, "ready", "", []string{"mod_w1/**"})
 
-	target, err := pickClaimTarget(f.pc, "cursor-loser")
+	target, _, err := pickClaimTarget(f.pc, "cursor-loser", NextOptions{})
 	if err != nil {
 		t.Fatalf("选题：%v", err)
 	}
@@ -230,7 +230,7 @@ func TestManualNextAndManagedClaimCompete(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, _, manualErr = claimManual(f.pc, manualAgent, filepath.Join(".worktrees", manualAgent))
+			_, _, _, manualErr = claimManual(f.pc, manualAgent, filepath.Join(".worktrees", manualAgent), NextOptions{})
 		}()
 		go func() {
 			defer wg.Done()
@@ -291,7 +291,7 @@ func TestManualClaimKeepsScheduleRules(t *testing.T) {
 	}
 	f.seedTask("VN-B2", "ready", "", []string{"internal/core/**"}) // 与在跑任务写盘重叠
 
-	if _, _, err := claimManual(f.pc, "cursor-late", ".worktrees/cursor-late"); err == nil {
+	if _, _, _, err := claimManual(f.pc, "cursor-late", ".worktrees/cursor-late", NextOptions{}); err == nil {
 		t.Fatal("写盘重叠的任务不应被领取")
 	}
 
@@ -306,7 +306,7 @@ func TestManualClaimKeepsScheduleRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed dep: %v", err)
 	}
-	if _, _, err := claimManual(f.pc, "cursor-late", ".worktrees/cursor-late"); err == nil {
+	if _, _, _, err := claimManual(f.pc, "cursor-late", ".worktrees/cursor-late", NextOptions{}); err == nil {
 		t.Fatal("依赖未完成的任务不应被领取")
 	}
 }
@@ -325,13 +325,14 @@ func TestExpireStaleAgentsKeepsRunOccupancy(t *testing.T) {
 		t.Fatalf("managed claim: %v", err)
 	}
 	// 手工领取：GAP-004 之后同样建 Run（占用语义与受管一致）。
-	if _, _, err := claimManual(f.pc, "cursor-manual", ".worktrees/cursor-manual"); err != nil {
+	if _, _, _, err := claimManual(f.pc, "cursor-manual", ".worktrees/cursor-manual", NextOptions{}); err != nil {
 		t.Fatalf("manual claim: %v", err)
 	}
 
 	// 两个 Agent 的心跳都放到过期之外。
 	// 受管领取不登记 Agent 行（派发方从别的通道上报心跳），所以这里显式补上，
 	// 否则过期扫描根本没有对象可扫——那会掩盖「有占用时保留」这条规则。
+	// 题 heartbeat 也要打旧，避免被「题心跳续命」当成仍在 progress。
 	stale := "2020-01-01T00:00:00Z"
 	err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
 		for _, a := range []struct{ id, task string }{
@@ -342,6 +343,14 @@ func TestExpireStaleAgentsKeepsRunOccupancy(t *testing.T) {
 				ProjectID: f.pc.ID(), ID: a.id, Role: "worker", Status: "working",
 				TaskID: a.task, LastSeen: stale,
 			}); e != nil {
+				return e
+			}
+			task, e := db.GetTask(tx, f.pc.ID(), a.task)
+			if e != nil || task == nil {
+				return e
+			}
+			task.Heartbeat = stale
+			if e := db.UpsertTask(tx, task); e != nil {
 				return e
 			}
 		}
@@ -438,7 +447,7 @@ func TestResumeClaimKeepsUncommittedWork(t *testing.T) {
 	const id = "VN-R1"
 	f.seedTask(id, "ready", "", []string{"mod_r1/**"})
 
-	target, err := pickClaimTarget(f.pc, "cursor-resumer")
+	target, _, err := pickClaimTarget(f.pc, "cursor-resumer", NextOptions{})
 	if err != nil {
 		t.Fatalf("选题：%v", err)
 	}
@@ -488,11 +497,11 @@ func TestMaxParallelIsReferenceOnly(t *testing.T) {
 	f.seedTask("VN-M1", "ready", "", []string{"mod_m1/**"})
 	f.seedTask("VN-M2", "ready", "", []string{"mod_m2/**"})
 
-	first, _, err := claimManual(f.pc, "cursor-m1", ".worktrees/cursor-m1")
+	first, _, _, err := claimManual(f.pc, "cursor-m1", ".worktrees/cursor-m1", NextOptions{})
 	if err != nil {
 		t.Fatalf("第一道领取：%v", err)
 	}
-	second, _, err := claimManual(f.pc, "cursor-m2", ".worktrees/cursor-m2")
+	second, _, _, err := claimManual(f.pc, "cursor-m2", ".worktrees/cursor-m2", NextOptions{})
 	if err != nil {
 		t.Fatalf("第二道领取：%v（max_parallel 不应成为硬上限）", err)
 	}
@@ -746,4 +755,77 @@ func activeRunCount(t *testing.T, f *fixture) int {
 		t.Fatalf("count runs: %v", err)
 	}
 	return n
+}
+
+func TestLaneStickyNextAB(t *testing.T) {
+	f := newFixture(t)
+	seed := func(id, lane string, pri, mo int, scope []string) {
+		t.Helper()
+		err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+			return db.UpsertTask(tx, &db.Task{
+				ProjectID: f.pc.ID(), ID: id, Title: id, Status: "ready",
+				Priority: pri, MergeOrder: mo, Lane: lane, WriteScope: scope,
+				Acceptance: []string{"ok"},
+			})
+		})
+		if err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	seed("N-4", "IMPORT", 30, 31, []string{"import/a.go"})
+	seed("N-8", "BLUEPRINT", 20, 21, []string{"bp/a.go"})
+	seed("N-11", "FIGMA", 20, 22, []string{"fig/a.go"})
+
+	// A：未绑定自动选队首最优 BLUEPRINT
+	res, err := NextWith(f.repo, "cursor-lane-a", NextOptions{Claim: true})
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	task, _ := res["task"].(*db.Task)
+	if task == nil || task.ID != "N-8" {
+		t.Fatalf("auto lane want N-8, got %#v", res["task"])
+	}
+	if lane, _ := res["bound_lane"].(string); lane != "BLUEPRINT" {
+		t.Fatalf("bound_lane=%v", res["bound_lane"])
+	}
+
+	// 粘住 BLUEPRINT 但队内已无 ready：预注册另一 Agent，不应自动跳到 IMPORT
+	if err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		if e := db.UpsertAgent(tx, &db.Agent{
+			ProjectID: f.pc.ID(), ID: "cursor-lane-stuck", Role: "worker", Status: "idle",
+		}); e != nil {
+			return e
+		}
+		return db.SetAgentBoundLane(tx, f.pc.ID(), "cursor-lane-stuck", "BLUEPRINT")
+	}); err != nil {
+		t.Fatalf("bind stuck agent: %v", err)
+	}
+	// N-8 已被 cursor-lane-a 占着，BLUEPRINT 无其它 ready
+	_, err = NextWith(f.repo, "cursor-lane-stuck", NextOptions{Claim: true})
+	if err == nil {
+		t.Fatal("expected lane_empty, got success (must not auto-jump)")
+	}
+	if !strings.Contains(err.Error(), "BLUEPRINT") && !strings.Contains(err.Error(), "子队列") && !strings.Contains(err.Error(), "lane") {
+		t.Fatalf("want lane empty error, got %v", err)
+	}
+
+	// B：显式换到 IMPORT
+	res, err = NextWith(f.repo, "cursor-lane-stuck", NextOptions{Claim: true, Lane: "IMPORT"})
+	if err != nil {
+		t.Fatalf("switch lane: %v", err)
+	}
+	task, _ = res["task"].(*db.Task)
+	if task == nil || task.ID != "N-4" {
+		t.Fatalf("IMPORT want N-4, got %#v", res["task"])
+	}
+
+	// 另一 Agent 可并行领 FIGMA
+	res2, err := NextWith(f.repo, "cursor-lane-fig", NextOptions{Claim: true, Lane: "FIGMA"})
+	if err != nil {
+		t.Fatalf("parallel FIGMA: %v", err)
+	}
+	task2, _ := res2["task"].(*db.Task)
+	if task2 == nil || task2.ID != "N-11" {
+		t.Fatalf("FIGMA want N-11, got %#v", res2["task"])
+	}
 }

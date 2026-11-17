@@ -15,7 +15,7 @@ func TestExpireReleasesManualRunWithoutProcess(t *testing.T) {
 	f := newFixture(t)
 	task := f.seedTask("VN-H1", "ready", "", []string{"mod_h1/**"})
 
-	if _, _, err := claimManual(f.pc, "cursor-manual", ".worktrees/cursor-manual"); err != nil {
+	if _, _, _, err := claimManual(f.pc, "cursor-manual", ".worktrees/cursor-manual", NextOptions{}); err != nil {
 		t.Fatalf("manual claim: %v", err)
 	}
 	if got := f.task(task.ID); got.Status != string(model.TaskClaimed) {
@@ -104,7 +104,7 @@ func TestExpireReleasesManualRunAfterRetry(t *testing.T) {
 	f := newFixture(t)
 	task := f.seedTask("VN-H3", "ready", "", []string{"mod_h3/**"})
 
-	if _, _, err := claimManual(f.pc, "cursor-manual", ".worktrees/cursor-manual"); err != nil {
+	if _, _, _, err := claimManual(f.pc, "cursor-manual", ".worktrees/cursor-manual", NextOptions{}); err != nil {
 		t.Fatalf("manual claim: %v", err)
 	}
 	staleAgent(t, f, "cursor-manual", task.ID)
@@ -145,7 +145,7 @@ BEGIN SELECT RAISE(ABORT, 'injected: task write failed'); END`,
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
 			task := f.seedTask("VN-HF", "ready", "", []string{"mod_hf/**"})
-			if _, _, err := claimManual(f.pc, "cursor-stale", ".worktrees/cursor-stale"); err != nil {
+			if _, _, _, err := claimManual(f.pc, "cursor-stale", ".worktrees/cursor-stale", NextOptions{}); err != nil {
 				t.Fatalf("manual claim: %v", err)
 			}
 			staleAgent(t, f, "cursor-stale", task.ID)
@@ -191,13 +191,22 @@ func expire(t *testing.T, f *fixture) error {
 }
 
 // staleAgent 把 Agent 心跳放到过期之外（受管领取不登记 Agent 行，这里显式补上）。
+// 同时把题 heartbeat 打旧：领取时写入的新鲜 heartbeat 不能被当成「仍在 progress」。
 func staleAgent(t *testing.T, f *fixture, agentID, taskID string) {
 	t.Helper()
 	if err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
-		return db.UpsertAgent(tx, &db.Agent{
+		if err := db.UpsertAgent(tx, &db.Agent{
 			ProjectID: f.pc.ID(), ID: agentID, Role: "worker", Status: "working",
 			TaskID: taskID, LastSeen: "2020-01-01T00:00:00Z",
-		})
+		}); err != nil {
+			return err
+		}
+		task, err := db.GetTask(tx, f.pc.ID(), taskID)
+		if err != nil || task == nil {
+			return err
+		}
+		task.Heartbeat = "2020-01-01T00:00:00Z"
+		return db.UpsertTask(tx, task)
 	}); err != nil {
 		t.Fatalf("stale agent: %v", err)
 	}

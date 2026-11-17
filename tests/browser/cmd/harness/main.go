@@ -57,6 +57,11 @@ func main() {
 	flag.Parse()
 
 	mux := http.NewServeMux()
+	assets, err := board.BoardAssets()
+	if err != nil {
+		panic(err)
+	}
+	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
 			http.NotFound(w, r)

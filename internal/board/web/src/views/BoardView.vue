@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { statusLabel } from '../lib/status'
 import { useBoard } from '../stores/board'
 import { depRows, depTone, taskDeps, unsatisfiedDeps } from '../lib/deps'
 
 const board = useBoard()
 
 const LANES = [
-  // 泳道必须覆盖全部状态：backlog 在 Queued、cancelled 在 Done，
-  // 否则这些题在「全部工程」视图里会凭空消失（总数对不上卡片数）。
+  // 泳道必须覆盖全部状态：backlog 在 Queued；cancelled 单独一列，
+  // 避免与 done 混在「已完成」里仍挂 blocked_reason 造成误解。
   { id: 'queued', label: 'Queued', statuses: ['backlog', 'ready'], symbol: '▷', empty: '—' },
   { id: 'active', label: 'Active', statuses: ['claimed', 'in_progress', 'self_check'], symbol: '◉', empty: '—' },
   { id: 'review', label: 'Review', statuses: ['in_review', 'merging'], symbol: '◎', empty: '—' },
   { id: 'attention', label: 'Attention', statuses: ['blocked', 'conflict'], symbol: '!', empty: '—' },
-  { id: 'done', label: 'Done', statuses: ['done', 'cancelled'], symbol: '✓', empty: '—' },
+  { id: 'done', label: 'Done', statuses: ['done'], symbol: '✓', empty: '—' },
+  { id: 'cancelled', label: 'Cancelled', statuses: ['cancelled'], symbol: '×', empty: '—' },
 ]
 
 const tasks = computed(() => {
@@ -50,7 +52,12 @@ const lanes = computed(() => {
     items: tasks.value.filter((t) => lane.statuses.includes(String(t.status))),
   }))
   if (extraLane.value) base.push(extraLane.value)
-  return base.filter((lane) => lane.id !== 'attention' || lane.items.length > 0)
+  return base.filter((lane) => {
+    if (lane.id === 'attention' || lane.id === 'cancelled') {
+      return lane.items.length > 0
+    }
+    return true
+  })
 })
 
 /** 泳道计数之和：必须等于落在看板上的任务数，否则有卡片在泳道外丢了。 */
@@ -133,9 +140,9 @@ function waitingText(task: Record<string, unknown>) {
     >
       <h3>
         <span class="lane-index">{{ String(i + 1).padStart(2, '0') }}</span>
-        {{ lane.label }}
+        {{ board.state.lang === 'zh' ? ({ queued: '待处理', active: '进行中', review: '评审中', attention: '需关注', done: '已完成', cancelled: '已取消', other: '其他' } as Record<string, string>)[lane.id] : lane.label }}
         <span class="count">{{ lane.items.length }}</span>
-        <span class="lane-symbol" aria-hidden="true">{{ lane.symbol }}</span>
+
       </h3>
       <div class="col-body">
         <template v-if="lane.items.length">
@@ -146,6 +153,7 @@ function waitingText(task: Record<string, unknown>) {
             :class="{ active: isActive(task) }"
             tabindex="0"
             role="button"
+            :data-status="String(task.status || '')"
             :data-tid="String(task.id)"
             :data-pid="String(task.project_id || '')"
             @click="openTask(task)"
@@ -153,11 +161,14 @@ function waitingText(task: Record<string, unknown>) {
           >
             <div class="card-top">
               <span class="id">{{ task.id }}</span>
-              <span class="badge">{{ task.status }}</span>
+              <span class="badge" :class="'badge--' + task.status">{{ statusLabel(task.status, board.state.lang) }}</span>
             </div>
             <h4 class="task-title">{{ task.title }}</h4>
             <div class="card-project">{{ task.project_name || task.project_id || '—' }}</div>
-            <div v-if="task.blocked_reason" class="task-reason">{{ task.blocked_reason }}</div>
+            <div
+              v-if="task.blocked_reason && task.status !== 'done' && task.status !== 'cancelled'"
+              class="task-reason"
+            >{{ task.blocked_reason }}</div>
             <div v-if="taskDeps(task).length" class="card-deps" :data-deps="taskDeps(task).length">
               <button
                 v-for="chip in depChips(task)"
@@ -185,7 +196,7 @@ function waitingText(task: Record<string, unknown>) {
           </article>
         </template>
         <div v-else class="lane-empty">
-          <span aria-hidden="true">{{ lane.symbol }}</span>{{ lane.empty }}
+          {{ board.state.lang === 'zh' ? '暂无任务' : 'No tasks' }}
         </div>
       </div>
     </section>

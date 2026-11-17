@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -76,6 +77,43 @@ func Parse(name string) (app, project string, n int, ok bool) {
 func IsCanonical(name string) bool {
 	_, _, _, ok := Parse(name)
 	return ok
+}
+
+// LooksLikeDump 识别误把 register/next 的 JSON 整段当成 Agent 名的情况
+//（例如 shell 把命令输出 export 进 MAW_AGENT）。
+func LooksLikeDump(name string) bool {
+	s := strings.TrimSpace(name)
+	if s == "" {
+		return false
+	}
+	if len(s) > 64 {
+		return true
+	}
+	if strings.ContainsAny(s, "{}\"'") {
+		return true
+	}
+	if strings.Contains(s, ": ") || strings.Contains(s, "MAW_AGENT") {
+		return true
+	}
+	if strings.ContainsRune(s, ' ') || strings.ContainsRune(s, '\n') {
+		return true
+	}
+	return false
+}
+
+// ValidateWorkerName 校验可注册的 Worker 名：拒绝 JSON dump；integrator/reviewer 豁免规范形。
+func ValidateWorkerName(name string, allowNonCanonical bool) error {
+	s := strings.TrimSpace(name)
+	if s == "" {
+		return fmt.Errorf("agent id empty")
+	}
+	if LooksLikeDump(s) {
+		return fmt.Errorf("agent id looks like dumped JSON/output, not {app}-{project}-{n}")
+	}
+	if allowNonCanonical || IsCanonical(s) {
+		return nil
+	}
+	return fmt.Errorf("agent id must match {app}-{project}-{n}")
 }
 
 // NextSeq 返回该 app+工程 下尚未占用的最小可用序号（从 1 起，跳过已占用）。

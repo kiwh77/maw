@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	"github.com/kiwh77/maw/internal/db"
@@ -33,10 +34,14 @@ func expireStaleAgentsAt(tx *sql.Tx, pc *projCtx, now time.Time) error {
 	}
 	ttl := pc.Config.Locks.HeartbeatTTLSec
 	if ttl <= 0 {
-		ttl = 900
+		ttl = 1800
 	}
 	cutoff := now.UTC().Add(-time.Duration(ttl) * time.Second)
 	agents, err := db.ListAgents(tx, pc.ID())
+	if err != nil {
+		return err
+	}
+	tasks, err := db.ListTasks(tx, pc.ID())
 	if err != nil {
 		return err
 	}
@@ -54,6 +59,11 @@ func expireStaleAgentsAt(tx *sql.Tx, pc *projCtx, now time.Time) error {
 		if seen.After(cutoff) {
 			continue
 		}
+		// 题上仍有近期 heartbeat（progress / status report）时视为在岗：续命而非过期。
+		// 编码 Agent 常连续工作 > TTL 却忘了 progress，避免误释放占用。
+		if renewed := renewAgentFromTaskHeartbeat(tx, pc.ID(), a, tasks, cutoff, now); renewed {
+			continue
+		}
 		lastSeen := a.LastSeen
 		agentID := a.ID
 		a.Status = "offline"
@@ -67,10 +77,6 @@ func expireStaleAgentsAt(tx *sql.Tx, pc *projCtx, now time.Time) error {
 		if err := db.AppendEvent(tx, pc.ID(), "system", "agent_expired", "", map[string]any{
 			"agent": agentID, "ttl_sec": ttl, "last_seen": lastSeen,
 		}); err != nil {
-			return err
-		}
-		tasks, err := db.ListTasks(tx, pc.ID())
-		if err != nil {
 			return err
 		}
 		for _, t := range tasks {
@@ -152,6 +158,48 @@ func expireStaleAgentsAt(tx *sql.Tx, pc *projCtx, now time.Time) error {
 		}
 	}
 	return nil
+}
+
+// renewAgentFromTaskHeartbeat 若该 Agent 仍持有 ActiveOwner 题，且题 heartbeat
+// 未过 cutoff，则把 Agent.LastSeen 续到 now 并写审计事件，返回 true。
+func renewAgentFromTaskHeartbeat(tx *sql.Tx, projectID string, a *db.Agent, tasks []*db.Task, cutoff, now time.Time) bool {
+	if a == nil {
+		return false
+	}
+	var best time.Time
+	var taskID string
+	for _, t := range tasks {
+		if t == nil || t.Owner != a.ID || !machine.ActiveOwner[t.Status] {
+			continue
+		}
+		hb := strings.TrimSpace(t.Heartbeat)
+		if hb == "" {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339, hb)
+		if err != nil {
+			ts, err = time.Parse(time.RFC3339Nano, hb)
+		}
+		if err != nil {
+			continue
+		}
+		if ts.After(cutoff) && ts.After(best) {
+			best = ts
+			taskID = t.ID
+		}
+	}
+	if best.IsZero() || taskID == "" {
+		return false
+	}
+	a.LastSeen = now.UTC().Format(time.RFC3339)
+	if err := db.UpsertAgent(tx, a); err != nil {
+		return false
+	}
+	_ = db.AppendEvent(tx, projectID, "system", "agent_heartbeat_renewed", taskID, map[string]any{
+		"agent": a.ID, "task_heartbeat": best.UTC().Format(time.RFC3339),
+		"renewed_at": a.LastSeen,
+	})
+	return true
 }
 
 // occupyingRun 返回该任务实例上仍计入占用的 Run；没有则返回 nil。

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useBoard } from '../stores/board'
+import { statusLabel } from '../lib/status'
+import UiIcon from './UiIcon.vue'
 import ViewToggle from './ViewToggle.vue'
+import JoinPromptButton from './JoinPromptButton.vue'
 
 const board = useBoard()
 const snap = computed(() => board.state.snapshot)
-const project = computed(() => board.state.route.project || '')
 /**
  * 工程筛选头服务流程视图（看板／工坊／拓扑／执行）。
  *
@@ -15,10 +17,19 @@ const project = computed(() => board.state.route.project || '')
 const showChrome = computed(() => {
   const view = board.state.route.view
   return Boolean(
-    project.value &&
-      (view === 'board' || view === 'factory' || view === 'topo' || view === 'execution'),
+    (view === 'board' || view === 'factory' || view === 'topo' || view === 'execution'),
   )
 })
+/** 流程视图 + 已选工程：工具栏筛选左侧展示接入按钮。 */
+const showJoinPrompt = computed(() => {
+  const view = board.state.route.view
+  return Boolean(
+    board.state.route.project &&
+      (view === 'board' || view === 'factory' || view === 'topo'),
+  )
+})
+const filtersOpen = ref(!window.matchMedia('(max-width: 1100px)').matches)
+const filterCount = computed(() => ['agent', 'status', 'iteration'].filter(k => Boolean(board.state.route[k as 'agent' | 'status' | 'iteration'])).length)
 const search = ref(board.state.route.search || '')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -68,7 +79,7 @@ const iterationOptions = computed(() => {
 const taskCountLabel = computed(() => {
   const n = snap.value?.tasks?.length ?? 0
   const total = snap.value?.total ?? n
-  return board.state.lang === 'zh' ? `${n} 个任务 · 共 ${total}` : `${n} tasks · ${total} total`
+  return board.state.lang === 'zh' ? `显示 ${n} / 全部 ${total}` : `Showing ${n} / ${total}`
 })
 
 function onFilterChange(field: 'agent' | 'status' | 'iteration', event: Event) {
@@ -123,7 +134,33 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
     </div>
   </section>
   <div v-if="showChrome" class="toolbar">
-    <div class="filters" id="filters">
+
+    <div class="toolbar-right">
+      <div class="board-meta-left">
+        <ViewToggle />
+        <span id="board-count">{{ taskCountLabel }}</span>
+      </div>
+      <label class="search-box">
+        <UiIcon name="search" />
+        <input
+          id="task-search"
+          v-model="search"
+          type="search"
+          :aria-label="board.state.lang === 'zh' ? '搜索任务' : 'Search tasks'"
+          :placeholder="board.state.lang === 'zh' ? '搜索任务…' : 'Search tasks…'"
+          @input="onSearchInput"
+        />
+        <kbd aria-hidden="true">/</kbd>
+      </label>
+      <JoinPromptButton v-if="showJoinPrompt" variant="join" />
+      <button id="filter-toggle" type="button" class="quiet-button filter-toggle"
+        aria-controls="filters" :aria-expanded="filtersOpen" :class="{ active: filtersOpen || filterCount }"
+        @click="filtersOpen = !filtersOpen">
+        <UiIcon name="filters" /><span>{{ board.state.lang === 'zh' ? '筛选' : 'Filters' }}</span>
+        <span v-if="filterCount" class="filter-count">{{ filterCount }}</span>
+      </button>
+    </div>
+    <div v-show="filtersOpen" class="filters" id="filters">
       <select
         id="f-agent"
         :value="board.state.route.agent"
@@ -136,7 +173,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
           :key="String(a.id)"
           :value="String(a.id)"
         >
-          {{ a.name || a.id }}
+          {{ typeof a.name === 'string' ? a.name : a.id }}
         </option>
       </select>
       <select
@@ -146,7 +183,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
         @change="onFilterChange('status', $event)"
       >
         <option value="">{{ board.state.lang === 'zh' ? '全部状态' : 'All statuses' }}</option>
-        <option v-for="st in statusOptions" :key="st" :value="st">{{ st }}</option>
+        <option v-for="st in statusOptions" :key="st" :value="st">{{ statusLabel(st, board.state.lang) }}</option>
       </select>
       <select
         id="f-iteration"
@@ -166,38 +203,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
       <button type="button" id="f-reset" class="quiet-button" @click="onReset">
         {{ board.state.lang === 'zh' ? '重置' : 'Reset' }}
       </button>
-    </div>
-    <div class="toolbar-right">
-      <!--
-        配置入口只留一个：主题／语言归顶栏，节点接入、容量、受管执行与保留归设置页。
-        流程视图不再各自摆开关，这里只给一个去设置页的跳转，免得同一件事有三个入口。
-      -->
-      <button
-        type="button"
-        id="settings-entry"
-        class="quiet-button"
-        data-settings-entry="1"
-        :aria-label="board.state.lang === 'zh' ? '打开设置' : 'Open settings'"
-        :title="board.state.lang === 'zh' ? '设置' : 'Settings'"
-        @click="board.navigate('settings')"
-      >
-        ⚙
-      </button>
-      <div class="board-meta-left">
-        <ViewToggle />
-        <span id="board-count">{{ taskCountLabel }}</span>
-      </div>
-      <label class="search-box">
-        <span aria-hidden="true">⌕</span>
-        <input
-          id="task-search"
-          v-model="search"
-          type="search"
-          :placeholder="board.state.lang === 'zh' ? '搜索任务…' : 'Search tasks…'"
-          @input="onSearchInput"
-        />
-        <kbd aria-hidden="true">/</kbd>
-      </label>
     </div>
   </div>
 </template>

@@ -20,7 +20,7 @@
 .settings-section {
   margin: 0 0 var(--space-block, 24px);
   padding: 0;
-  max-width: 720px;
+  max-width: 960px;
 }
 
 .settings-section__title {
@@ -45,7 +45,7 @@
 }
 
 .settings-current .note {
-  color: var(--text-dim);
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 
@@ -57,7 +57,7 @@
   flex-direction: column;
   gap: var(--space-tight, 4px);
   font-size: var(--font-small, 12px);
-  color: var(--text-dim);
+  color: var(--muted);
   line-height: 1.6;
 }
 

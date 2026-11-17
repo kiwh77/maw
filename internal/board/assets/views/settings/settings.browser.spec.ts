@@ -61,7 +61,7 @@ test.describe("VN-725 系统执行策略", () => {
   test("VN-725 深色主题下概念与保留值分开呈现", async ({ page }) => {
     const view = await loadView();
     const policy = view.normalizePolicy(POLICY);
-    await mount(page, view.renderSettings({ status: "ready", policy, save: "idle" }, { lang: "zh" }));
+    await mount(page, view.renderSettings({ status: "ready", policy, save: "idle", platformSupported: true, configApplied: true }, { lang: "zh" }));
 
     await expect(page.locator(".settings-save-status")).toBeVisible();
     for (const label of ["自动模式", "计算上限", "节点容量", "max_parallel 参考值"]) {

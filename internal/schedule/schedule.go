@@ -3,8 +3,9 @@
 //  1. 显式 deps 未完成 → 不可激活
 //  2. write_scope 与「进行中」任务重叠 → 不可激活
 //  3. write_scope 与「尚未完成且排序更靠前」的任务重叠 → 不可激活（用 priority→merge_order→id 串行）
-//  4. maw next 在可激活 ready 中优先选与该 Agent 近期完成题「上下文亲和」的题（deps 续链 / 写盘重叠 / 同模块前缀），减少连续领题时的上下文偏移
-// 这样蓝图可一次压入同目录串行题，不必因 overlap 拆多波 apply。
+//  4. 领取硬边界是 lane（上下文子队列）：Agent 粘在一条 lane 上，只从该队选题
+//  5. 队内选题：priority→merge_order 优先；同分才用上下文亲和（deps 续链 / 写盘重叠 / 同模块前缀）打破
+// 这样蓝图可一次压入同目录串行题，不必因 overlap 拆多波 apply；并行靠多 lane × 多 Agent。
 package schedule
 
 import (
@@ -26,6 +27,14 @@ func Incomplete(t *db.Task) bool {
 	default:
 		return true
 	}
+}
+
+// LaneOf 规范化任务子队列 id（去空白；未标则为空串默认队）。
+func LaneOf(t *db.Task) string {
+	if t == nil {
+		return ""
+	}
+	return strings.TrimSpace(t.Lane)
 }
 
 // Before 表示 a 应排在 b 之前（数字越小越优先）。
@@ -160,7 +169,7 @@ func contextNewer(a, b *db.Task) bool {
 }
 
 // AffinityScore 候选题相对上下文锚点的亲和分（越高越应优先领取）。
-// 0 表示无亲和；>0 时 next 优先于无亲和的 ready 题。
+// 仅作队内 priority/merge_order 同分时的打破；不再跨队压过序位键。
 func AffinityScore(cand, hint *db.Task) int {
 	if cand == nil || hint == nil {
 		return 0
@@ -240,31 +249,47 @@ func commonPrefixLen(a, b []string) int {
 	return i
 }
 
-// betterPick 在亲和分与序位键下，a 是否优于 b。
+// betterPick 队内选题：先 priority/merge_order，同分再用亲和，再比 id。
 func betterPick(a, b *db.Task, hint *db.Task) bool {
+	if a.Priority != b.Priority {
+		return a.Priority < b.Priority
+	}
+	if a.MergeOrder != b.MergeOrder {
+		return a.MergeOrder < b.MergeOrder
+	}
 	sa, sb := AffinityScore(a, hint), AffinityScore(b, hint)
 	if sa != sb {
 		return sa > sb
 	}
-	return Before(a, b)
+	return a.ID < b.ID
 }
 
-// PickNextReady 按 priority/merge_order/id 选取可领取的 ready 任务（无 Agent 上下文）。
+// PickNextReady 按 priority/merge_order/id 选取可领取的 ready 任务（无 Agent / 无 lane 过滤）。
 func PickNextReady(all []*db.Task) *db.Task {
 	return PickNextReadyFor(all, "")
 }
 
-// PickNextReadyFor 为指定 Agent 选取下一题：在可激活 ready 中优先上下文亲和，再按序位键。
+// PickNextReadyFor 为指定 Agent 选取下一题（不限 lane；兼容旧调用）。
 func PickNextReadyFor(all []*db.Task, agent string) *db.Task {
 	return PickNextReadyForShared(all, agent, nil)
 }
 
 // PickNextReadyForShared 同 PickNextReadyFor，并尊重 shared_files 互斥。
 func PickNextReadyForShared(all []*db.Task, agent string, shared []db.SharedFileRow) *db.Task {
+	return PickNextReadyInLane(all, agent, "", shared, false)
+}
+
+// PickNextReadyInLane 在指定子队列内选题。
+// restrictLane=false 且 lane="" 表示不限队（仅用于兼容旧入口）；
+// restrictLane=true 时即使 lane 为空串也只选默认空队列。
+func PickNextReadyInLane(all []*db.Task, agent, lane string, shared []db.SharedFileRow, restrictLane bool) *db.Task {
 	hint := LastContextTask(all, agent)
 	var best *db.Task
 	for _, t := range all {
 		if t.Status != "ready" {
+			continue
+		}
+		if restrictLane && LaneOf(t) != lane {
 			continue
 		}
 		if !CanActivateShared(t, all, shared) {
@@ -275,6 +300,37 @@ func PickNextReadyForShared(all []*db.Task, agent string, shared []db.SharedFile
 		}
 	}
 	return best
+}
+
+// SelectLane 为未绑定 Agent 挑选一条有可激活 ready 的子队列：
+// 以各队队首（可激活 ready 中序位最前）比较，取全局序位最优者所在 lane。
+func SelectLane(all []*db.Task, shared []db.SharedFileRow) (lane string, head *db.Task) {
+	heads := map[string]*db.Task{}
+	for _, t := range all {
+		if t == nil || t.Status != "ready" {
+			continue
+		}
+		if !CanActivateShared(t, all, shared) {
+			continue
+		}
+		l := LaneOf(t)
+		cur := heads[l]
+		if cur == nil || Before(t, cur) {
+			heads[l] = t
+		}
+	}
+	for l, h := range heads {
+		if head == nil || Before(h, head) {
+			head = h
+			lane = l
+		}
+	}
+	return lane, head
+}
+
+// LaneHasActivatable 某子队列是否存在可激活 ready。
+func LaneHasActivatable(all []*db.Task, lane string, shared []db.SharedFileRow) bool {
+	return PickNextReadyInLane(all, "", lane, shared, true) != nil
 }
 
 // DependsOn 判断 descendant 是否（直接或间接）依赖 ancestor。

@@ -114,6 +114,7 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 		created, updated, preserved, removed int
 		identityNotes                        []string
 		pinned                               int
+		staleBlocked                         []string
 	)
 	iterationCounts := map[string]*planIterationCount{}
 	var iterationCreatedIDs, iterationUpdatedIDs []string
@@ -229,6 +230,10 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 				if machine.PreserveOnPlanApply(old.Status) {
 					preserved++
 					bumpIterationCount(iterationCounts, old.IterationID, "preserved")
+					// blocked 题不在蓝图里：保留现场，但提示可 cancel / 并入别题
+					if old.Status == "blocked" {
+						staleBlocked = append(staleBlocked, old.ID)
+					}
 					continue
 				}
 				if err := retireIdleRemoved(tx, pc.ID(), old, agent); err != nil {
@@ -236,6 +241,12 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 				}
 				removed++
 				bumpIterationCount(iterationCounts, old.IterationID, "removed")
+			}
+			if len(staleBlocked) > 0 {
+				_ = db.AppendEvent(tx, pc.ID(), agent, "plan_stale_blocked", "", map[string]any{
+					"task_ids": staleBlocked,
+					"hint":     "maw task cancel <id> --reason removed_from_plan --superseded-by <new>",
+				})
 			}
 			if err := db.DeleteSharedFiles(tx, pc.ID()); err != nil {
 				return err
@@ -286,6 +297,10 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 	if len(identityNotes) > 0 {
 		res["identity_notes"] = identityNotes
 	}
+	if len(staleBlocked) > 0 {
+		res["stale_blocked"] = staleBlocked
+		res["stale_blocked_hint"] = i18n.T("next.stale_blocked")
+	}
 	return res, nil
 }
 
@@ -294,6 +309,7 @@ func mergePlanFields(dst, src *db.Task) {
 	dst.Title = src.Title
 	dst.Priority = src.Priority
 	dst.MergeOrder = src.MergeOrder
+	dst.Lane = src.Lane
 	dst.Deps = src.Deps
 	dst.WriteScope = src.WriteScope
 	dst.ReadScope = src.ReadScope

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/errx"
@@ -13,16 +14,25 @@ import (
 	"github.com/kiwh77/maw/internal/machine"
 )
 
+// pruneIdleGrace 是 idle Agent 的 worktree 宽限期：last_seen 在此之内仍保留，
+// 避免刚交题就立刻被 prune 砍掉温热依赖缓存。超时或 offline 则可清。
+const pruneIdleGrace = 48 * time.Hour
+
 // Prune lists or removes leftover worktrees and agent/* branches.
-// Keeps: ActiveOwner task worktrees/branches, and per-agent trees for non-offline agents.
-// Also keeps directories still held by unknown / stop-unconfirmed / pending-acceptance runs.
+//
+// 保留规则（kept_reasons 会写明）：
+//   - ActiveOwner 任务占用的 worktree / 分支 / owner 树
+//   - status=working 的 Agent 树
+//   - idle 且 last_seen 在 pruneIdleGrace 内的 Agent 树（温热复用）
+//   - unknown / stop-unconfirmed / pending-acceptance 占用（blocked_holds）
+//
+// idle 过期、offline、以及磁盘有树但 agents.worktree 空挂的目录，均可清。
 // Default is dry-run (yes=false); pass yes=true to delete.
 func Prune(cwd string, yes, dryRun bool) (Result, error) {
 	pc, err := resolveProject(cwd)
 	if err != nil {
 		return nil, err
 	}
-	// dryRun global flag OR !yes → preview only
 	preview := dryRun || !yes
 
 	var tasks []*db.Task
@@ -42,29 +52,41 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 
 	protectedWT := map[string]bool{}
 	protectedBranch := map[string]bool{}
+	keptReasons := map[string]string{}
 	blockedHolds := []string{}
+	now := time.Now().UTC()
+
 	for _, t := range tasks {
 		if t == nil || !machine.ActiveOwner[t.Status] {
 			continue
 		}
 		if t.Worktree != "" {
-			protectedWT[absWorktree(pc.Repo, t.Worktree)] = true
+			abs := absWorktree(pc.Repo, t.Worktree)
+			protectedWT[abs] = true
+			keptReasons[abs] = "active_task:" + t.ID
 		}
 		if t.Branch != "" {
 			protectedBranch[t.Branch] = true
 		}
 		if t.Owner != "" {
-			protectedWT[filepath.Join(pc.Repo, ".worktrees", t.Owner)] = true
+			abs := filepath.Join(pc.Repo, ".worktrees", t.Owner)
+			protectedWT[abs] = true
+			keptReasons[abs] = "active_owner:" + t.ID
 		}
 	}
 	for _, a := range agents {
 		if a == nil || a.ID == "" {
 			continue
 		}
-		if a.Status == "offline" {
+		abs := filepath.Join(pc.Repo, ".worktrees", a.ID)
+		reason, keep := agentWorktreeKeepReason(a, now)
+		if !keep {
 			continue
 		}
-		protectedWT[filepath.Join(pc.Repo, ".worktrees", a.ID)] = true
+		protectedWT[abs] = true
+		if _, ok := keptReasons[abs]; !ok {
+			keptReasons[abs] = reason
+		}
 	}
 
 	var removeWTs []string
@@ -87,6 +109,7 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 			})
 			if holdReason != "" {
 				protectedWT[abs] = true
+				keptReasons[abs] = "hold:" + holdReason
 				blockedHolds = append(blockedHolds, holdReason)
 				continue
 			}
@@ -94,7 +117,6 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 		}
 	}
 
-	// 真正删除前再次确认：若仍有占用阻塞，拒绝（避免 --yes 误清）。
 	if !preview && len(blockedHolds) > 0 && len(removeWTs) == 0 {
 		return nil, errx.New("prune blocked by workspace hold",
 			"unknown／残留进程／待验收占用解除前不能 prune："+strings.Join(blockedHolds, "; "))
@@ -118,7 +140,6 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 	removedBranches := []string{}
 	if !preview {
 		for _, wt := range removeWTs {
-			// 删除瞬间再查一次占用，证据不匹配则跳过该目录。
 			skip := false
 			_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 				if _, blocked := workspaceHoldReason(tx, wt); blocked {
@@ -130,16 +151,20 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 				blockedHolds = append(blockedHolds, "skipped occupied "+wt)
 				continue
 			}
+			// 仅 maw 会话产物时也强制清掉，避免「看起来 dirty」挡住人工二次清理。
+			_ = stripMawSessionArtifacts(wt)
 			gitops.RemoveWorktree(pc.Repo, wt)
 			removedWT = append(removedWT, wt)
 		}
 		for _, br := range removeBranches {
-			// If a kept worktree is still on this branch, detach first.
 			for _, a := range agents {
-				if a == nil || a.Status == "offline" {
+				if a == nil {
 					continue
 				}
 				agentWT := filepath.Join(pc.Repo, ".worktrees", a.ID)
+				if !protectedWT[agentWT] {
+					continue
+				}
 				if cur, err := gitops.CurrentBranch(agentWT); err == nil && cur == br {
 					_ = gitops.DetachWorktree(agentWT)
 				}
@@ -173,6 +198,7 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 		"removed_worktrees": removedWT,
 		"removed_branches":  removedBranches,
 		"kept_worktrees":    len(protectedWT),
+		"kept_reasons":      keptReasons,
 		"blocked_holds":     blockedHolds,
 		"next":              next,
 	}, nil
@@ -186,4 +212,51 @@ func absWorktree(repo, relOrAbs string) string {
 		return relOrAbs
 	}
 	return filepath.Join(repo, relOrAbs)
+}
+
+// agentWorktreeKeepReason 决定是否因 Agent 注册而保留其持久树。
+func agentWorktreeKeepReason(a *db.Agent, now time.Time) (reason string, keep bool) {
+	if a == nil || a.ID == "" {
+		return "", false
+	}
+	switch strings.TrimSpace(a.Status) {
+	case "working":
+		return "agent_working:" + a.ID, true
+	case "offline", "":
+		return "", false
+	default:
+		// idle 等：宽限期内保留，超时可清。
+		seen := parseAgentLastSeen(a.LastSeen)
+		if seen.IsZero() {
+			return "", false
+		}
+		if now.Sub(seen) <= pruneIdleGrace {
+			return "agent_idle_fresh:" + a.ID, true
+		}
+		return "", false
+	}
+}
+
+func parseAgentLastSeen(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC3339, time.RFC3339Nano, "2006-01-02T15:04:05Z"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Time{}
+}
+
+// stripMawSessionArtifacts 删除 worktree 根上的 TASK.md 与 .maw/，
+// 这些是领取时写入的会话文件，不应阻止清理。
+func stripMawSessionArtifacts(wt string) error {
+	if wt == "" {
+		return nil
+	}
+	_ = os.Remove(filepath.Join(wt, "TASK.md"))
+	_ = os.RemoveAll(filepath.Join(wt, ".maw"))
+	return nil
 }

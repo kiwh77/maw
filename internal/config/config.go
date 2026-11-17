@@ -394,7 +394,7 @@ timeout_sec = 900
 
 [locks]
 ttl_sec = 1800
-heartbeat_ttl_sec = 900
+heartbeat_ttl_sec = 1800
 
 [launcher]
 mode = "manual"

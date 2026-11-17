@@ -38,10 +38,17 @@ import (
 //
 // 查询与领取必须分离：默认只预览下一题候选，只有显式 Claim 才动任务状态、
 // 建 Run/租约、准备 worktree。误敲一次 next 不应该占坑。
+//
+// Lane / ReleaseLane 控制上下文子队列粘性（A+B）：
+//   - 未绑定：自动按队首序位选一条 lane 并在领取后粘住
+//   - Lane 非空：显式绑到该队（可换队）
+//   - ReleaseLane：先解除绑定，再按未绑定规则选队
 type NextOptions struct {
-	DryRun  bool
-	LogPath string
-	Claim   bool
+	DryRun      bool
+	LogPath     string
+	Claim       bool
+	Lane        string
+	ReleaseLane bool
 }
 
 // Next 保留旧的程序化入口：调用方明确要求领取。
@@ -113,14 +120,25 @@ func NextWith(cwd, agentFlag string, opts NextOptions) (Result, error) {
 		return res, nil
 	}
 
+	if opts.ReleaseLane && !opts.Claim && !opts.DryRun {
+		if err := clearAgentLane(pc, who); err != nil {
+			return nil, err
+		}
+		res := Result{"ok": true, "agent": who, "project_id": pc.ID(), "bound_lane": "",
+			"released_lane": true, "next": i18n.T("next.lane_released", who)}
+		attachAgentNameMeta(res, who, allocated, nameWarn)
+		return res, nil
+	}
+
 	wtRel := filepath.Join(".worktrees", who)
 	if opts.DryRun || !opts.Claim {
-		preview, err := pickClaimTarget(pc, who)
+		preview, boundLane, err := pickClaimTarget(pc, who, opts)
 		if err != nil {
 			return nil, err
 		}
 		res := Result{"ok": true, "preview": true, "task": preview, "agent": who,
-			"project_id": pc.ID(), "limits": limitsOf(pc),
+			"project_id": pc.ID(), "limits": limitsOf(pc), "bound_lane": boundLane,
+			"lane": schedule.LaneOf(preview),
 			"next": i18n.T("next.preview_only", who)}
 		if opts.DryRun {
 			res["dry_run"] = true
@@ -133,7 +151,8 @@ func NextWith(cwd, agentFlag string, opts NextOptions) (Result, error) {
 	// ready→claimed 的判定、Run/Operation 的建立、节点槽与工作目录的占用都在同一个
 	// 事务里完成，与受管派发抢同一道题时只会有一个赢家。
 	var outcome claim.Outcome
-	task, outcome, err = claimManual(pc, who, wtRel)
+	var boundLane string
+	task, outcome, boundLane, err = claimManual(pc, who, wtRel, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +186,7 @@ func NextWith(cwd, agentFlag string, opts NextOptions) (Result, error) {
 	res := Result{
 		"ok": true, "task": task, "worktree": wt, "branch": task.Branch, "agent": who,
 		"project_id": pc.ID(), "registered": true, "limits": limitsOf(pc),
+		"bound_lane": boundLane, "lane": schedule.LaneOf(task),
 		"env":  map[string]string{"MAW_AGENT": who, "MAW_TASK": task.ID},
 		"next": i18n.T("next.registered", who, wt),
 	}
@@ -342,37 +362,50 @@ func resumeClaim(pc *projCtx, task *db.Task, who string) error {
 // ready+revision 校验兜住。竞争失败只发生在别的领取者恰好同时赢了同一道题：
 // 此时那道题已经不是 ready，下一轮选题自然不会重复挑到它。
 // 非竞争错误（依赖不满足、没有 ready）直接上抛。
-func claimManual(pc *projCtx, who, wtRel string) (*db.Task, claim.Outcome, error) {
+func claimManual(pc *projCtx, who, wtRel string, opts NextOptions) (*db.Task, claim.Outcome, string, error) {
 	var lost error
 	for attempt := 0; attempt < manualClaimAttempts; attempt++ {
-		t, out, err := claimOnce(pc, who, wtRel, attempt)
+		t, out, lane, err := claimOnce(pc, who, wtRel, opts, attempt)
 		if err == nil {
-			return t, out, nil
+			return t, out, lane, nil
 		}
 		if !errors.Is(err, errClaimLost) {
-			return nil, out, err
+			return nil, out, "", err
 		}
 		lost = err
 	}
 	var detail *claimLostError
 	if errors.As(lost, &detail) {
-		return nil, claim.Outcome{}, i18n.E("err.owner_mismatch", "next.rerun_next", detail.TaskID, detail.Owner, who)
+		return nil, claim.Outcome{}, "", i18n.E("err.owner_mismatch", "next.rerun_next", detail.TaskID, detail.Owner, who)
 	}
-	return nil, claim.Outcome{}, lost
+	return nil, claim.Outcome{}, "", lost
 }
 
 // claimOnce 选题，然后交给 engine/claim 建 Run、占节点槽与目录。
-func claimOnce(pc *projCtx, who, wtRel string, attempt int) (*db.Task, claim.Outcome, error) {
-	t, err := pickClaimTarget(pc, who)
+func claimOnce(pc *projCtx, who, wtRel string, opts NextOptions, attempt int) (*db.Task, claim.Outcome, string, error) {
+	t, boundLane, err := pickClaimTarget(pc, who, opts)
 	if err != nil {
-		return nil, claim.Outcome{}, err
+		return nil, claim.Outcome{}, "", err
 	}
-	return commitClaimWithOutcome(pc, who, wtRel, t, attempt)
+	claimed, out, err := commitClaimWithOutcome(pc, who, wtRel, t, attempt)
+	if err != nil {
+		return nil, out, "", err
+	}
+	lane := schedule.LaneOf(claimed)
+	if lane == "" {
+		lane = boundLane
+	}
+	if err := persistAgentLane(pc, who, lane); err != nil {
+		return claimed, out, lane, err
+	}
+	return claimed, out, lane, nil
 }
 
-// pickClaimTarget 只读选题：依赖／写盘／亲和策略全部沿用同一套调度规则。
-func pickClaimTarget(pc *projCtx, who string) (*db.Task, error) {
+// pickClaimTarget 只读选题：先定 lane（粘性 / --lane / 自动选队），再队内序位选题。
+// 返回值 boundLane 是选题所用的子队列（领取成功后应粘住）。
+func pickClaimTarget(pc *projCtx, who string, opts NextOptions) (*db.Task, string, error) {
 	var out *db.Task
+	var boundLane string
 	err := db.WithReadTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		tasks, err := db.ListTasks(tx, pc.ID())
 		if err != nil {
@@ -382,14 +415,72 @@ func pickClaimTarget(pc *projCtx, who string) (*db.Task, error) {
 		if err != nil {
 			return err
 		}
-		pick := schedule.PickNextReadyForShared(tasks, who, shared)
+		current, err := db.AgentBoundLane(tx, pc.ID(), who)
+		if err != nil {
+			return err
+		}
+		want := strings.TrimSpace(opts.Lane)
+		release := opts.ReleaseLane
+		if release {
+			current = ""
+		}
+		lane := current
+		switch {
+		case want != "":
+			lane = want
+		case current != "":
+			lane = current
+		default:
+			selected, head := schedule.SelectLane(tasks, shared)
+			if head == nil {
+				return i18n.E("err.no_ready", "next.board_deps")
+			}
+			lane = selected
+		}
+		pick := schedule.PickNextReadyInLane(tasks, who, lane, shared, true)
 		if pick == nil {
+			if current != "" && want == "" && !release {
+				return i18n.E("err.lane_empty", "next.lane_empty", lane)
+			}
+			if want != "" {
+				return i18n.E("err.lane_empty", "next.lane_empty", want)
+			}
 			return i18n.E("err.no_ready", "next.board_deps")
 		}
 		out = pick
+		boundLane = lane
 		return nil
 	})
-	return out, err
+	return out, boundLane, err
+}
+
+func persistAgentLane(pc *projCtx, who, lane string) error {
+	return db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		a, err := db.GetAgent(tx, pc.ID(), who)
+		if err != nil {
+			return err
+		}
+		if a == nil {
+			// 领取刚写入 agent 行；若竟读不到，补一行 idle 再写绑定。
+			if err := bindAgent(tx, pc.ID(), who, "worker", "idle", "", "", "", ""); err != nil {
+				return err
+			}
+		}
+		return db.SetAgentBoundLane(tx, pc.ID(), who, lane)
+	})
+}
+
+func clearAgentLane(pc *projCtx, who string) error {
+	return db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		a, err := db.GetAgent(tx, pc.ID(), who)
+		if err != nil {
+			return err
+		}
+		if a == nil {
+			return nil
+		}
+		return db.SetAgentBoundLane(tx, pc.ID(), who, "")
+	})
 }
 
 // commitClaim 把选定任务交给统一的领取用例（测试与续做路径保留旧签名）。
@@ -600,6 +691,10 @@ func Register(cwd, agentFlag, role string) (Result, error) {
 		if r := identity.Role(who, pc.Config); r == "integrator" || r == "reviewer" {
 			role = r
 		}
+		// 拒绝把 register/next JSON 整段当成 Agent 名（niuma 迭代曾出现）。
+		if identity.LooksLikeDump(who) {
+			return i18n.E("err.agent_id_dump", "next.set_agent")
+		}
 		nameWarn = workerNameWarn(who, pc)
 		tasks, err := db.ListTasks(tx, pc.ID())
 		if err != nil {
@@ -646,6 +741,12 @@ func Unregister(cwd, agentFlag string) (Result, error) {
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		if err := db.ClearAgentTask(tx, pc.ID(), who); err != nil {
 			return err
+		}
+		if err := db.SetAgentBoundLane(tx, pc.ID(), who, ""); err != nil {
+			// Agent 行可能已被清成不存在以外的状态；ClearAgentTask 后仍应在
+			if _, ok := err.(*db.AgentNotFound); !ok {
+				return err
+			}
 		}
 		_, err := tx.Exec(`UPDATE agents SET status = 'offline', last_seen = ? WHERE project_id = ? AND id = ?`, db.UTCNow(), pc.ID(), who)
 		if err != nil {
@@ -1056,6 +1157,20 @@ func deliverySubmit(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, erro
 			return nil
 		})
 		return deliveryCaseResult{}, errx.New(verifyOut.Reason, "修复验证失败后重试 maw submit")
+	}
+
+	// 冻结/跑 gate 之后再验一次干净树：禁止「先 auto-approve 再因 dirty 在 merge 翻车」。
+	if in.WT != "" {
+		if err := gitops.AssertWorkingTreeClean(in.WT); err != nil {
+			_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+				_ = db.AppendEvent(tx, pc.ID(), in.Actor, "gate_failed", in.TaskID, map[string]any{
+					"error": err.Error(), "phase": "submit_post_freeze",
+					"delivery_id": string(frozen.Delivery.DeliveryID),
+				})
+				return nil
+			})
+			return deliveryCaseResult{}, err
+		}
 	}
 
 	var status string

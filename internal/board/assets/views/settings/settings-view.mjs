@@ -73,7 +73,7 @@ const I18N = {
   zh: {
     "settings.title": "系统执行策略",
     "settings.subtitle": "系统级只读快照：自动模式、计算上限、节点容量与保留口径一次看清。",
-    "settings.table.caption": "当前生效策略（来自 /api/runtime 的系统级只读快照，全机共用）。",
+    "settings.table.caption": "当前生效策略的只读快照，适用于本机所有工程。",
     "settings.form.caption.readonly": "字段区：下面是服务端回显的当前值，只作展示，不提交。",
     "settings.form.caption.editable": "字段区：改动后点保存，请求会带上当前 revision。",
     "settings.loading": "正在读取设置…",

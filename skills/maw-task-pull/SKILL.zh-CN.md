@@ -134,9 +134,10 @@ maw board --serve   # 浏览器看全局；仍须用 CLI next -C 拉取
 4. 合入后若仍有 ready，继续 `maw next` 查询、`maw next --claim` 领取，直至无题可领或用户叫停。
 5. 全局模式下先 **board 选仓**，再 **`next -C`**；没有「一条命令跨库自动领最优题」时，由本技能按优先级选仓。
 6. 选仓启发式：`ready>0` → priority 更优的题所在仓 → 用户当前打开的工程优先。**不按 max_parallel 卡槽**（≥0.3.6：有可激活 ready 即派活）。
-7. **上下文亲和（maw ≥0.3.5）**：同一 `MAW_AGENT` 再 `next` 时，调度优先领与其近期完成题亲和的 ready（deps 续链 > 写盘重叠 > 同模块路径前缀），再比 `priority`/`merge_order`/`id`。无锚点（新 agent / 首题）则纯序位。  
-   - 连跑时**不要**为了「换换口味」手动挑别的仓/题，除非用户指定或本 Lane 已无 ready。  
-   - dry-run 可预览下一题是否仍在同模块；若漂到无关域，先查清单 Lane / 补同簇题（maw-plan-push），而不是硬做。
+7. **子队列粘性（lane）**：拆题写入任务 `lane`；同一 `MAW_AGENT` 首题自动粘住该队，之后只从本队领。  
+   - 显式：`maw next --claim --lane IMPORT`；解除：`maw next --release-lane`（可再 `--claim` 重选队）。  
+   - 本队暂无可激活题时**不自动跳队**；换队须显式。  
+   - 队内：`priority`/`merge_order` 优先，同分才用亲和打破。并行靠多 lane × 多 Agent。
 
 ## 失败对照
 
@@ -148,7 +149,7 @@ maw board --serve   # 浏览器看全局；仍须用 CLI next -C 拉取
 | 无法定位全局库 | 检查 `MAW_GLOBAL` / `~/.maw` |
 | worktree 已存在冲突 | 按 maw 报错「下一步」处理；勿手删他人树 |
 | `working tree dirty`（submit/merge） | **先在 worktree 内 `git add` + `git commit`（仅 write_scope）再 submit**；勿只 add 不 commit |
-| 题已 `done` 仍显示 dirty/阻塞原因 | 多为历史 `blocked_reason` 残留；以 `status`/`git log` 合入记录为准（新版 merge 成功会清空该字段） |
+| 题已 `done`/`cancelled` 仍显示 dirty/阻塞原因 | 旧版残留；新版 merge/cancel 会清空并归档。蓝图外 blocked 用 `maw task cancel --superseded-by` |
 
 ## 输出给用户（中文）
 

@@ -82,10 +82,10 @@ const (
 	AgentActivityIdle    AgentActivityKind = "idle"
 )
 
-// agentStaleAfter 与 [locks] heartbeat_ttl_sec、project_busy 守卫对齐（15 分钟）。
+// agentStaleAfter 与 [locks] heartbeat_ttl_sec、project_busy 守卫对齐（默认 30 分钟）。
 // 它只是展示阈值：判为 stalled 不会释放任务占用，释放仍由 CQ-003 的
-// expireStaleAgents 单独决定。
-const agentStaleAfter = 15 * time.Minute
+// expireStaleAgents 单独决定（且会按题 heartbeat 续命）。
+const agentStaleAfter = 30 * time.Minute
 
 // DeriveAgentActivity 推导单个 Agent 的展示态。纯函数，不改入参。
 //

@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
+import UiIcon from './UiIcon.vue'
 import { useBoard } from '../stores/board'
 import { buildProjectJoinPrompt, copyText } from '../lib/prompts'
 
-const props = withDefaults(
+withDefaults(
   defineProps<{ variant?: 'join' | 'toolbar' }>(),
   { variant: 'join' },
 )
 
 const board = useBoard()
-const copyLabel = ref('')
-let copyTimer: ReturnType<typeof setTimeout> | null = null
+const toastMessage = ref('')
+const toastVisible = ref(false)
+let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 const projects = computed(() => board.state.snapshot?.projects || [])
 const projectId = computed(() => board.state.route.project || '')
@@ -34,18 +36,22 @@ const title = computed(() => {
   return zh.value ? '复制工程接入提示词' : 'Copy project join prompt'
 })
 
-const text = computed(() => {
-  if (copyLabel.value) return copyLabel.value
-  return zh.value ? '复制工程接入提示词' : 'Copy project join prompt'
-})
+const text = computed(() => (zh.value ? '接入' : 'Join'))
+
+function showToast(message: string) {
+  toastMessage.value = message
+  toastVisible.value = true
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastVisible.value = false
+    toastMessage.value = ''
+    toastTimer = null
+  }, 2800)
+}
 
 async function onCopy() {
   if (!projectId.value && projects.value.length > 1) {
-    copyLabel.value = zh.value ? '请先选工程' : 'Pick project'
-    if (copyTimer) clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => {
-      copyLabel.value = ''
-    }, 2000)
+    showToast(zh.value ? '请先选择工程' : 'Pick a project first')
     return
   }
   const target =
@@ -57,26 +63,39 @@ async function onCopy() {
   })
   try {
     await copyText(prompt)
-    copyLabel.value = zh.value ? '已复制提示词' : 'Prompt copied'
+    showToast(
+      zh.value
+        ? '已复制，请到agent对话框中使用'
+        : 'Copied — paste it in the agent chat',
+    )
   } catch {
-    copyLabel.value = zh.value ? '复制失败' : 'Copy failed'
+    showToast(zh.value ? '复制失败' : 'Copy failed')
   }
-  if (copyTimer) clearTimeout(copyTimer)
-  copyTimer = setTimeout(() => {
-    copyLabel.value = ''
-  }, 2000)
 }
+
+onBeforeUnmount(() => {
+  if (toastTimer) clearTimeout(toastTimer)
+})
 </script>
 
 <template>
   <button
     type="button"
     id="f-copy-join"
-    :class="variant === 'join' ? 'join-button' : 'copy primary'"
+    :class="variant === 'join' ? 'join-button' : 'copy'"
     :disabled="!projects.length"
     :title="title"
+    :aria-label="title"
     @click="onCopy"
   >
-    <span v-if="variant === 'join'" class="symbol" aria-hidden="true">⌘</span>{{ text }}
+    <UiIcon name="copy" />{{ text }}
   </button>
+  <Teleport to="body">
+    <div
+      v-if="toastVisible"
+      class="ui-toast"
+      role="status"
+      aria-live="polite"
+    >{{ toastMessage }}</div>
+  </Teleport>
 </template>

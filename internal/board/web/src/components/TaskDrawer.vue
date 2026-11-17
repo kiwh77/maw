@@ -333,9 +333,13 @@ onBeforeUnmount(() => {
             <dd>{{ task.attempts ?? 0 }} · {{ zh ? '修订' : 'rev' }} {{ task.revision ?? 0 }}</dd>
             <dt>{{ zh ? '心跳' : 'Heartbeat' }}</dt>
             <dd>{{ fmtTime(task.heartbeat) }}</dd>
-            <template v-if="task.blocked_reason">
+            <template v-if="task.blocked_reason && task.status !== 'done' && task.status !== 'cancelled'">
               <dt>{{ zh ? '阻塞原因' : 'Blocked' }}</dt>
               <dd>{{ task.blocked_reason }}</dd>
+            </template>
+            <template v-else-if="task.extra && task.extra.cancel_reason">
+              <dt>{{ zh ? '取消原因' : 'Cancel reason' }}</dt>
+              <dd>{{ task.extra.cancel_reason }}<span v-if="task.extra.superseded_by"> → {{ task.extra.superseded_by }}</span></dd>
             </template>
           </dl>
         </div>

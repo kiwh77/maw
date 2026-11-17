@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import UiIcon from './UiIcon.vue'
 import { useBoard } from '../stores/board'
 
 const board = useBoard()
@@ -32,7 +33,7 @@ function go(id: string) {
       :aria-pressed="view === item.id ? 'true' : 'false'"
       @click="go(item.id)"
     >
-      {{ board.t(item.labelKey) }}
+      <UiIcon :name="item.id" /><span>{{ board.t(item.labelKey) }}</span>
     </button>
   </div>
 </template>

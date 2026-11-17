@@ -93,8 +93,12 @@ func FilterActivity(tasks []*Task, includeDone, includeArchived bool) []*Task {
 			if !includeArchived {
 				continue
 			}
-		} else if !includeDone && strings.EqualFold(strings.TrimSpace(t.Status), "done") {
-			continue
+		} else if !includeDone {
+			// cancelled 与 done 同属终态：默认活动视图一并隐藏，避免「已完成」泳道里挂取消文案。
+			st := strings.ToLower(strings.TrimSpace(t.Status))
+			if st == "done" || st == "cancelled" {
+				continue
+			}
 		}
 		out = append(out, t)
 	}

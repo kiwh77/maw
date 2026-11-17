@@ -15,9 +15,55 @@ import (
 //   - 看板与 `maw agents --json` 已经把 meta 原样透出，存进去即可在列表里看到；
 //   - 契约（maw.collaboration.primitives/v1 §5）只要求「本机可标记」，不要求索引。
 const (
-	AgentMetaTags  = "tags"
-	AgentMetaRoles = "roles"
+	AgentMetaTags      = "tags"
+	AgentMetaRoles     = "roles"
+	AgentMetaBoundLane = "bound_lane"
 )
+
+// AgentBoundLane 读回该 Agent 粘住的子队列；未绑定返回空串。
+func AgentBoundLane(tx *sql.Tx, projectID, agentID string) (string, error) {
+	a, err := GetAgent(tx, projectID, agentID)
+	if err != nil {
+		return "", err
+	}
+	if a == nil {
+		return "", nil
+	}
+	return metaString(a.Meta, AgentMetaBoundLane), nil
+}
+
+// SetAgentBoundLane 写入或清除子队列绑定；lane 空串表示解除绑定。
+func SetAgentBoundLane(tx *sql.Tx, projectID, agentID, lane string) error {
+	a, err := GetAgent(tx, projectID, agentID)
+	if err != nil {
+		return err
+	}
+	if a == nil {
+		return &AgentNotFound{ProjectID: projectID, AgentID: agentID}
+	}
+	if a.Meta == nil {
+		a.Meta = map[string]any{}
+	}
+	lane = strings.TrimSpace(lane)
+	if lane == "" {
+		delete(a.Meta, AgentMetaBoundLane)
+	} else {
+		a.Meta[AgentMetaBoundLane] = lane
+	}
+	return UpsertAgent(tx, a)
+}
+
+func metaString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	s, _ := raw.(string)
+	return strings.TrimSpace(s)
+}
 
 // SetAgentLabels 覆盖式写入某 Agent 的 tags / roles。
 //

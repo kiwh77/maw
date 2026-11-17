@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { STATUS_LABELS } from '../lib/status'
 import { useBoard } from '../stores/board'
 import { layoutTopoBands } from '../layout'
 import { disposeTopology, renderTopology, type TopologyHandle, type TopoTask } from '../topology'
@@ -10,34 +11,6 @@ let handle: TopologyHandle | null = null
 /** 换工程／语言时才自动适应画布；同工程 snapshot 刷新不得冲掉用户缩放。 */
 let fitKey = ''
 
-const STATUS_LABELS: Record<string, Record<string, string>> = {
-  zh: {
-    backlog: '待排期',
-    ready: '可领取',
-    claimed: '已领取',
-    in_progress: '进行中',
-    self_check: '自检中',
-    in_review: '评审中',
-    merging: '合并中',
-    conflict: '冲突',
-    blocked: '阻塞',
-    done: '已完成',
-    cancelled: '已取消',
-  },
-  en: {
-    backlog: 'Backlog',
-    ready: 'Ready',
-    claimed: 'Claimed',
-    in_progress: 'In progress',
-    self_check: 'Self-check',
-    in_review: 'In review',
-    merging: 'Merging',
-    conflict: 'Conflict',
-    blocked: 'Blocked',
-    done: 'Done',
-    cancelled: 'Cancelled',
-  },
-}
 
 function asTasks(raw: Array<Record<string, unknown>>): TopoTask[] {
   return raw.map((t) => ({

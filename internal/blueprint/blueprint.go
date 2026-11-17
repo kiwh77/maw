@@ -42,6 +42,7 @@ type TaskSpec struct {
 	Goal       string   `toml:"goal"`
 	Priority   int      `toml:"priority"`
 	Iteration  string   `toml:"iteration"`
+	Lane       string   `toml:"lane"`
 	Deps       []string `toml:"deps"`
 	WriteScope []string `toml:"write_scope"`
 	ReadScope  []string `toml:"read_scope"`
@@ -74,6 +75,7 @@ title = "更新 README 安装说明"
 goal = "现状：安装步骤缺失。目标：README 含一键安装命令。"
 priority = 1
 iteration = "IT-001"
+lane = "DOCS"
 deps = []
 write_scope = ["README.md"]
 acceptance = ["README 含 ./install.sh 与 maw --version 说明"]
@@ -472,7 +474,7 @@ func TasksForDB(f *File) []*db.Task {
 		}
 		out = append(out, &db.Task{
 			ID: t.ID, IterationID: strings.TrimSpace(t.Iteration), Title: t.Title, Status: status,
-			Priority: prio, MergeOrder: mo, Deps: t.Deps,
+			Priority: prio, MergeOrder: mo, Lane: strings.TrimSpace(t.Lane), Deps: t.Deps,
 			WriteScope: t.WriteScope, ReadScope: t.ReadScope, Acceptance: t.Acceptance,
 			Extra: extra,
 		})

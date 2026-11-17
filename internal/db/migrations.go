@@ -356,6 +356,7 @@ var migrations = []Migration{
 	{Version: 11, Name: "iterations", SQL: iterationsDDL},
 }
 
+
 // systemAgentDDL 是 v9：系统 Agent 任务队列（阻塞自愈 / 拆题 / 运维）。
 //
 // 事件游标复用 projection_state（projection="system_agent.events"），不另建游标表。

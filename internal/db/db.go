@@ -35,6 +35,8 @@ type Task struct {
 	Status        string         `json:"status"`
 	Priority      int            `json:"priority"`
 	MergeOrder    int            `json:"merge_order"`
+	// Lane 是上下文子队列 id；空表示未标 lane（落入默认空队列，彼此仍可并行粘住）。
+	Lane          string         `json:"lane"`
 	Owner         string         `json:"owner"`
 	Deps          []string       `json:"deps"`
 	WriteScope    []string       `json:"write_scope"`
@@ -236,22 +238,23 @@ func scanProject(row interface{ Scan(dest ...any) error }) (*Project, error) {
 	return &p, nil
 }
 
-const taskCols = `project_id, id, title, status, priority, merge_order, owner, deps_json, write_scope_json, read_scope_json, acceptance_json, branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json, instance_id, iteration_id`
+const taskCols = `project_id, id, title, status, priority, merge_order, owner, deps_json, write_scope_json, read_scope_json, acceptance_json, branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json, instance_id, iteration_id, lane`
 
 func scanTask(row interface{ Scan(dest ...any) error }) (*Task, error) {
 	var t Task
 	var owner, branch, wt, blocked, hb, prev sql.NullString
-	var deps, ws, rs, acc, extra, instanceID, iterationID string
+	var deps, ws, rs, acc, extra, instanceID, iterationID, lane string
 	err := row.Scan(
 		&t.ProjectID, &t.ID, &t.Title, &t.Status, &t.Priority, &t.MergeOrder, &owner,
 		&deps, &ws, &rs, &acc, &branch, &wt, &t.Attempts, &blocked, &hb, &prev, &t.Revision, &extra,
-		&instanceID, &iterationID,
+		&instanceID, &iterationID, &lane,
 	)
 	if err != nil {
 		return nil, err
 	}
 	t.InstanceID = instanceID
 	t.IterationID = iterationID
+	t.Lane = lane
 	t.Owner = owner.String
 	t.Branch = branch.String
 	t.Worktree = wt.String
@@ -298,7 +301,7 @@ func ListTasksFiltered(tx *sql.Tx, projectID, agent, status string) ([]*Task, er
 	q := `SELECT t.project_id, t.id, t.title, t.status, t.priority, t.merge_order, t.owner,
 		t.deps_json, t.write_scope_json, t.read_scope_json, t.acceptance_json, t.branch, t.worktree,
 		t.attempts, t.blocked_reason, t.heartbeat, t.prev_status, t.revision, t.extra_json,
-		t.instance_id, t.iteration_id, COALESCE(p.name,'')
+		t.instance_id, t.iteration_id, t.lane, COALESCE(p.name,'')
 		FROM tasks t LEFT JOIN projects p ON p.id = t.project_id WHERE 1=1`
 	var args []any
 	if projectID != "" {
@@ -321,33 +324,11 @@ func ListTasksFiltered(tx *sql.Tx, projectID, agent, status string) ([]*Task, er
 	defer rows.Close()
 	var out []*Task
 	for rows.Next() {
-		var t Task
-		var owner, branch, wt, blocked, hb, prev sql.NullString
-		var deps, ws, rs, acc, extra, instanceID, iterationID, pname string
-		err := rows.Scan(
-			&t.ProjectID, &t.ID, &t.Title, &t.Status, &t.Priority, &t.MergeOrder, &owner,
-			&deps, &ws, &rs, &acc, &branch, &wt, &t.Attempts, &blocked, &hb, &prev, &t.Revision, &extra,
-			&instanceID, &iterationID, &pname,
-		)
+		t, err := scanTaskWithName(rows)
 		if err != nil {
 			return nil, err
 		}
-		t.InstanceID = instanceID
-		t.IterationID = iterationID
-		t.Owner = owner.String
-		t.Branch = branch.String
-		t.Worktree = wt.String
-		t.BlockedReason = blocked.String
-		t.Heartbeat = hb.String
-		t.PrevStatus = prev.String
-		t.Deps = parseJSONArr(deps)
-		t.WriteScope = parseJSONArr(ws)
-		t.ReadScope = parseJSONArr(rs)
-		t.Acceptance = parseJSONArr(acc)
-		t.Extra = map[string]any{}
-		_ = json.Unmarshal([]byte(extra), &t.Extra)
-		t.ProjectName = pname
-		out = append(out, &t)
+		out = append(out, t)
 	}
 	return out, rows.Err()
 }
@@ -373,8 +354,8 @@ INSERT INTO tasks(
   project_id, id, title, status, priority, merge_order, owner,
   deps_json, write_scope_json, read_scope_json, acceptance_json,
   branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json,
-  instance_id, iteration_id
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  instance_id, iteration_id, lane
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(project_id, id) DO UPDATE SET
   title=excluded.title, status=excluded.status, priority=excluded.priority,
   merge_order=excluded.merge_order, owner=excluded.owner,
@@ -383,12 +364,12 @@ ON CONFLICT(project_id, id) DO UPDATE SET
   branch=excluded.branch, worktree=excluded.worktree, attempts=excluded.attempts,
   blocked_reason=excluded.blocked_reason, heartbeat=excluded.heartbeat,
   prev_status=excluded.prev_status, revision=excluded.revision, extra_json=excluded.extra_json,
-  instance_id=excluded.instance_id, iteration_id=excluded.iteration_id
+  instance_id=excluded.instance_id, iteration_id=excluded.iteration_id, lane=excluded.lane
 `, t.ProjectID, t.ID, t.Title, t.Status, t.Priority, t.MergeOrder, nullStr(t.Owner),
 		mustJSON(t.Deps), mustJSON(t.WriteScope), mustJSON(t.ReadScope), mustJSON(t.Acceptance),
 		nullStr(t.Branch), nullStr(t.Worktree), t.Attempts, nullStr(t.BlockedReason),
 		nullStr(t.Heartbeat), nullStr(t.PrevStatus), t.Revision, mustJSON(t.Extra),
-		t.InstanceID, t.IterationID)
+		t.InstanceID, t.IterationID, t.Lane)
 	return err
 }
 
@@ -462,7 +443,7 @@ func FindTask(tx *sql.Tx, projectID, id string) (*Task, error) {
 SELECT t.project_id, t.id, t.title, t.status, t.priority, t.merge_order, t.owner,
   t.deps_json, t.write_scope_json, t.read_scope_json, t.acceptance_json, t.branch, t.worktree,
   t.attempts, t.blocked_reason, t.heartbeat, t.prev_status, t.revision, t.extra_json,
-  t.instance_id, t.iteration_id, COALESCE(p.name,'')
+  t.instance_id, t.iteration_id, t.lane, COALESCE(p.name,'')
 FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
 WHERE t.id = ? ORDER BY t.project_id LIMIT 1`, id)
 	t, err := scanTaskWithName(row)
@@ -475,17 +456,18 @@ WHERE t.id = ? ORDER BY t.project_id LIMIT 1`, id)
 func scanTaskWithName(row interface{ Scan(dest ...any) error }) (*Task, error) {
 	var t Task
 	var owner, branch, wt, blocked, hb, prev sql.NullString
-	var deps, ws, rs, acc, extra, instanceID, iterationID, pname string
+	var deps, ws, rs, acc, extra, instanceID, iterationID, lane, pname string
 	err := row.Scan(
 		&t.ProjectID, &t.ID, &t.Title, &t.Status, &t.Priority, &t.MergeOrder, &owner,
 		&deps, &ws, &rs, &acc, &branch, &wt, &t.Attempts, &blocked, &hb, &prev, &t.Revision, &extra,
-		&instanceID, &iterationID, &pname,
+		&instanceID, &iterationID, &lane, &pname,
 	)
 	if err != nil {
 		return nil, err
 	}
 	t.InstanceID = instanceID
 	t.IterationID = iterationID
+	t.Lane = lane
 	t.Owner = owner.String
 	t.Branch = branch.String
 	t.Worktree = wt.String

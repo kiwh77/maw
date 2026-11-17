@@ -205,7 +205,9 @@ func AssertWorkingTreeClean(cwd string) error {
 			p = p[i+4:]
 		}
 		p = strings.Trim(p, "\"")
-		if p == ".gitignore" || strings.HasPrefix(p, ".multiagent/") {
+		// maw 会话产物与工程元数据不算阻塞合入的脏状态（即便被误跟踪）。
+		if p == ".gitignore" || p == "TASK.md" || strings.HasPrefix(p, ".multiagent/") ||
+			strings.HasPrefix(p, ".maw/") || p == ".maw" {
 			continue
 		}
 		dirty = append(dirty, strings.TrimSpace(ln))
@@ -241,6 +243,16 @@ type GateResult struct {
 	OK         bool   `json:"ok"`
 	Output     string `json:"output,omitempty"`
 	EnvFailure bool   `json:"env_failure,omitempty"`
+}
+
+// IsDirtyTree reports whether an error is a working-tree-dirty failure
+// (recoverable by commit/stash), not a true merge conflict.
+func IsDirtyTree(msg string) bool {
+	low := strings.ToLower(msg)
+	return strings.Contains(low, "working tree dirty") ||
+		strings.Contains(low, "工作区不干净") ||
+		strings.Contains(low, "dirty_in") ||
+		strings.Contains(low, "err.dirty")
 }
 
 // IsEnvFailure reports whether a gate/merge error looks like local environment,
