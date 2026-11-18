@@ -125,8 +125,16 @@ func Load(path string) (*File, error) {
 	if err != nil {
 		return nil, i18n.E("err.blueprint_missing", "next.blueprint_path", path)
 	}
+	return Parse(b)
+}
+
+// Parse 解析内存里的蓝图内容（不读盘）。
+//
+// 目标级 Lead 的入队路径要先把「既有 + 片段」合成全文再校验，校验通过才落盘：
+// 用 Parse 而不是再读一次文件，才能保证「校验的就是将要写入的那一份」。
+func Parse(data []byte) (*File, error) {
 	var f File
-	if err := toml.Unmarshal(b, &f); err != nil {
+	if err := toml.Unmarshal(data, &f); err != nil {
 		return nil, i18n.EW("err.blueprint_invalid", "next.fix_toml", err)
 	}
 	return &f, nil

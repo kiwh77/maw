@@ -14,36 +14,45 @@ var blueprintIDRE = regexp.MustCompile(`(?m)^[ \t]*id[ \t]*=[ \t]*"([^"]+)"[ \t]
 // blueprintTaskRE 只数独占一行的 [[task]] 表头，避免把字符串里的同名文本算进去。
 var blueprintTaskRE = regexp.MustCompile(`(?m)^[ \t]*\[\[task\]\][ \t]*$`)
 
-// AppendTasks 把 blocks 追加到蓝图文件末尾，返回可读 diff。
+// appendPlan 是「原内容 + 片段」的候选全文与配套信息。
 //
-// 事故防线（STATUS.md 记过：单题临时 toml 做增量 plan apply 把 30 道 idle 题
-// 标成 removed_from_plan），这里强制：
-//   - 读取原文件全部内容，只在末尾追加，绝不截断、绝不重写；
-//   - 新 id 与既有 ^id = "..." 不重复，重复直接报错；
-//   - 追加后 [[task]] 数 = 既有 + 新增，绝不少于既有；
-//   - 拒绝含 [meta] / [project] / [[iteration]] 等表头的「整份计划文件」；
-//   - dryRun=true 只返回 diff，不写盘；
-//   - 写盘用同目录临时文件 + rename（原子），并保留原文件权限。
-func AppendTasks(blueprintPath string, blocks []byte, dryRun bool) (diff string, err error) {
+// 校验与写盘共用同一份候选内容：先 planAppend 得到全文，调用方在校验通过后
+// 才落盘，避免「写进去了但内容不合法」的中间态。
+type appendPlan struct {
+	content    []byte
+	fragment   string
+	newIDs     []string
+	addedTasks int
+}
+
+// MergeForAppend 返回「原内容 + 片段」的候选全文，不写盘。
+//
+// 只用于增长场景：片段必须只含 [[task]]，新 id 不得与既有 id 重复，
+// 结果必须以原内容为前缀（绝不截断），任务块数必须等于既有 + 新增。
+func MergeForAppend(orig, blocks []byte) ([]byte, error) {
+	p, err := planAppend(orig, blocks)
+	if err != nil {
+		return nil, err
+	}
+	return p.content, nil
+}
+
+// planAppend 是 MergeForAppend 与 AppendTasks 的共同实现。
+func planAppend(orig, blocks []byte) (*appendPlan, error) {
 	blockText := string(blocks)
 	if strings.TrimSpace(blockText) == "" {
-		return "", fmt.Errorf("blocks 为空：没有可追加的任务块")
+		return nil, fmt.Errorf("blocks 为空：没有可追加的任务块")
 	}
 	if hasNonTaskTable(blockText) {
-		return "", fmt.Errorf("blocks 含 [[task]] 之外的表头：只允许追加任务块，不能把整份计划文件塞进蓝图")
+		return nil, fmt.Errorf("blocks 含 [[task]] 之外的表头：只允许追加任务块，不能把整份计划文件塞进蓝图")
 	}
 	addedTasks := countTasks(blockText)
 	if addedTasks == 0 {
-		return "", fmt.Errorf("blocks 不含任何 [[task]] 块，拒绝追加")
+		return nil, fmt.Errorf("blocks 不含任何 [[task]] 块，拒绝追加")
 	}
 	newIDs, err := extractBlockIDs(blockText)
 	if err != nil {
-		return "", err
-	}
-
-	orig, err := os.ReadFile(blueprintPath)
-	if err != nil {
-		return "", fmt.Errorf("读取蓝图 %q 失败：%w", blueprintPath, err)
+		return nil, err
 	}
 	existing := map[string]bool{}
 	for _, m := range blueprintIDRE.FindAllStringSubmatch(string(orig), -1) {
@@ -52,11 +61,11 @@ func AppendTasks(blueprintPath string, blocks []byte, dryRun bool) (diff string,
 	seen := map[string]bool{}
 	for _, id := range newIDs {
 		if seen[id] {
-			return "", fmt.Errorf("blocks 内出现重复 id %q，拒绝追加", id)
+			return nil, fmt.Errorf("blocks 内出现重复 id %q，拒绝追加", id)
 		}
 		seen[id] = true
 		if existing[id] {
-			return "", fmt.Errorf("新题 id %q 与蓝图既有 id 重复，拒绝追加", id)
+			return nil, fmt.Errorf("新题 id %q 与蓝图既有 id 重复，拒绝追加", id)
 		}
 	}
 
@@ -73,17 +82,38 @@ func AppendTasks(blueprintPath string, blocks []byte, dryRun bool) (diff string,
 
 	oldTasks := countTasks(base)
 	if !strings.HasPrefix(newContent, string(orig)) {
-		return "", fmt.Errorf("内部校验失败：追加后原内容不再是前缀，疑似被截断")
+		return nil, fmt.Errorf("内部校验失败：追加后原内容不再是前缀，疑似被截断")
 	}
 	if got := countTasks(newContent); got != oldTasks+addedTasks {
-		return "", fmt.Errorf("内部校验失败：追加后任务块数 %d != 既有 %d + 新增 %d", got, oldTasks, addedTasks)
+		return nil, fmt.Errorf("内部校验失败：追加后任务块数 %d != 既有 %d + 新增 %d", got, oldTasks, addedTasks)
 	}
+	return &appendPlan{content: []byte(newContent), fragment: add, newIDs: newIDs, addedTasks: addedTasks}, nil
+}
 
-	diff = renderAppendDiff(blueprintPath, dryRun, oldTasks, addedTasks, newIDs, add)
+// AppendTasks 把 blocks 追加到蓝图文件末尾，返回可读 diff。
+//
+// 事故防线（STATUS.md 记过：单题临时 toml 做增量 plan apply 把 30 道 idle 题
+// 标成 removed_from_plan），这里强制：
+//   - 读取原文件全部内容，只在末尾追加，绝不截断、绝不重写；
+//   - 新 id 与既有 ^id = "..." 不重复，重复直接报错；
+//   - 追加后 [[task]] 数 = 既有 + 新增，绝不少于既有；
+//   - 拒绝含 [meta] / [project] / [[iteration]] 等表头的「整份计划文件」；
+//   - dryRun=true 只返回 diff，不写盘；
+//   - 写盘用同目录临时文件 + rename（原子），并保留原文件权限。
+func AppendTasks(blueprintPath string, blocks []byte, dryRun bool) (diff string, err error) {
+	orig, err := os.ReadFile(blueprintPath)
+	if err != nil {
+		return "", fmt.Errorf("读取蓝图 %q 失败：%w", blueprintPath, err)
+	}
+	plan, err := planAppend(orig, blocks)
+	if err != nil {
+		return "", err
+	}
+	diff = renderAppendDiff(blueprintPath, dryRun, countTasks(string(orig)), plan.addedTasks, plan.newIDs, plan.fragment)
 	if dryRun {
 		return diff, nil
 	}
-	if err := writeBytesAtomic(blueprintPath, []byte(newContent)); err != nil {
+	if err := writeBytesAtomic(blueprintPath, plan.content); err != nil {
 		return "", err
 	}
 	return diff, nil
