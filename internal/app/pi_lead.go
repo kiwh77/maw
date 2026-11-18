@@ -329,8 +329,16 @@ func LeadGoalPlan(cwd string, in LeadGoalPlanInput) (Result, error) {
 				return err
 			}
 		}
-		_, err := db.SavePlanRevision(tx, rev, actor)
-		return err
+		if _, err := db.SavePlanRevision(tx, rev, actor); err != nil {
+			return err
+		}
+		// Lead 的模型调用独立归属（契约 §10 第 1 条）：把 goal/plan_rev 写进审计事件，
+		// 统计侧按 usage_kind=lead 归集，不并进 Worker 的 Run 用量。
+		return db.AppendEvent(tx, pc.ID(), actor, "goal_lead_call", "", map[string]any{
+			"usage_kind": "lead", "goal_id": goalID, "plan_rev": planRev,
+			"plan_digest": rev.PlanDigest, "cards": len(rev.Cards),
+			"model": strings.TrimSpace(os.Getenv("PI_MODEL")),
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -499,4 +507,145 @@ func LeadGoalShow(cwd, goalID string) (Result, error) {
 		"enqueues": len(snap.Enqueues),
 		"next":     "maw lead goal plan / approve / enqueue",
 	}, nil
+}
+
+// LeadGoalReworkInput 是一次返工规划请求。
+type LeadGoalReworkInput struct {
+	GoalID string
+	DryRun bool
+}
+
+// LeadGoalRework 按整体验收的失败断言生成返工计划修订（契约 §12）。
+//
+// 三条约束：
+//   - 只有真的失败（且不是 unknown）才返工；
+//   - 每张返工卡必须带失败证据（G216），证据来自本次验收；
+//   - 返工受 max_rework_rounds / max_plan_revisions 限制，用尽就升级人工。
+func LeadGoalRework(cwd string, in LeadGoalReworkInput) (Result, error) {
+	actor, err := leadActor(cwd)
+	if err != nil {
+		return nil, err
+	}
+	pc, err := resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	goalID := strings.TrimSpace(in.GoalID)
+	if goalID == "" {
+		return nil, fmt.Errorf("需要 --goal")
+	}
+	acceptRes, err := LeadGoalAccept(cwd, LeadGoalAcceptInput{GoalID: goalID, DryRun: true})
+	if err != nil {
+		return nil, err
+	}
+	proposal, _ := acceptRes["rework"].(goal.ReworkProposal)
+	overall, _ := acceptRes["overall"].(string)
+	if overall != goal.VerdictFail {
+		return nil, fmt.Errorf("目标验收结论是 %s，不是 fail：只有失败才需要返工（unknown 请先补证据）", overall)
+	}
+	if len(proposal.Targets) == 0 {
+		return nil, fmt.Errorf("没有失败断言，拒绝生成空返工")
+	}
+
+	var snap *db.GoalSnapshot
+	if err := withGlobalRead(pc.GlobalDB, func(tx *sql.Tx) error {
+		var e error
+		snap, e = db.LoadGoalSnapshot(tx, pc.ID(), goalID)
+		return e
+	}); err != nil {
+		return nil, err
+	}
+	budget := goalReworkBudget(snap)
+	if !budget.ReworkAllowed() {
+		return nil, fmt.Errorf("返工预算已用尽（返工 %d/%d 轮，修订 %d/%d）：目标应升级人工，不再自动加卡",
+			budget.UsedReworkRounds, budget.MaxReworkRounds, budget.UsedPlanRevisions, budget.MaxPlanRevisions)
+	}
+	if snap == nil || snap.Active == nil {
+		return nil, fmt.Errorf("目标 %s 缺少当前版本定义", goalID)
+	}
+
+	planRev := len(snap.Plans) + 1
+	req := goal.PlanRequest{
+		ProjectID: pc.ID(), GoalID: goalID, GoalVersion: snap.Goal.ActiveVersion,
+		PlanRev: planRev, Kind: goal.PlanKindRework,
+		Title: snap.Active.Title, Statement: snap.Active.Statement,
+		Acceptance: snap.Active.Acceptance, Evidence: proposal.Evidence,
+		MaxCards: snap.Active.Budget.MaxCardsPerRevision,
+	}
+	planner, err := leadPlannerFactory(pc)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	cards, err := planner.Plan(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("返工规划失败（未产生任何任务副作用）：%w", err)
+	}
+	for i := range cards {
+		if len(cards[i].Origin.Evidence) == 0 {
+			cards[i].Origin.Evidence = append([]string{}, proposal.Evidence...)
+		}
+	}
+	rev, err := goal.BuildPlanRevision(req, cards)
+	if err != nil {
+		return nil, fmt.Errorf("返工计划校验失败（未产生任何任务副作用）：%w", err)
+	}
+
+	// 同一失败证据集只落一份修订：卡片内容相同就返回已有修订。
+	// 比较时把 plan_rev 归一为 0——修订号每次都递增，带着它比会把同一份计划判成不同的。
+	var existing *goal.PlanRevision
+	want := normalizedPlanDigest(rev)
+	for _, p := range snap.Plans {
+		if p.Kind == goal.PlanKindRework && strings.EqualFold(normalizedPlanDigest(p), want) {
+			existing = p
+			break
+		}
+	}
+	if existing != nil {
+		return Result{
+			"ok": true, "replayed": true, "goal_id": goalID, "plan_rev": existing.PlanRev,
+			"status": existing.Status, "plan_digest": existing.PlanDigest,
+			"rework": proposal, "next": "同一失败证据已有返工修订，不重复创建",
+		}, nil
+	}
+
+	if in.DryRun {
+		return Result{
+			"ok": true, "dry_run": true, "goal_id": goalID, "plan_rev": planRev,
+			"plan_digest": rev.PlanDigest, "rework": proposal, "cards": rev.Cards,
+			"next": "去掉 --dry-run 落库为返工修订",
+		}, nil
+	}
+	if err := withGlobalWrite(pc.GlobalDB, func(tx *sql.Tx) error {
+		if _, err := db.SavePlanRevision(tx, rev, actor); err != nil {
+			return err
+		}
+		return db.AppendEvent(tx, pc.ID(), actor, "goal_rework_proposed", "", map[string]any{
+			"goal_id": goalID, "plan_rev": planRev, "plan_digest": rev.PlanDigest,
+			"rework_key": proposal.Key, "targets": proposal.Targets,
+			"evidence": proposal.Evidence, "usage_kind": "lead",
+		})
+	}); err != nil {
+		return nil, err
+	}
+	return Result{
+		"ok": true, "goal_id": goalID, "plan_rev": planRev, "status": rev.Status,
+		"plan_digest": rev.PlanDigest, "rework": proposal,
+		"next": fmt.Sprintf("maw lead goal approve --goal %s --rev %d", goalID, planRev),
+	}, nil
+}
+
+// normalizedPlanDigest 忽略修订号后的计划摘要，用于返工重放去重。
+func normalizedPlanDigest(r *goal.PlanRevision) string {
+	if r == nil {
+		return ""
+	}
+	copyRev := *r
+	copyRev.PlanRev = 0
+	digest, err := goal.Digest(&copyRev)
+	if err != nil {
+		return ""
+	}
+	return digest
 }

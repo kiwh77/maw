@@ -285,6 +285,11 @@ func buildServeLeaderBundle(pc *projCtx, cfg config.SystemAgent, onError func(er
 	}
 	b.system = leader.System != nil
 	b.runner = leader
+	// 中枢重启后先按持久化证据重建目标视图：只读、幂等，不推进状态。
+	// 失败只记录到 stderr，不影响派发循环启动（恢复不是启动的前提）。
+	if _, err := recoverGoalsForProject(pc); err != nil && onError != nil {
+		onError(fmt.Errorf("recover goals: %w", err))
+	}
 	return b, nil
 }
 
