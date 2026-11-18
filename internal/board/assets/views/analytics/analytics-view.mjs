@@ -11,6 +11,13 @@
 //
 // 非目标：不在页面重新聚合原始记录；不改公共计量口径。
 
+import {
+  ATTRIBUTION_DIMENSIONS,
+  dimensionLabelKey,
+  granularityOf,
+  runDrillHref,
+} from "./attribution.mjs";
+
 export const VIEW_STATUSES = Object.freeze([
   "ready", "loading", "empty", "error", "expired", "unauthenticated", "unknown",
 ]);
@@ -82,6 +89,55 @@ const I18N = {
     "quality.observed": "实测",
     "quality.estimated": "估算",
     "quality.unknown": "未知",
+    "attr.title": "用量归属",
+    "attr.subtitle": "按来源、节点、模型与用途查看用量与采集完整度；未知与估算如实标注。",
+    "attr.basis": "口径：按用量行维度归集；每个比率都带分子/分母，分母为 0 时记「无分母」，不写 0%。",
+    "attr.tab.hint": "切换维度只换归集键，窗口与去重口径不变。",
+    "attr.loading": "正在读取归属统计…",
+    "attr.error": "归属统计加载失败。",
+    "attr.error.hint": "该维度暂时不可用；其余维度仍可查看。",
+    "attr.retry": "重试",
+    "attr.empty": "这个窗口里没有可归集的用量。",
+    "attr.empty.hint": "没有记账不等于用量为零：先跑起执行或诊断，再回来看。",
+    "attr.unsupported": "该维度暂不支持归集。",
+    "attr.unauthenticated": "未登录，无法读取归属统计。",
+    "attr.table.value": "维度值",
+    "attr.table.turns": "轮次",
+    "attr.table.tokens": "token（总量 / 输入+输出）",
+    "attr.table.coverage": "观测覆盖",
+    "attr.table.quality": "质量",
+    "attr.table.granularity": "粒度",
+    "attr.table.evidence": "证据",
+    "attr.value.undeclared": "未声明",
+    "attr.coverage.none": "无分母",
+    "attr.granularity.call": "逐次调用",
+    "attr.granularity.run": "运行级（旧 CLI 汇总）",
+    "attr.granularity.mixed": "逐次 + 运行级",
+    "attr.granularity.unknown": "粒度未知",
+    "attr.quality.estimated_turns": "估算 {n} 轮",
+    "attr.cache.verified": "缓存已归一 {n}",
+    "attr.cache.unverified": "缓存未归一 {n}",
+    "attr.totals.calls": "调用覆盖（有用量/调用）",
+    "attr.totals.turns": "轮次覆盖（有用量/轮次）",
+    "attr.totals.run_success": "Run 成功",
+    "attr.totals.delivery_pass": "交付通过",
+    "attr.totals.tokens": "累计 token",
+    "attr.totals.cost": "估算成本",
+    "attr.totals.cost.basis": "未配置价目表：只报 token 与质量，不编单价",
+    "attr.partial": "部分未知：合计不含未知用量的轮次，覆盖率按已记账分母给出。",
+    "attr.gaps": "缺测与口径说明",
+    "attr.watermark": "归属水位",
+    "attr.run.drill": "去 Run 列表核对",
+    "attr.run.drill.missing_project": "选择工程后可跳到 Run 列表",
+    "attr.run.grain": "Run 结果只按节点归集：其它维度没有归属证据，分维度留空只报合计。",
+    "attr.gap.tool_seconds": "工具调用只有 journal 证据，没有独立区间来源：不用 Run 时间去顶替。",
+    "attr.dimension.source": "来源",
+    "attr.dimension.node": "节点",
+    "attr.dimension.model": "模型",
+    "attr.dimension.purpose": "用途",
+    "attr.purpose.worker": "Worker（执行）",
+    "attr.purpose.lead": "Lead（规划）",
+    "attr.purpose.diagnose": "诊断",
   },
   en: {
     "analytics.title": "Delivery & usage statistics",
@@ -142,6 +198,55 @@ const I18N = {
     "quality.observed": "Observed",
     "quality.estimated": "Estimated",
     "quality.unknown": "Unknown",
+    "attr.title": "Usage attribution",
+    "attr.subtitle": "Usage and collection completeness by source, node, model and purpose; unknown and estimated stay labelled.",
+    "attr.basis": "Basis: grouped by the usage row dimension; every ratio states numerator/denominator, and a zero denominator reads \"no denominator\", never 0%.",
+    "attr.tab.hint": "Switching dimension changes the grouping key only; window and dedupe stay the same.",
+    "attr.loading": "Loading attribution…",
+    "attr.error": "Failed to load attribution.",
+    "attr.error.hint": "This dimension is unavailable for now; the others remain readable.",
+    "attr.retry": "Retry",
+    "attr.empty": "No usage to attribute in this window.",
+    "attr.empty.hint": "No records is not zero usage: run an execution or diagnosis first, then come back.",
+    "attr.unsupported": "Attribution is not supported for this dimension.",
+    "attr.unauthenticated": "Sign in to read attribution.",
+    "attr.table.value": "Value",
+    "attr.table.turns": "Turns",
+    "attr.table.tokens": "Tokens (total / input+output)",
+    "attr.table.coverage": "Observed coverage",
+    "attr.table.quality": "Quality",
+    "attr.table.granularity": "Granularity",
+    "attr.table.evidence": "Evidence",
+    "attr.value.undeclared": "undeclared",
+    "attr.coverage.none": "no denominator",
+    "attr.granularity.call": "Per-call",
+    "attr.granularity.run": "Run-level (legacy CLI summary)",
+    "attr.granularity.mixed": "Per-call + run-level",
+    "attr.granularity.unknown": "Granularity unknown",
+    "attr.quality.estimated_turns": "{n} estimated turns",
+    "attr.cache.verified": "cache normalised {n}",
+    "attr.cache.unverified": "cache unverified {n}",
+    "attr.totals.calls": "Call coverage (with usage / calls)",
+    "attr.totals.turns": "Turn coverage (with usage / turns)",
+    "attr.totals.run_success": "Run success",
+    "attr.totals.delivery_pass": "Delivery pass",
+    "attr.totals.tokens": "Cumulative tokens",
+    "attr.totals.cost": "Estimated cost",
+    "attr.totals.cost.basis": "No price table configured: tokens and quality only, unit price never invented",
+    "attr.partial": "Partially unknown: totals exclude turns without usage; coverage uses the recorded denominator.",
+    "attr.gaps": "Gaps and basis notes",
+    "attr.watermark": "Attribution watermark",
+    "attr.run.drill": "Verify in run list",
+    "attr.run.drill.missing_project": "Pick a project to drill into runs",
+    "attr.run.grain": "Run outcomes group by node only: other dimensions carry no attribution evidence, so per-dimension run results stay empty and only totals are reported.",
+    "attr.gap.tool_seconds": "Tool calls have journal evidence only and no independent interval source; run time is never substituted.",
+    "attr.dimension.source": "Source",
+    "attr.dimension.node": "Node",
+    "attr.dimension.model": "Model",
+    "attr.dimension.purpose": "Purpose",
+    "attr.purpose.worker": "Worker (execution)",
+    "attr.purpose.lead": "Lead (planning)",
+    "attr.purpose.diagnose": "Diagnose",
   },
 };
 
@@ -375,6 +480,235 @@ function renderEvidence(rep, lang) {
   return html + "</section>";
 }
 
+// ---------- 用量归属（PI-203） ----------
+
+/** 比率：分子/分母逐字给出；分母为 0 时比率是 null，写「无分母」而不是 0%。 */
+function ratioText(den, lang) {
+  if (!den) return unknownValue(lang);
+  const base = den.numerator + "/" + den.denominator;
+  if (den.ratio == null) {
+    return safeText(base) + ' <span class="field-hint">' + safeText(t("attr.coverage.none", lang)) + "</span>";
+  }
+  return safeText(base + " (" + Math.round(den.ratio * 100) + "%)");
+}
+
+function granularityBadge(grain, lang) {
+  const cls = grain === "call" ? "badge--done" : grain === "run" ? "badge--claimed" : "badge--in_review";
+  return '<span class="badge ' + cls + '" data-granularity="' + safeText(grain) + '">' +
+    safeText(t("attr.granularity." + grain, lang)) + "</span>";
+}
+
+/** 质量标记：未知、估算与缓存归一分开说，不合并成一个「大概能用」。 */
+function attributionQuality(row, lang) {
+  const out = [];
+  if (row.usageUnknown) {
+    out.push('<span class="analytics__unknown" data-unknown="true">' +
+      safeText(t("quality.unknown", lang)) + "</span>");
+  }
+  if (row.estimatedTurns != null && row.estimatedTurns > 0) {
+    out.push('<span class="badge badge--claimed" data-quality="estimated">' +
+      safeText(t("attr.quality.estimated_turns", lang, { n: row.estimatedTurns })) + "</span>");
+  }
+  if (row.cacheUnverified != null && row.cacheUnverified > 0) {
+    out.push('<span class="analytics__unknown" data-cache="unverified">' +
+      safeText(t("attr.cache.unverified", lang, { n: row.cacheUnverified })) + "</span>");
+  }
+  if (row.cacheNormalized != null && row.cacheNormalized > 0) {
+    out.push('<span class="field-hint" data-cache="verified">' +
+      safeText(t("attr.cache.verified", lang, { n: row.cacheNormalized })) + "</span>");
+  }
+  if (!out.length) out.push('<span class="field-hint">' + safeText(t("quality.observed", lang)) + "</span>");
+  return out.join(" ");
+}
+
+/** token：合计为 null 就写未知；输入/输出缺一项时用 ? 标出，不补 0。 */
+function attributionTokens(row, lang) {
+  const tk = row.tokens;
+  if (tk.total == null) return unknownValue(lang);
+  const parts = [];
+  if (tk.input != null || tk.output != null) {
+    parts.push((tk.input == null ? "?" : tk.input) + " + " + (tk.output == null ? "?" : tk.output));
+  }
+  return safeText(String(tk.total)) +
+    (parts.length ? ' <span class="field-hint">(' + safeText(parts[0]) + ")</span>" : "");
+}
+
+/** 用途是封闭集合：翻成可读标签，原始值仍留在 data 属性里可核对。 */
+const PURPOSE_LABEL_KEYS = Object.freeze({
+  worker: "attr.purpose.worker",
+  lead: "attr.purpose.lead",
+  diagnose: "attr.purpose.diagnose",
+});
+
+function attributionValue(row, lang) {
+  if (row.value === "") {
+    return '<span class="analytics__undeclared" data-undeclared="true">' +
+      safeText(t("attr.value.undeclared", lang)) + "</span>";
+  }
+  const key = row.dimension === "purpose" ? PURPOSE_LABEL_KEYS[row.value] : "";
+  return key ? safeText(t(key, lang)) : safeText(row.value);
+}
+
+function renderAttributionRow(row, lang) {
+  const value = attributionValue(row, lang);
+  const grain = granularityOf(row);
+  return '<tr data-attr-row="1" data-dimension-value="' + safeText(row.value) +
+    '" data-granularity="' + safeText(grain) + '">' +
+    '<td class="analytics__attr-value">' + value + "</td>" +
+    "<td>" + (row.turns == null ? unknownValue(lang) : safeText(String(row.turns))) + "</td>" +
+    "<td>" + attributionTokens(row, lang) + "</td>" +
+    "<td>" + ratioText(row.observed, lang) + "</td>" +
+    '<td class="analytics__attr-quality">' + attributionQuality(row, lang) + "</td>" +
+    "<td>" + granularityBadge(grain, lang) + "</td>" +
+    '<td class="analytics__attr-evidence">' + safeText(row.evidence.join(" · ")) + "</td></tr>";
+}
+
+function renderAttributionTotals(rep, lang) {
+  const tot = rep.totals;
+  const rows = [
+    [t("attr.totals.calls", lang), ratioText(tot.calls, lang)],
+    [t("attr.totals.turns", lang), ratioText(tot.turns, lang)],
+    [t("attr.totals.run_success", lang), ratioText(tot.runSuccess, lang)],
+    [t("attr.totals.delivery_pass", lang), ratioText(tot.deliveryPass, lang)],
+    [t("attr.totals.tokens", lang), tot.tokens.total == null ? unknownValue(lang) : safeText(String(tot.tokens.total))],
+    [t("attr.totals.cost", lang), tot.cost.amountUSD == null
+      ? '<span class="field-hint">' + safeText(t("attr.totals.cost.basis", lang)) + "</span>"
+      : safeText("$" + tot.cost.amountUSD)],
+  ];
+  return '<dl class="analytics__reads analytics__attr-totals" data-attr-totals>' +
+    rows.map(([k, v]) => "<div><dt>" + safeText(k) + "</dt><dd>" + v + "</dd></div>").join("") +
+    "</dl>";
+}
+
+function renderAttributionTabs(dimensions, active, errors, lang) {
+  const buttons = dimensions.map(dim => {
+    const err = errors[dim];
+    return '<button type="button" class="analytics__attr-tab' +
+      (dim === active ? " is-active" : "") + '" role="tab"' +
+      ' aria-selected="' + (dim === active ? "true" : "false") + '"' +
+      ' data-attr-dimension="' + safeText(dim) + '"' +
+      (err ? ' data-dimension-error="' + safeText(err) + '"' : "") + ">" +
+      safeText(t(dimensionLabelKey(dim), lang)) + "</button>";
+  }).join("");
+  return '<div class="analytics__attr-tabs" role="tablist" data-attr-tabs>' + buttons + "</div>";
+}
+
+/** 缺测说明：已知字段翻成本地文案，未知字段原样保留（不猜语义）。 */
+function renderAttributionGaps(rep, lang) {
+  if (!rep.gaps.length) return "";
+  const known = {
+    runs_by_dimension: "attr.run.grain",
+    tool_seconds: "attr.gap.tool_seconds",
+  };
+  const items = rep.gaps.map(gap => {
+    const key = known[gap.field];
+    const text = key ? t(key, lang) : gap.reason;
+    return "<li><code>" + safeText(gap.field) + "</code> " + safeText(text) + "</li>";
+  }).join("");
+  return '<div class="analytics__attr-gaps" data-attr-gaps><h3>' +
+    safeText(t("attr.gaps", lang)) + "</h3><ul>" + items + "</ul></div>";
+}
+
+function renderAttributionFooter(rep, project, lang) {
+  const wm = rep.watermark;
+  const drill = project
+    ? '<a class="analytics__attr-drill-link" href="' + safeText(runDrillHref(project)) +
+      '" data-drill="runs">' + safeText(t("attr.run.drill", lang)) + "</a>"
+    : '<span class="field-hint">' + safeText(t("attr.run.drill.missing_project", lang)) + "</span>";
+  return '<div class="analytics__attr-footer" data-attr-footer>' +
+    '<p class="analytics__attr-drill">' + drill + ' <span class="field-hint">' +
+    safeText(t("attr.run.grain", lang)) + "</span></p>" +
+    (wm
+      ? '<p class="analytics__cursors">' + safeText(t("attr.watermark", lang)) + "=" +
+        safeText(wm.cursor ?? "—") + " · " + safeText(wm.complete_before ?? "—") + "</p>"
+      : "") +
+    "</div>";
+}
+
+/**
+ * 用量归属面板。
+ *
+ * @param {object} attribution { status, dimension, dimensions, reports, errors }
+ * @param {string} lang
+ * @param {object} options { project }
+ */
+export function renderAttributionPanel(attribution, lang = "zh", options = {}) {
+  const state = attribution && typeof attribution === "object" ? attribution : null;
+  if (!state) return "";
+  const status = state.status || "loading";
+  const head = '<div class="analytics__attr-head"><h2>' + safeText(t("attr.title", lang)) + "</h2>" +
+    '<p class="field-hint">' + safeText(t("attr.basis", lang)) + "</p></div>";
+  const open = extra => '<section class="analytics__attribution" data-attribution data-status="' +
+    safeText(status) + '"' + (extra || "") + ">";
+
+  if (status === "loading") {
+    return open() + head + '<p class="nodes-loading">' + safeText(t("attr.loading", lang)) + "</p></section>";
+  }
+  if (status === "unauthenticated") {
+    return open() + head +
+      emptyState(lang, ["attr.unauthenticated", "attr.error.hint"]) + "</section>";
+  }
+  if (status === "unsupported") {
+    return open() + head + emptyState(lang, ["attr.unsupported", "attr.error.hint"]) + "</section>";
+  }
+  if (status === "error") {
+    return open() + head +
+      '<div class="empty-state" data-attr-error><p class="empty-state__text">' +
+      safeText(t("attr.error", lang)) + '</p><p class="empty-state__text">' +
+      safeText(t("attr.error.hint", lang)) + '</p><button type="button" class="analytics__attr-retry"' +
+      ' data-action="retry-attribution">' + safeText(t("attr.retry", lang)) + "</button></div></section>";
+  }
+
+  const dimensions = Array.isArray(state.dimensions) && state.dimensions.length
+    ? state.dimensions.filter(dim => ATTRIBUTION_DIMENSIONS.includes(dim))
+    : [...ATTRIBUTION_DIMENSIONS];
+  const active = dimensions.includes(state.dimension) ? state.dimension : dimensions[0];
+  const reports = state.reports && typeof state.reports === "object" ? state.reports : {};
+  const errors = state.errors && typeof state.errors === "object" ? state.errors : {};
+  const rep = reports[active];
+  const project = String(options.project || (rep && rep.scope && rep.scope.projectId) || "").trim();
+
+  let body = "";
+  if (!rep) {
+    body = '<div class="empty-state" data-attr-error><p class="empty-state__text">' +
+      safeText(t("attr.error", lang)) + '</p><p class="empty-state__text">' +
+      safeText(errors[active] ? String(errors[active]) : t("attr.error.hint", lang)) +
+      '</p><button type="button" class="analytics__attr-retry" data-action="retry-attribution">' +
+      safeText(t("attr.retry", lang)) + "</button></div>";
+  } else {
+    const partial = rep.completeness !== "complete" || rep.totals.usageUnknown;
+    const rows = rep.rollups.map(row => renderAttributionRow(row, lang)).join("");
+    const headers = [
+      ["attr.table.value", "left"],
+      ["attr.table.turns", "num"],
+      ["attr.table.tokens", "num"],
+      ["attr.table.coverage", "num"],
+      ["attr.table.quality", "left"],
+      ["attr.table.granularity", "left"],
+      ["attr.table.evidence", "left"],
+    ].map(([key, kind]) => '<th scope="col"' + (kind === "num" ? ' class="analytics__num"' : "") + ">" +
+      safeText(t(key, lang)) + "</th>").join("");
+    body =
+      (partial
+        ? '<p class="analytics__missing-banner" data-attr-partial="true">' +
+          safeText(t("attr.partial", lang)) + "</p>"
+        : "") +
+      renderAttributionTotals(rep, lang) +
+      (rows
+        ? '<div class="table-wrap"><table class="table analytics__attr-table" data-attr-table>' +
+          "<thead><tr>" + headers + "</tr></thead><tbody>" + rows + "</tbody></table></div>"
+        : '<p class="analytics__attr-empty" data-attr-empty>' + safeText(t("attr.empty", lang)) +
+          '</p><p class="field-hint">' + safeText(t("attr.empty.hint", lang)) + "</p>") +
+      renderAttributionGaps(rep, lang) +
+      renderAttributionFooter(rep, project, lang);
+  }
+
+  return open(' data-dimension="' + safeText(active) + '"') + head +
+    renderAttributionTabs(dimensions, active, errors, lang) +
+    '<p class="field-hint analytics__attr-tab-hint">' + safeText(t("attr.tab.hint", lang)) + "</p>" +
+    body + "</section>";
+}
+
 /**
  * 渲染统计视图。
  * @param {object} state { status, report }
@@ -424,12 +758,16 @@ export function renderAnalytics(state = {}, options = {}) {
       " " + safeText(t("analytics.unknown.hint", lang)) + "</p>"
     : "";
 
+  const project = String(options.project || (rep.scope && rep.scope.project_id) || "").trim();
+  const attribution = renderAttributionPanel(state.attribution, lang, { project });
+
   return '<div class="analytics" data-status="' +
     safeText(showUnknownBanner && status === "ready" ? "unknown" : (status || "ready")) + '">' +
     banner +
     '<div class="analytics__cards">' +
     renderDeliveriesCard(rep, lang) + renderInvestCard(rep, lang) + renderUsageCard(rep, lang) +
     "</div>" +
+    attribution +
     '<div class="analytics__charts">' +
     renderSourceChart(rep, lang) + renderDayChart(rep, lang) +
     "</div>" +

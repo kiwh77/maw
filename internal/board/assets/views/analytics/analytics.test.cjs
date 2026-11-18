@@ -164,3 +164,271 @@ test("E2E-102 未选工程时指向工程下拉，而不是说没有统计结果
   assert.ok(en.includes("No project selected"));
   assert.ok(!/[\u4e00-\u9fa5]/.test(en), "英文界面不应残留中文");
 });
+
+// ---------- PI-203：用量归属 ----------
+
+const ATTRIBUTION_MODULE = pathToFileURL(path.join(__dirname, "attribution.mjs")).href;
+const loadAttribution = () => import(ATTRIBUTION_MODULE);
+
+/** 一份带「逐次调用 + 旧 CLI 运行级 + 未声明维度值」的归属报表。 */
+const attributionReport = (overrides = {}) => ({
+  dimension: "source",
+  scope: { project_id: "p1", start: "2026-10-23T00:00:00Z", end: "2026-10-24T00:00:00Z", timezone: "Asia/Shanghai" },
+  completeness: "partial",
+  watermark: { cursor: 42, complete_before: 40 },
+  gaps: [{ field: "runs_by_dimension", reason: "Run 结果只按节点归集" }],
+  rollups: [
+    {
+      dimension: "source", value: "pi", scopes: ["call"], turns: 3,
+      tokens: { input_tokens: 900, output_tokens: 300, total_tokens: 1200, cache_read_tokens: 200, cache_write_tokens: null },
+      usage_unknown: false, estimated_turns: 1, cache_normalized: 2, cache_unverified: 0,
+      usage_observed: { numerator: 3, denominator: 3, ratio: 1 },
+      evidence: ["dimension:source", "scope:call"],
+    },
+    {
+      dimension: "source", value: "codebuddy", scopes: ["run"], turns: 2,
+      tokens: { input_tokens: null, output_tokens: null, total_tokens: null },
+      usage_unknown: true, estimated_turns: 0, cache_normalized: 0, cache_unverified: 0,
+      usage_observed: { numerator: 0, denominator: 2, ratio: 0 },
+      evidence: ["dimension:source", "scope:run"],
+    },
+    {
+      dimension: "source", value: "", scopes: [], turns: 1,
+      tokens: { input_tokens: null, output_tokens: null, total_tokens: null },
+      usage_unknown: true,
+      usage_observed: { numerator: 0, denominator: 1, ratio: 0 },
+    },
+  ],
+  totals: {
+    tokens: { total_tokens: 1200, input_tokens: 900, output_tokens: 300 },
+    calls_with_usage: { numerator: 3, denominator: 6, ratio: 0.5 },
+    turns_with_usage: { numerator: 3, denominator: 6, ratio: 0.5 },
+    run_success: { numerator: 0, denominator: 0, ratio: null },
+    delivery_pass: { numerator: 0, denominator: 2, ratio: 0 },
+    usage_unknown: true,
+    estimated_cost: { amount_usd: null, basis: "未配置价目表" },
+  },
+  ...overrides,
+});
+
+/** 归一化之后的 ready 归属状态（视图只认归一模型）。 */
+async function readyAttribution(overrides = {}) {
+  const mod = await loadAttribution();
+  return {
+    status: "ready",
+    dimension: "source",
+    dimensions: ["source", "node", "model", "purpose"],
+    reports: { source: mod.normalizeAttribution(attributionReport(overrides)) },
+    errors: {},
+  };
+}
+
+test("归属报表归一：缺 token 保持 null，零分母比率保持 null", async () => {
+  const mod = await loadAttribution();
+  const rep = mod.normalizeAttribution(attributionReport({
+    dimension: "purpose",
+    rollups: [{ dimension: "purpose", value: "diagnose", scopes: ["call"], turns: 1, tokens: {}, usage_observed: { numerator: 0, denominator: 0 } }],
+  }));
+  assert.equal(rep.dimension, "purpose");
+  assert.equal(rep.rollups[0].tokens.total, null, "缺 token 不得变成 0");
+  assert.deepEqual(rep.totals.runSuccess, { numerator: 0, denominator: 0, ratio: null });
+  assert.equal(rep.totals.cost.amountUSD, null);
+  assert.equal(rep.scope.projectId, "p1");
+});
+
+test("归属面板：四个维度可切换，汇总带分子分母，Run 成功零分母写无分母", async () => {
+  const mod = await load();
+  const html = mod.renderAttributionPanel(await readyAttribution(), "zh");
+  assert.ok(html.includes('data-attribution'));
+  assert.ok(html.includes('data-dimension="source"'));
+  for (const dim of ["source", "node", "model", "purpose"]) {
+    assert.ok(html.includes(`data-attr-dimension="${dim}"`), dim + " 维度缺一不可");
+  }
+  for (const label of ["来源", "节点", "模型", "用途"]) {
+    assert.ok(html.includes(">" + label + "</button>"), "维度标签要翻译成中文：" + label);
+  }
+  assert.ok(!html.includes("attr.dimension."), "维度标签不得漏翻成 i18n key");
+  assert.ok(html.includes("调用覆盖（有用量/调用）"));
+  assert.ok(html.includes("3/6 (50%)"), "比率必须写出分子/分母");
+  assert.ok(html.includes("Run 成功"));
+  assert.ok(html.includes("0/0"), "零分母照实写 0/0");
+  assert.ok(html.includes("无分母"), "零分母不得写成 0%");
+  assert.ok(!html.includes("0/0 (0%)"), "零分母不得伪造百分比");
+});
+
+test("归属面板：逐次调用与旧 CLI 运行级按原粒度标注，不合并", async () => {
+  const mod = await load();
+  const html = mod.renderAttributionPanel(await readyAttribution(), "zh");
+  assert.ok(html.includes('data-granularity="call"'));
+  assert.ok(html.includes("逐次调用"));
+  assert.ok(html.includes('data-granularity="run"'));
+  assert.ok(html.includes("运行级（旧 CLI 汇总）"), "旧 CLI 数据按原粒度显示");
+  assert.ok(html.includes('data-dimension-value="codebuddy"'));
+});
+
+test("归属面板：未知用量、估算与未归一缓存都显式标注", async () => {
+  const mod = await load();
+  const html = mod.renderAttributionPanel(await readyAttribution(), "zh");
+  assert.ok(html.includes('data-unknown="true"'), "未知用量要有明确标记");
+  assert.ok(html.includes("估算 1 轮"), "估算轮次必须写明");
+  assert.ok(html.includes("缓存已归一 2"));
+  assert.ok(html.includes('data-attr-partial="true"'), "部分未知必须有横幅");
+  assert.ok(html.includes("部分未知"));
+  // 未知 token 不得渲染成 0。
+  assert.ok(!html.includes("<td>0</td>"));
+});
+
+test("归属面板：空维度值写「未声明」，不写空白", async () => {
+  const mod = await load();
+  const html = mod.renderAttributionPanel(await readyAttribution(), "zh");
+  assert.ok(html.includes('data-undeclared="true"'));
+  assert.ok(html.includes("未声明"));
+});
+
+test("归属面板：可从汇总追到 Run，并保留水位与缺测说明", async () => {
+  const mod = await load();
+  const html = mod.renderAttributionPanel(await readyAttribution(), "zh");
+  assert.ok(html.includes('data-drill="runs"'), "汇总必须能下钻到 Run 列表");
+  assert.ok(html.includes("view=runs"), "下钻地址要带 run 视图");
+  assert.ok(html.includes("project=p1"), "下钻地址要带工程作用域");
+  assert.ok(html.includes("去 Run 列表核对"));
+  assert.ok(html.includes("归属水位=42"));
+  assert.ok(html.includes("<code>runs_by_dimension</code>"), "缺测字段要原样可查");
+});
+
+test("归属面板：没有可归集用量时给空态而不是全零表", async () => {
+  const mod = await load();
+  const attribution = await readyAttribution({ rollups: [], totals: {} });
+  const html = mod.renderAttributionPanel(attribution, "zh");
+  assert.ok(html.includes('data-attr-empty'));
+  assert.ok(html.includes("没有可归集的用量"));
+  assert.ok(!html.includes('data-attr-table'), "没有行就不要渲染表头");
+});
+
+test("归属面板：某维度失败不影响其它维度，错误可重试", async () => {
+  const mod = await load();
+  const attribution = await readyAttribution();
+  attribution.dimension = "node";
+  attribution.errors = { node: "http_500" };
+  const html = mod.renderAttributionPanel(attribution, "zh");
+  assert.ok(html.includes("归属统计加载失败"));
+  assert.ok(html.includes('data-action="retry-attribution"'));
+  assert.ok(html.includes('data-attr-dimension="source"'), "其它维度仍可切换");
+  assert.ok(html.includes('data-dimension-error="http_500"'));
+});
+
+test("归属面板：loading／未登录／不支持／整体失败各有状态", async () => {
+  const mod = await load();
+  const cases = {
+    loading: { status: "loading" },
+    unauthenticated: { status: "unauthenticated" },
+    unsupported: { status: "unsupported" },
+    error: { status: "error" },
+  };
+  const seen = new Set();
+  for (const [key, state] of Object.entries(cases)) {
+    const html = mod.renderAttributionPanel(state, "zh");
+    assert.ok(html.includes(`data-status="${key}"`), key);
+    assert.ok(html.length > 0, key);
+    assert.ok(!seen.has(html), key + " 与其他状态重复");
+    seen.add(html);
+  }
+});
+
+test("归属面板：英文界面无中文，值经转义", async () => {
+  const mod = await load();
+  const attribution = await readyAttribution({
+    rollups: [{
+      dimension: "source", value: "<script>x</script>", scopes: ["call"], turns: 1,
+      tokens: { total_tokens: 10 },
+      usage_observed: { numerator: 1, denominator: 1, ratio: 1 },
+      evidence: ["scope:call"],
+    }],
+    gaps: [],
+    completeness: "complete",
+    totals: { tokens: { total_tokens: 10 }, usage_unknown: false },
+  });
+  const html = mod.renderAttributionPanel(attribution, "en");
+  assert.ok(html.includes("Usage attribution"));
+  assert.ok(html.includes("Per-call"));
+  assert.doesNotMatch(html, /[\u4e00-\u9fa5]/);
+  assert.ok(!html.includes("<script>"));
+  assert.ok(html.includes("&lt;script&gt;"));
+});
+
+test("统计视图接线：有归属数据才多出面板，没有时保持原样", async () => {
+  const mod = await load();
+  const withAttr = mod.renderAnalytics({ report: report(), attribution: await readyAttribution() }, { lang: "zh" });
+  assert.ok(withAttr.includes("data-attribution"));
+  assert.ok(withAttr.includes("data-card=\"usage\""), "原有卡片仍要在");
+  const without = mod.renderAnalytics({ report: report() }, { lang: "zh" });
+  assert.ok(!without.includes("data-attribution"));
+});
+
+test("归属取数：每个维度独立成败，全失败才整体失败", async () => {
+  const mod = await loadAttribution();
+  const payload = { attribution: attributionReport(), completeness: "partial" };
+  const urls = [];
+  const fetchImpl = async url => {
+    urls.push(url);
+    if (url.includes("dimension=node")) return { ok: false, status: 500 };
+    if (url.includes("dimension=model")) return { ok: false, status: 401 };
+    return { ok: true, status: 200, json: async () => payload };
+  };
+  const out = await mod.fetchAttribution("p1", { fetchImpl });
+  assert.equal(out.status, "ready");
+  assert.ok(out.reports.source && out.reports.purpose);
+  assert.equal(out.errors.node, "http_500");
+  assert.equal(out.errors.model, "unauthenticated");
+  assert.equal(urls.length, 4);
+  assert.ok(urls.every(u => u.startsWith("/api/v1/projects/p1/analytics?dimension=")));
+
+  const allFail = await mod.fetchAttribution("p1", { fetchImpl: async () => ({ ok: false, status: 500 }) });
+  assert.equal(allFail.status, "error");
+
+  const allUnauth = await mod.fetchAttribution("p1", { fetchImpl: async () => ({ ok: false, status: 401 }) });
+  assert.equal(allUnauth.status, "unauthenticated");
+
+  const missing = await mod.fetchAttribution("p1", { fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({}) }) });
+  assert.equal(missing.status, "unsupported", "没有 attribution 字段 = 这次查询不支持归集");
+});
+
+test("归属取数：无工程时走全局聚合路由", async () => {
+  const mod = await loadAttribution();
+  const urls = [];
+  await mod.fetchAttribution("", {
+    fetchImpl: async url => {
+      urls.push(url);
+      return { ok: true, status: 200, json: async () => ({ attribution: attributionReport() }) };
+    },
+  });
+  assert.ok(urls.every(u => u.startsWith("/api/v1/analytics?dimension=")), urls.join(","));
+});
+
+test("归属面板：用途维度翻成可读标签，原始值仍可核对", async () => {
+  const mod = await load();
+  const attributionMod = await loadAttribution();
+  const attribution = {
+    status: "ready",
+    dimension: "purpose",
+    dimensions: ["source", "node", "model", "purpose"],
+    reports: {
+      purpose: attributionMod.normalizeAttribution({
+        dimension: "purpose",
+        rollups: [
+          { dimension: "purpose", value: "worker", scopes: ["call"], turns: 1, tokens: { total_tokens: 5 } },
+          { dimension: "purpose", value: "lead", scopes: ["call"], turns: 1, tokens: { total_tokens: 5 } },
+          { dimension: "purpose", value: "diagnose", scopes: ["call"], turns: 1, tokens: { total_tokens: 5 } },
+        ],
+        totals: { usage_unknown: false },
+        completeness: "complete",
+      }),
+    },
+    errors: {},
+  };
+  const html = mod.renderAttributionPanel(attribution, "zh");
+  assert.ok(html.includes("Worker（执行）"));
+  assert.ok(html.includes("Lead（规划）"));
+  assert.ok(html.includes("诊断"));
+  assert.ok(html.includes('data-dimension-value="diagnose"'), "原始值要留作核对");
+});
