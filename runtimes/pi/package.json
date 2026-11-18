@@ -1,0 +1,22 @@
+{
+  "name": "@maw/pi-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi SDK 执行器：worker/lead/diagnose 三模式共用的 maw.pi.execution/v1 协议实现",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "probe": "node src/main.mjs --probe"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-coding-agent": "1.5.2"
+  }
+}
