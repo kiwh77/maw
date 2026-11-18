@@ -394,3 +394,74 @@ func TestUnsupportedPlatformIsExplicit(t *testing.T) {
 		t.Fatalf("非 macOS 恢复核对应明确不支持: %v", err)
 	}
 }
+
+// TestStopKillsPiToolTree 覆盖 Pi 会话的停止语义：
+// 运行时（node）自己会起工具子进程（bash/编辑），停止必须覆盖整组，
+// 不能只杀外层进程留一个孤儿在后台继续写文件。
+func TestStopKillsPiToolTree(t *testing.T) {
+	requireDarwinProcessTools(t)
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("需要 node 复现 Pi 运行时的进程树")
+	}
+	dir := t.TempDir()
+	// 模拟运行时：拉起一个长驻工具子进程，并把它的 PID 落盘，供测试核对。
+	script := filepath.Join(dir, "runtime.mjs")
+	if err := os.WriteFile(script, []byte(`
+import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+writeFileSync('child.pid', String(child.pid));
+setInterval(() => {}, 1000);
+`), 0o644); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	p, err := Start(StartSpec{
+		RunID: "run_pi_tree",
+		Argv:  []string{node, script},
+		Dir:   dir,
+		Nonce: newNonce(t),
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		_, _ = p.Stop(StopCancel)
+	}()
+
+	pidFile := filepath.Join(dir, "child.pid")
+	deadline := time.Now().Add(5 * time.Second)
+	var childPID string
+	for {
+		if b, err := os.ReadFile(pidFile); err == nil && len(b) > 0 {
+			childPID = strings.TrimSpace(string(b))
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("工具子进程未启动（child.pid 未出现）")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	ev, err := p.Stop(StopCancel)
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if !ev.Exited || !ev.GroupEmpty || !ev.Reusable() {
+		t.Fatalf("停止应确认整组清空：%+v", ev)
+	}
+
+	// 工具子进程必须一起消失，不能留孤儿。
+	gone := false
+	for i := 0; i < 100; i++ {
+		if err := exec.Command("ps", "-p", childPID, "-o", "pid=").Run(); err != nil {
+			gone = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !gone {
+		t.Fatalf("停止后工具子进程 %s 仍存活：Pi 会话的进程树没有被覆盖", childPID)
+	}
+}

@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -112,6 +113,13 @@ func NodeRegister(cwd string, in NodeRegisterInput) (Result, error) {
 		return nil, errx.New("需要 --cli 或 --cmd", "例如 maw node register --id claude-1 --cli claude --model sonnet")
 	}
 	meta := localCLINodeMeta(argv, in.System)
+	// Pi 运行时用 --cmd 登记（argv = [node, runtimes/pi/src/main.mjs]）。
+	// 识别出来是为了让探测走 --probe、启动走 stdin 配置，而不是把模型提示塞进 argv。
+	if isPiRuntimeArgv(argv) {
+		meta["adapter_kind"] = "pi"
+		meta["auto_probe"] = true
+		meta["heartbeat_interval_sec"] = 60
+	}
 	if flavor := cliFlavorFromID(id, label); flavor != "" {
 		meta["cli_flavor"] = flavor
 	}
@@ -180,6 +188,22 @@ func NodeRemove(cwd, nodeID string, dryRun bool) (Result, error) {
 		return nil, err
 	}
 	return Result{"ok": true, "node_id": id, "removed": true}, nil
+}
+
+// isPiRuntimeArgv 识别 Pi 运行时的登记形态：node + runtimes/pi/**/main.mjs。
+//
+// 这是一个窄匹配：只认本仓 runtime 的目录约定，避免把任意 node 脚本当 Pi。
+func isPiRuntimeArgv(argv []string) bool {
+	if len(argv) < 2 {
+		return false
+	}
+	switch strings.TrimSpace(filepath.Base(argv[0])) {
+	case "node", "nodejs":
+	default:
+		return false
+	}
+	entry := strings.ReplaceAll(strings.TrimSpace(argv[1]), "\\", "/")
+	return strings.Contains(entry, "runtimes/pi/") && strings.HasSuffix(entry, "main.mjs")
 }
 
 func localCLINodeMeta(argv []string, system bool) map[string]any {

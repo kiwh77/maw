@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,6 +56,18 @@ func probeDueNodes(gdb string) error {
 			}
 			entry := nodeEntryPath(meta)
 			ok, detail := probeNodeEntry(entry)
+			// Pi 节点：入口存在还不够，必须让运行时自报版本与协议。
+			if ok && metaString(meta, "adapter_kind") == "pi" {
+				if argv := metaStrings(meta["argv"]); len(argv) >= 2 {
+					var info map[string]any
+					ok, detail, info = probePiRuntime(argv)
+					if ok {
+						for k, v := range info {
+							meta[k] = v
+						}
+					}
+				}
+			}
 			meta["last_probe_at"] = nowStr
 			meta["observed_at"] = nowStr
 			meta["auto_probe"] = true
@@ -79,6 +93,52 @@ func probeDueNodes(gdb string) error {
 		}
 		return nil
 	})
+}
+
+// probePiRuntime 执行 `<node> <main.mjs> --probe`，读运行时自报的版本与协议。
+//
+// 只读探测：不跑模型、不建会话；凭据不在环境里也能通过（--probe 不需要密钥）。
+// 输出必须是首行 JSON 且 protocol 与契约一致，否则按「入口不可用」处理。
+func probePiRuntime(argv []string) (bool, string, map[string]any) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], append(append([]string{}, argv[1:]...), "--probe")...)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, "probe timeout", nil
+		}
+		return false, strings.TrimSpace(string(out)), nil
+	}
+	line := strings.TrimSpace(string(out))
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	var report struct {
+		OK       bool   `json:"ok"`
+		Protocol struct {
+			Format  string `json:"format"`
+			Version string `json:"version"`
+		} `json:"protocol"`
+		SDK  string `json:"sdk"`
+		Node string `json:"node"`
+	}
+	if err := json.Unmarshal([]byte(line), &report); err != nil {
+		return false, "probe 输出不是 JSON: " + err.Error(), nil
+	}
+	if !report.OK || strings.TrimSpace(report.SDK) == "" {
+		return false, "probe 自报 ok=false 或缺 sdk 版本", nil
+	}
+	if report.Protocol.Format != "pi-stream-json" || report.Protocol.Version != "1" {
+		return false, "协议不匹配: " + report.Protocol.Format + "/" + report.Protocol.Version, nil
+	}
+	return true, "", map[string]any{
+		"version":          report.SDK,
+		"protocol_format":  report.Protocol.Format,
+		"protocol_version": report.Protocol.Version,
+		"runtime_node":     report.Node,
+	}
 }
 
 func nodeAutoProbeEnabled(meta map[string]any) bool {

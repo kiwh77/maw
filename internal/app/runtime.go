@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kiwh77/maw/internal/adapters/pi"
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/engine/dispatch"
 	"github.com/kiwh77/maw/internal/engine/model"
@@ -191,6 +192,12 @@ func (rt *Runtime) PrepareRunnerArtifacts(opDir string, op dispatch.Operation) e
 			if err := rt.prepareTaskWorkspace(op, opDir, node, &spec); err != nil {
 				return err
 			}
+		}
+	}
+	// Pi 节点：任务目录与任务卡已就绪后再生成 stdin 配置（里面要带 worktree 路径与范围）。
+	if node, ok := rt.assignedNode(op); ok && metaString(node.Meta, "adapter_kind") == "pi" {
+		if err := rt.applyPiLaunch(op, node, &spec); err != nil {
+			return err
 		}
 	}
 	specPath := filepath.Join(opDir, launchSpecFile)
@@ -442,6 +449,70 @@ func (rt *Runtime) prepareTaskWorkspace(op dispatch.Operation, opDir string, nod
 	}
 	spec.Cwd = wt
 	return rt.applyDshModelPatch(node, spec, wt)
+}
+
+// piLaunchConfig 是写进运行时 stdin 的一次执行配置（与 runtimes/pi 的约定一致）。
+type piLaunchConfig struct {
+	Mode       string   `json:"mode"`
+	Cwd        string   `json:"cwd"`
+	RunID      string   `json:"run_id"`
+	Generation int      `json:"generation"`
+	WriteScope []string `json:"write_scope"`
+	ReadScope  []string `json:"read_scope"`
+	AllowBash  bool     `json:"allow_bash"`
+	Model      string   `json:"model,omitempty"`
+	Prompt     string   `json:"prompt"`
+}
+
+// applyPiLaunch 把 Pi 节点的启动规格补成「配置走 stdin、协议走 pi-stream-json」。
+//
+// 关键点：
+//   - write_scope 来自任务卡，运行时据此在工具边界拒绝越界写（契约 §6）；
+//   - 模型提示不放 argv：设了 prompt_last 也只会让 argv 变成无意义参数；
+//   - 协议显式写成 pi-stream-json/1，SourceFor 才会选 Pi 适配器。
+func (rt *Runtime) applyPiLaunch(op dispatch.Operation, node *db.Node, spec *model.LaunchSpec) error {
+	if rt == nil || rt.pc == nil || spec == nil || node == nil {
+		return nil
+	}
+	projectID := strings.TrimSpace(string(op.ProjectID))
+	if projectID == "" {
+		projectID = rt.pc.ID()
+	}
+	cfg := piLaunchConfig{
+		Mode:       "worker",
+		Cwd:        spec.Cwd,
+		RunID:      string(op.RunID),
+		Generation: int(op.Generation),
+		Prompt:     taskPrompt,
+		Model:      effectiveModel(node.Meta, rt.modelOverride),
+	}
+	if task, _, err := rt.taskForInstance(projectID, string(op.Instance)); err != nil {
+		return err
+	} else if task != nil {
+		cfg.WriteScope = append([]string{}, task.WriteScope...)
+		cfg.ReadScope = append([]string{}, task.ReadScope...)
+	}
+	cfg.AllowBash = metaBool(node.Meta, "allow_bash", false)
+	if cfg.RunID == "" {
+		cfg.RunID = runIDForOperation(string(op.OperationID))
+	}
+	if cfg.Generation < 1 {
+		cfg.Generation = 1
+	}
+	if strings.TrimSpace(cfg.Cwd) == "" {
+		cfg.Cwd = spec.Cwd
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return errx.New("无法编码 Pi 运行配置: "+err.Error(), "检查任务 worktree 与 write_scope")
+	}
+	spec.StdinMode = model.StdinPipe
+	spec.StdinData = string(data)
+	spec.ExpectedProtocol = model.Protocol{Format: pi.ProtocolFormat, Version: pi.ProtocolVersion}
+	env := append([]string{}, spec.EnvAllowlist...)
+	env = append(env, pi.ModelEnvAllowlist...)
+	spec.EnvAllowlist = env
+	return nil
 }
 
 // taskForInstance 用实例身份反查任务行，并同时返回全量任务（写任务卡时需要 deps）。

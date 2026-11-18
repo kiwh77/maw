@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,12 +19,14 @@ const (
 	AdapterTrae      AdapterKind = "trae"
 	AdapterZCode     AdapterKind = "zcode"
 	AdapterLocalCLI  AdapterKind = "local_cli"
+	// AdapterPi 是 Pi 运行时（runtimes/pi）的接入器，协议 pi-stream-json/1。
+	AdapterPi AdapterKind = "pi"
 )
 
 // Valid 报告取值是否合法。
 func (a AdapterKind) Valid() bool {
 	switch a {
-	case AdapterCodeBuddy, AdapterWorkBuddy, AdapterTrae, AdapterZCode, AdapterLocalCLI:
+	case AdapterCodeBuddy, AdapterWorkBuddy, AdapterTrae, AdapterZCode, AdapterLocalCLI, AdapterPi:
 		return true
 	}
 	return false
@@ -90,6 +93,10 @@ type RunSpec struct {
 	Permission PermissionProfile `json:"permission"`
 	Session    SessionSpec       `json:"session"`
 	Timeout    time.Duration     `json:"timeout"`
+	// WriteScope／ReadScope 是这张卡的执行边界（契约 §6）：Pi 运行时据此拒绝越界写。
+	// 留空表示调用方没有声明范围——运行时会把写入一律拒绝，而不是放开。
+	WriteScope []string `json:"write_scope,omitempty"`
+	ReadScope  []string `json:"read_scope,omitempty"`
 }
 
 // Validate 拒绝不完整或不可判定的运行规格。
@@ -116,6 +123,18 @@ func (s RunSpec) Validate() []*Error {
 	if !s.InputMode.Valid() {
 		out = append(out, Violationf(CodePortFieldInvalid, "run_spec.input_mode",
 			"只能是 stdin/file/arg，收到 %q", s.InputMode))
+	}
+	for i, scope := range s.WriteScope {
+		p := "run_spec.write_scope[" + strconv.Itoa(i) + "]"
+		if err := validateScopePath(scope); err != nil {
+			out = append(out, Violation(CodePortFieldInvalid, p, err.Error()))
+		}
+	}
+	for i, scope := range s.ReadScope {
+		p := "run_spec.read_scope[" + strconv.Itoa(i) + "]"
+		if err := validateScopePath(scope); err != nil {
+			out = append(out, Violation(CodePortFieldInvalid, p, err.Error()))
+		}
 	}
 	if strings.TrimSpace(s.Input) == "" {
 		out = append(out, Violation(CodePortFieldInvalid, "run_spec.input", "任务输入不得为空"))
@@ -145,7 +164,10 @@ type LaunchSpec struct {
 	Argv             []string  `json:"argv"`
 	Cwd              string    `json:"cwd"`
 	StdinMode        StdinMode `json:"stdin_mode"`
-	EnvAllowlist     []string  `json:"env_allowlist"`
+	// StdinData 是随进程启动一次性写入 stdin 的内容（仅 StdinMode=pipe 时合法）。
+	// Pi 运行时用它接收运行配置：长文本不进 argv，也不落临时文件。
+	StdinData    string   `json:"stdin_data,omitempty"`
+	EnvAllowlist []string `json:"env_allowlist"`
 	ExpectedProtocol Protocol  `json:"expected_protocol"`
 }
 
@@ -175,6 +197,10 @@ func (s LaunchSpec) Validate() []*Error {
 	}
 	if s.Cwd != "" && !isAbsPath(s.Cwd) {
 		out = append(out, Violation(CodePortFieldInvalid, "launch_spec.cwd", "必须是绝对路径"))
+	}
+	if strings.TrimSpace(s.StdinData) != "" && s.StdinMode != StdinPipe {
+		out = append(out, Violation(CodePortFieldInvalid, "launch_spec.stdin_data",
+			"只有 stdin_mode=pipe 才允许携带 stdin_data"))
 	}
 	if !s.StdinMode.Valid() {
 		out = append(out, Violationf(CodePortFieldInvalid, "launch_spec.stdin_mode", "未知标准输入模式 %q", s.StdinMode))
@@ -454,6 +480,21 @@ func (e StopEvidence) Validate() []*Error {
 		out = append(out, Violation(CodePortFieldInvalid, "stop_evidence.evidence_ref", "确认停止必须可追溯"))
 	}
 	return out
+}
+
+// validateScopePath 拒绝绝对路径、上跳与空项：执行边界只接受仓库相对范围。
+func validateScopePath(p string) error {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return fmt.Errorf("范围项不能为空")
+	}
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~") || (len(p) > 1 && p[1] == ':') {
+		return fmt.Errorf("必须是仓库相对路径，收到 %q", p)
+	}
+	if strings.Contains(p, "..") {
+		return fmt.Errorf("不得包含 ..，收到 %q", p)
+	}
+	return nil
 }
 
 func isAbsPath(p string) bool {

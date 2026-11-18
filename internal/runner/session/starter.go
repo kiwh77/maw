@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,7 +64,12 @@ func (execStarter) start(spec model.LaunchSpec, runID model.RunID, gen model.Gen
 	cmd.Dir = spec.Cwd
 	cmd.Env = envFor(spec.EnvAllowlist)
 	if spec.StdinMode == model.StdinPipe {
-		cmd.Stdin = os.Stdin
+		if spec.StdinData != "" {
+			// 一次性配置：写完即关，子进程读到 EOF 就知道输入结束。
+			cmd.Stdin = strings.NewReader(spec.StdinData)
+		} else {
+			cmd.Stdin = os.Stdin
+		}
 	}
 	// 错误输出有上限：诊断够用，别把几 MB 拉进内存。
 	stderr := &boundedBuffer{limit: 8 << 10}
