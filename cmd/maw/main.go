@@ -881,6 +881,7 @@ func main() {
 	}
 	leadSignalsCmd.Flags().Bool("enqueue", false, "入队观察作业（需 lead 身份，受 auto_kinds 与升级人工约束）")
 	leadCmd.AddCommand(leadSignalsCmd)
+	addLeadGoalCommands(leadCmd, &cwd, printRes)
 	root.AddCommand(leadCmd)
 
 	// 同一二进制的内部 Runner：参数白名单，隐藏于帮助。

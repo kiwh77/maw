@@ -85,7 +85,9 @@ func PiAppendPlan(in PiAppendInput) (Result, error) {
 	if vs := plan.Validate(); len(vs) > 0 {
 		return nil, vs.Err()
 	}
-	if plan.Status != goal.PlanApproved {
+	// applied 也允许进入：那是重放，不是第二次入队。真正的重复追加由
+	// enqueue_key 台账拦住；这里只拒绝「从没批准过」或「已失效」的修订。
+	if plan.Status != goal.PlanApproved && plan.Status != goal.PlanApplied {
 		return nil, fmt.Errorf("%w: rev %d 当前 %s", errPiEnqueueNotApproved, plan.PlanRev, plan.Status)
 	}
 	if plan.Approval.State != goal.ApprovalApproved || strings.TrimSpace(plan.Approval.Approver) == "" {
@@ -276,6 +278,11 @@ func PiAppendPlan(in PiAppendInput) (Result, error) {
 	// 8. 写映射与终态台账（同事务）：重放靠这两张表，不靠目录或内存。
 	var linkRows []*goal.TaskLink
 	if err := withGlobalWrite(pc.GlobalDB, func(tx *sql.Tx) error {
+		// 修订的 applied 与映射/台账同事务：否则「已追加但修订还停在 approved」，
+		// 重放判断和看板都会看到两个互相矛盾的结论（契约 G204）。
+		if _, _, err := db.MarkPlanRevisionApplied(tx, pc.ID(), plan.GoalID, plan.PlanRev, actor); err != nil {
+			return err
+		}
 		for _, d := range decisions {
 			if d.State != piCardAppend && d.State != piCardPresent {
 				continue
