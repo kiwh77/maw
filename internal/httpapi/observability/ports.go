@@ -57,6 +57,26 @@ type StatsSource interface {
 	Report(ctx context.Context, q StatsQuery, data TimelineData) (*analytics.Report, error)
 }
 
+// AttributionQuery 是按归属维度的统计查询；空过滤条件不参与筛选。
+type AttributionQuery struct {
+	ProjectID string
+	SourceNS  string
+	Window    projection.Window
+	Loc       *time.Location
+	Dimension analytics.Dimension
+	NodeID    string
+	Model     string
+	Purpose   string
+}
+
+// AttributionSource 产出按节点／模型／来源／用途归集的可对账统计。
+//
+// 与 StatsSource 分开是有意的：报表口径先有，归属维度是后来加上去的；
+// 只实现 Report 的适配器仍然可用，归属查询缺失时接口回 capability 缺失，不编数据。
+type AttributionSource interface {
+	Attribution(ctx context.Context, q AttributionQuery, data TimelineData) (*analytics.AttributionReport, error)
+}
+
 // SessionQuery 是一次会话列表查询。
 type SessionQuery struct {
 	ProjectID string

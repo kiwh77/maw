@@ -17,6 +17,8 @@ type statsResponse struct {
 	meta
 	Result
 	Report *analytics.Report `json:"report"`
+	// Attribution 只在显式要求维度时返回：按节点／模型／来源／用途归集的可对账统计。
+	Attribution *analytics.AttributionReport `json:"attribution,omitempty"`
 }
 
 // handleStats 返回窗口内的统计报表。
@@ -78,6 +80,13 @@ func (a *API) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 归属统计：显式要求维度才查——不设维度时仍走原来的报表口径。
+	attribution, err := attributionOf(r, a, projectID, sourceNS, spec, data)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+
 	report, err := a.Stats.Report(r.Context(), StatsQuery{
 		ProjectID: projectID, SourceNS: sourceNS, Window: spec.Window, Loc: spec.Loc,
 	}, data)
@@ -119,7 +128,68 @@ func (a *API) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	res := newResult(capabilityOf("stats", true, ""), scope, window, wm,
 		completeness, gaps, missing, nil)
+	if attribution != nil && attribution.Totals.UsageUnknown {
+		missing = append(missing, Missing{
+			Section: "attribution", Reason: "usage_unknown",
+			Detail: "归集里存在未知用量：token 合计不含这部分，报表显示「部分未知」",
+		})
+		res.Missing = missing
+	}
 	writeJSON(w, http.StatusOK, statsResponse{
-		meta: meta{OK: true}, Result: res, Report: report,
+		meta: meta{OK: true}, Result: res, Report: report, Attribution: attribution,
 	})
+}
+
+// dimensionOf 解析归属维度；空表示不查归集。
+func dimensionOf(q map[string][]string) (analytics.Dimension, error) {
+	raw := strings.TrimSpace(firstQuery(q, "dimension"))
+	if raw == "" {
+		return "", nil
+	}
+	dim := analytics.Dimension(raw)
+	if !dim.Valid() {
+		return "", &ErrInvalid{Code: "invalid_query", Field: "dimension",
+			Message: "维度只能是 node／model／source／purpose"}
+	}
+	return dim, nil
+}
+
+// attributionOf 按需产出归属统计。
+//
+// 没有维度就返回 nil:不为了多一个字段改变既有报表形状。
+// 数据源不支持归属查询时也返回 nil——缺能力就少一节，不编数字。
+func attributionOf(r *http.Request, a *API, projectID, sourceNS string,
+	spec windowSpec, data TimelineData) (*analytics.AttributionReport, error) {
+	q := r.URL.Query()
+	dim, err := dimensionOf(q)
+	if err != nil {
+		return nil, err
+	}
+	if dim == "" {
+		return nil, nil
+	}
+	src, ok := a.Stats.(AttributionSource)
+	if !ok {
+		return nil, nil
+	}
+	return src.Attribution(r.Context(), AttributionQuery{
+		ProjectID: projectID,
+		SourceNS:  sourceNS,
+		Window:    spec.Window,
+		Loc:       spec.Loc,
+		Dimension: dim,
+		NodeID:    strings.TrimSpace(firstQuery(q, "node_id")),
+		Model:     strings.TrimSpace(firstQuery(q, "model")),
+		Purpose:   strings.TrimSpace(firstQuery(q, "purpose")),
+	}, data)
+}
+
+// firstQuery 取查询参数的第一个非空值。
+func firstQuery(q map[string][]string, key string) string {
+	for _, v := range q[key] {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

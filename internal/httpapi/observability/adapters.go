@@ -851,3 +851,39 @@ func placeholders(n int) string {
 	}
 	return b.String()
 }
+
+// Attribution 在一个只读快照里产出按归属维度归集的统计。
+func (s *SQLStats) Attribution(ctx context.Context, q AttributionQuery, data TimelineData) (*analytics.AttributionReport, error) {
+	if s == nil || s.Store == nil {
+		return nil, &ErrInvalid{Code: codeCapabilityOff, Field: "stats",
+			Message: "统计存储未配置"}
+	}
+	svc := s.Service
+	if svc == nil {
+		svc = &analytics.Service{}
+	}
+	var report *analytics.AttributionReport
+	err := s.Store.Read(func(tx *sql.Tx) error {
+		r, err := svc.Attribution(tx, analytics.AttributionQuery{
+			Query: analytics.Query{
+				ProjectID: q.ProjectID,
+				SourceNS:  q.SourceNS,
+				Window:    q.Window,
+				Loc:       q.Loc,
+			},
+			Dimension: q.Dimension,
+			NodeID:    q.NodeID,
+			Model:     q.Model,
+			Purpose:   q.Purpose,
+		}, data.Intervals, data.Cursors)
+		if err != nil {
+			return err
+		}
+		report = r
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return report, nil
+}
