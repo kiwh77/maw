@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -354,8 +355,117 @@ var migrations = []Migration{
 	{Version: 9, Name: "system_agent_jobs", SQL: systemAgentDDL},
 	{Version: 10, Name: "system_agent_dispatch_ready", SQL: systemAgentDispatchReadyDDL},
 	{Version: 11, Name: "iterations", SQL: iterationsDDL},
+	// v12–v14 由 system_jobs.go / task_lane.go 的 init 追加；v15 在台账字面量里声明，
+	// 执行顺序由 sortedMigrations 按版本号统一决定，不依赖注册位置。
+	{Version: 15, Name: "goal_plan_links", SQL: goalDDL},
 }
 
+// sortedMigrations 返回按版本号升序的迁移序列。
+//
+// 迁移条目分散在多个文件的 init 里追加，Go 的 init 顺序只能靠文件名保证，
+// 把执行顺序绑在「注册顺序」上迟早会踩坑；这里以版本号为准，注册位置只影响可读性。
+func sortedMigrations() []Migration {
+	out := make([]Migration, len(migrations))
+	copy(out, migrations)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	return out
+}
+
+// goalDDL 是 v15：目标级 Lead 的持久化状态（契约 maw.lead.goal/v1 §2–§9）。
+//
+// 只新增五张表，不改也不搬既有表：历史任务与它们的状态保持原样，
+// 「迁移保留历史任务」由这条约束保证，而不是靠回灌。
+//
+//	表                        职责
+//	goals                     目标身份 + 状态 + revision 乐观锁
+//	goal_versions             冻结的目标定义快照（验收条件、预算）
+//	goal_plan_revisions       不可变的计划修订 + 审批留痕 + 摘要
+//	goal_task_links           卡 → 任务实例的不可变映射（一实例至多一条）
+//	goal_enqueues             入队幂等台账（appended → applied/failed）
+const goalDDL = `
+CREATE TABLE IF NOT EXISTS goals (
+    project_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    iteration_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    active_version INTEGER NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0,
+    abandon_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, goal_id),
+    CHECK (status IN ('draft','active','verifying','paused','done','escalated','abandoned')),
+    CHECK (active_version >= 1),
+    CHECK (revision >= 0)
+);
+CREATE INDEX IF NOT EXISTS goals_status ON goals(project_id, status);
+CREATE INDEX IF NOT EXISTS goals_iteration ON goals(project_id, iteration_id);
+
+CREATE TABLE IF NOT EXISTS goal_versions (
+    project_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    goal_version INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    statement TEXT NOT NULL,
+    acceptance_json TEXT NOT NULL DEFAULT '[]',
+    budget_json TEXT NOT NULL DEFAULT '{}',
+    frozen_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, goal_id, goal_version)
+);
+
+CREATE TABLE IF NOT EXISTS goal_plan_revisions (
+    project_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    plan_rev INTEGER NOT NULL,
+    goal_version INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    baseline_json TEXT NOT NULL DEFAULT '{}',
+    plan_digest TEXT NOT NULL,
+    cards_json TEXT NOT NULL DEFAULT '[]',
+    approval_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    applied_at TEXT,
+    PRIMARY KEY (project_id, goal_id, plan_rev),
+    CHECK (kind IN ('initial','rework')),
+    CHECK (status IN ('proposed','approved','applied','rejected','invalidated','superseded'))
+);
+CREATE INDEX IF NOT EXISTS goal_plan_status ON goal_plan_revisions(project_id, goal_id, status);
+
+CREATE TABLE IF NOT EXISTS goal_task_links (
+    project_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    plan_rev INTEGER NOT NULL,
+    card_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    display_id TEXT NOT NULL,
+    version_no INTEGER NOT NULL,
+    enqueue_key TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'applied',
+    applied_at TEXT NOT NULL,
+    applied_by TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (project_id, instance_id),
+    UNIQUE (project_id, enqueue_key),
+    CHECK (state IN ('applied','drifted')),
+    CHECK (version_no >= 1)
+);
+CREATE INDEX IF NOT EXISTS goal_task_links_goal ON goal_task_links(project_id, goal_id, applied_at);
+
+CREATE TABLE IF NOT EXISTS goal_enqueues (
+    project_id TEXT NOT NULL,
+    enqueue_key TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    plan_rev INTEGER NOT NULL,
+    card_id TEXT NOT NULL,
+    plan_digest TEXT NOT NULL,
+    state TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, enqueue_key),
+    CHECK (state IN ('appended','applied','failed'))
+);
+CREATE INDEX IF NOT EXISTS goal_enqueues_goal ON goal_enqueues(project_id, goal_id, plan_rev);
+`
 
 // systemAgentDDL 是 v9：系统 Agent 任务队列（阻塞自愈 / 拆题 / 运维）。
 //
@@ -646,11 +756,9 @@ type querier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
-// Migrations 返回迁移序列的副本：调用方改切片不会动到内部注册表。
+// Migrations 返回迁移序列的副本（按版本升序）：调用方改切片不会动到内部注册表。
 func Migrations() []Migration {
-	out := make([]Migration, len(migrations))
-	copy(out, migrations)
-	return out
+	return sortedMigrations()
 }
 
 // LatestVersion 是本二进制迁移台账的末端版本。
@@ -698,9 +806,10 @@ func InspectSchema(q querier) (SchemaStatus, error) {
 
 	var name string
 	err := q.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, ledgerTable).Scan(&name)
+	ordered := sortedMigrations()
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		for _, m := range migrations {
+		for _, m := range ordered {
 			st.Pending = append(st.Pending, m.Version)
 		}
 		return st, nil
@@ -732,7 +841,7 @@ func InspectSchema(q querier) (SchemaStatus, error) {
 	if err := rows.Err(); err != nil {
 		return st, err
 	}
-	for _, m := range migrations {
+	for _, m := range ordered {
 		if !applied[m.Version] {
 			st.Pending = append(st.Pending, m.Version)
 		}
@@ -808,7 +917,7 @@ func MigrateDB(conn *sql.DB) error {
 		_ = tx.Rollback()
 		return err
 	}
-	for _, m := range migrations {
+	for _, m := range sortedMigrations() {
 		if applied[m.Version] {
 			continue
 		}
