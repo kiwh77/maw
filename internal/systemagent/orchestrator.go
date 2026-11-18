@@ -224,9 +224,12 @@ func (o *Orchestrator) runJob(ctx context.Context, job *db.SystemJob) error {
 			ProjectPath: projectPath,
 			ProjectID:   job.ProjectID,
 			TaskID:      job.TaskID,
-			Reason:      job.Reason,
-			Kind:        job.Kind,
-			Message:     fmt.Sprintf("%v", job.Decision["message"]),
+			// 作业身份随请求下传：Pi 诊断的用量与审计按它反查（PI-305），
+			// 决策解析与动作策略仍在下面按原样执行。
+			JobID:   job.JobID,
+			Reason:  job.Reason,
+			Kind:    job.Kind,
+			Message: fmt.Sprintf("%v", job.Decision["message"]),
 		})
 		if err != nil {
 			return err

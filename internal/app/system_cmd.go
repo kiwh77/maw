@@ -60,6 +60,7 @@ func SystemStatus(cwd string) (Result, error) {
 		}
 		return nil
 	})
+	backend := resolveDiagnoseBackend(pc, cfg, store)
 	return Result{
 		"ok":                      true,
 		"enabled":                 cfg.Enabled,
@@ -70,6 +71,8 @@ func SystemStatus(cwd string) (Result, error) {
 		"auto_kinds":              cfg.AutoKinds,
 		"llm_node":                cfg.LLMNode,
 		"worker_node":             cfg.WorkerNode,
+		"diagnose_backend":        backend.Kind,
+		"diagnose":                diagnoseBackendStatus(cfg, backend),
 		"queue": map[string]any{
 			"queued": queued, "running": running, "done": done,
 			"failed": failed, "escalated": escalated, "recent": len(jobs),
@@ -236,20 +239,13 @@ func buildOrchestratorWithCoord(pc *projCtx, cfg config.SystemAgent, coord *disp
 	if err != nil {
 		return nil, err
 	}
-	var inv systemagent.Invoker
-	if len(cfg.LLMCommand) > 0 {
-		inv = systemagent.ExecInvoker{Argv: cfg.LLMCommand, Timeout: 3 * time.Minute}
-	} else {
-		// 无 LLM 时规则层：无法判断则 escalate
-		inv = systemagent.FuncInvoker(func(ctx context.Context, req systemagent.DiagnoseRequest) (string, error) {
-			_ = ctx
-			return `{"action":"escalate_human","reason":"llm_command 未配置，默认升级人工"}`, nil
-		})
-	}
+	// 诊断后端的唯一解析处：显式 Pi 节点 > 旧 llm_command > 规则降级。
+	// 解析结果与 `maw system status` 同源，避免「状态说 Pi、实际跑命令」。
+	backend := resolveDiagnoseBackend(pc, cfg, store)
 	return &systemagent.Orchestrator{
 		Store:     store,
 		Config:    cfg,
-		Invoker:   inv,
+		Invoker:   backend.Invoker,
 		Effects:   appSystemEffects{cwd: pc.Repo},
 		Dispatch:  disp,
 		Reconcile: newLeadReconcilePort(store, rt),

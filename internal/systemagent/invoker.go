@@ -15,10 +15,13 @@ type DiagnoseRequest struct {
 	ProjectPath string
 	ProjectID   string
 	TaskID      string
-	Title       string
-	Reason      string
-	Kind        string
-	Message     string
+	// JobID 是这次诊断对应的 system job（编排器必填）：Pi 诊断的用量归属、
+	// run 关联与审计目录都按它反查；旧 Invoker 可忽略。
+	JobID   string
+	Title   string
+	Reason  string
+	Kind    string
+	Message string
 }
 
 // Invoker 调用本机 LLM CLI（或测试替身）产出决策文本。

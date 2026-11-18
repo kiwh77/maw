@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 
@@ -49,18 +50,24 @@ type Managed struct {
 // 它负责阻塞自愈 / 拆题 / 运维编排，**不负责**把任务自动派发出去——
 // 那件事只看 Managed.AutoEnabled。两个开关互不推导，可各自单独打开。
 type SystemAgent struct {
-	ConfigVersion    int      `toml:"config_version"`
-	Enabled          bool     `toml:"enabled"`
-	PollIntervalSec  int      `toml:"poll_interval_sec"`
-	MaxConcurrent    int      `toml:"max_concurrent"`
-	LLMNode          string   `toml:"llm_node"`
-	WorkerNode       string   `toml:"worker_node"`
-	LLMCommand       []string `toml:"llm_command"`
-	AutoKinds        []string `toml:"auto_kinds"`
-	EscalatePatterns []string `toml:"escalate_patterns"`
-	CooldownoutSec   int      `toml:"cooldown_sec"`
-	MaxAttempts      int      `toml:"max_attempts"`
-	OpsAllowlist     []string `toml:"ops_allowlist"`
+	ConfigVersion   int      `toml:"config_version"`
+	Enabled         bool     `toml:"enabled"`
+	PollIntervalSec int      `toml:"poll_interval_sec"`
+	MaxConcurrent   int      `toml:"max_concurrent"`
+	LLMNode         string   `toml:"llm_node"`
+	WorkerNode      string   `toml:"worker_node"`
+	LLMCommand      []string `toml:"llm_command"`
+	// DiagnoseTimeoutSec 是单次诊断调用的超时预算（秒）。
+	//
+	// Pi 诊断与旧的 llm_command 共用这个预算：超时不是「没消息」，必须留下
+	// 可审计结论（契约 maw.pi.execution/v1 §7）。0 或负数按 180 秒处理，
+	// 这样旧配置不写这一项也能读。
+	DiagnoseTimeoutSec int      `toml:"diagnose_timeout_sec"`
+	AutoKinds          []string `toml:"auto_kinds"`
+	EscalatePatterns   []string `toml:"escalate_patterns"`
+	CooldownoutSec     int      `toml:"cooldown_sec"`
+	MaxAttempts        int      `toml:"max_attempts"`
+	OpsAllowlist       []string `toml:"ops_allowlist"`
 }
 
 type Project struct {
@@ -154,6 +161,9 @@ func Load(path string) (*Config, error) {
 	if c.SystemAgent.MaxAttempts <= 0 {
 		c.SystemAgent.MaxAttempts = 3
 	}
+	if c.SystemAgent.DiagnoseTimeoutSec <= 0 {
+		c.SystemAgent.DiagnoseTimeoutSec = 180
+	}
 	if len(c.SystemAgent.AutoKinds) == 0 {
 		c.SystemAgent.AutoKinds = []string{"unblock_assist"}
 	}
@@ -219,6 +229,35 @@ func (c *Config) AutomationSummary() (dispatch bool, system bool) {
 	return dispatch, c.SystemAgentEnabled()
 }
 
+// DiagnoseNode 返回显式配置的诊断节点（system_agent.llm_node）。
+//
+// 空表示没有配置 Pi 诊断后端：此时系统 Agent 按旧路径（llm_command）或安全降级。
+func (c *Config) DiagnoseNode() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.SystemAgent.LLMNode)
+}
+
+// DiagnoseTimeout 返回单次诊断调用的超时预算；非正值回落到 180 秒。
+func (c *Config) DiagnoseTimeout() time.Duration {
+	if c == nil {
+		return defaultDiagnoseTimeout
+	}
+	return c.SystemAgent.DiagnoseTimeout()
+}
+
+// DiagnoseTimeout 返回单次诊断调用的超时预算；非正值回落到 180 秒。
+func (s SystemAgent) DiagnoseTimeout() time.Duration {
+	if s.DiagnoseTimeoutSec <= 0 {
+		return defaultDiagnoseTimeout
+	}
+	return time.Duration(s.DiagnoseTimeoutSec) * time.Second
+}
+
+// defaultDiagnoseTimeout 与旧 llm_command 的 3 分钟预算保持一致。
+const defaultDiagnoseTimeout = 180 * time.Second
+
 const managedSectionTOML = `
 [managed]
 # 受管执行：默认关闭自动派发；硬上限 1（与 max_parallel 看板参考值分离）
@@ -238,9 +277,13 @@ config_version = 1
 enabled = false
 poll_interval_sec = 5
 max_concurrent = 1
+# 诊断后端：填已登记的 Pi 节点 ID 时，诊断走 Pi 运行时的 diagnose 模式（只读）；
+# 留空则沿用 llm_command，未配置任何后端时安全降级为升级人工。
 llm_node = ""
 worker_node = ""
 llm_command = []
+# 单次诊断调用的超时（秒）；超时会留下可审计结论，不会被当成「还在跑」
+diagnose_timeout_sec = 180
 auto_kinds = ["unblock_assist"]
 escalate_patterns = ["needs_human", "auth_required"]
 cooldown_sec = 300
@@ -412,9 +455,13 @@ config_version = 1
 enabled = false
 poll_interval_sec = 5
 max_concurrent = 1
+# 诊断后端：填已登记的 Pi 节点 ID 时，诊断走 Pi 运行时的 diagnose 模式（只读）；
+# 留空则沿用 llm_command，未配置任何后端时安全降级为升级人工。
 llm_node = ""
 worker_node = ""
 llm_command = []
+# 单次诊断调用的超时（秒）；超时会留下可审计结论，不会被当成「还在跑」
+diagnose_timeout_sec = 180
 auto_kinds = ["unblock_assist"]
 escalate_patterns = ["needs_human", "auth_required"]
 cooldown_sec = 300

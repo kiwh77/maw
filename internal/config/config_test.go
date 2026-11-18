@@ -164,3 +164,66 @@ func TestAutoSelectDefaultsOffAndIsIndependent(t *testing.T) {
 		t.Fatal("开启 auto_select 不得打开系统 Agent")
 	}
 }
+
+// PI-305：诊断后端配置向后兼容。
+//
+// 旧配置没有 diagnose_timeout_sec：必须能读，并按 180 秒的既有预算回落；
+// 新配置显式给 Pi 节点与超时：原样读出，不做「猜一个更小/更大的值」。
+func TestSystemAgentDiagnoseConfigIsBackwardCompatible(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	write := func(body string) *Config {
+		t.Helper()
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		return cfg
+	}
+
+	old := write(`[project]
+main_branch = "main"
+
+[system_agent]
+config_version = 1
+enabled = true
+llm_command = ["echo", "ok"]
+`)
+	if old.DiagnoseNode() != "" {
+		t.Fatalf("旧配置没有 llm_node，DiagnoseNode 应为空：%q", old.DiagnoseNode())
+	}
+	if old.SystemAgent.DiagnoseTimeoutSec != 180 {
+		t.Fatalf("旧配置应回落 180 秒，得到 %d", old.SystemAgent.DiagnoseTimeoutSec)
+	}
+	if old.DiagnoseTimeout().Seconds() != 180 {
+		t.Fatalf("超时预算=%v，期望 180s", old.DiagnoseTimeout())
+	}
+
+	piCfg := write(`[project]
+main_branch = "main"
+
+[system_agent]
+enabled = true
+llm_node = "pi-1"
+diagnose_timeout_sec = 45
+`)
+	if piCfg.DiagnoseNode() != "pi-1" {
+		t.Fatalf("DiagnoseNode=%q", piCfg.DiagnoseNode())
+	}
+	if piCfg.DiagnoseTimeout().Seconds() != 45 {
+		t.Fatalf("超时预算=%v，期望 45s", piCfg.DiagnoseTimeout())
+	}
+
+	zero := write(`[project]
+main_branch = "main"
+
+[system_agent]
+diagnose_timeout_sec = -5
+`)
+	if zero.SystemAgent.DiagnoseTimeoutSec != 180 {
+		t.Fatalf("非法超时应回落 180 秒，得到 %d", zero.SystemAgent.DiagnoseTimeoutSec)
+	}
+}
