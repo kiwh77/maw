@@ -358,6 +358,7 @@ var migrations = []Migration{
 	// v12–v14 由 system_jobs.go / task_lane.go 的 init 追加；v15 在台账字面量里声明，
 	// 执行顺序由 sortedMigrations 按版本号统一决定，不依赖注册位置。
 	{Version: 15, Name: "goal_plan_links", SQL: goalDDL},
+	{Version: 16, Name: "usage_attribution", SQL: usageAttributionDDL},
 }
 
 // sortedMigrations 返回按版本号升序的迁移序列。
@@ -620,6 +621,44 @@ CREATE INDEX IF NOT EXISTS iterations_project_status
 ALTER TABLE tasks ADD COLUMN iteration_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS tasks_iteration
     ON tasks(project_id, iteration_id, priority);
+`
+
+// usageAttributionDDL 是 v16：给用量与会话关联补上归属字段（PI-201）。
+//
+// 归属要能回答：哪个项目、哪个节点、哪一次 Run、第几代、哪一轮会话、哪一次模型调用，
+// 以及用途（worker／lead／diagnose）、实际供应商模型与来源原始字段。
+// 还要能区分「运行基线」与「调用事实」，并把被 call 级取代的 run 级汇总标出来。
+//
+// SQLite 的 ADD COLUMN 不能带 CHECK：取值约束（scope／quality／cache_state）留在代码里校验，
+// 表上只加 NOT NULL 默认值，老库补列时不会因历史行为空而失败。
+const usageAttributionDDL = `
+ALTER TABLE usage_records ADD COLUMN project_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN instance_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_records ADD COLUMN call_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN session_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN purpose TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN provider TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN model TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN cache_state TEXT NOT NULL DEFAULT 'absent';
+ALTER TABLE usage_records ADD COLUMN cache_evidence TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN baseline INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_records ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_records ADD COLUMN raw_json TEXT NOT NULL DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS usage_records_run
+    ON usage_records(run_id, generation, scope);
+CREATE INDEX IF NOT EXISTS usage_records_project
+    ON usage_records(project_id, recorded_at);
+CREATE INDEX IF NOT EXISTS usage_records_call
+    ON usage_records(call_id);
+CREATE INDEX IF NOT EXISTS usage_records_session
+    ON usage_records(session_id);
+ALTER TABLE run_source_links ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_source_links ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE run_source_links ADD COLUMN call_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_source_links ADD COLUMN purpose TEXT NOT NULL DEFAULT '';
 `
 
 // observabilityDDL 是 v8：来源会话／轮次、用量、投影水位与通知去重身份。

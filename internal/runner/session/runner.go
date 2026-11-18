@@ -59,6 +59,9 @@ type Runner struct {
 	observationFailures atomic.Int64
 	// observed 统计成功落库的观测条数；为 0 时由调用方补一条基线。
 	observed atomic.Int64
+	// observationBacklog 记下写库失败的 journal 序号，供事后补录（只记位置，不复制事实）。
+	backlogMu          sync.Mutex
+	observationBacklog []int64
 
 	// deliverMu 串行化「取待交付记录 + 提交 + 推进游标」这一整段。
 	// 摄取与心跳会同时想交付，不串行就会把同一条记录提交两次。
@@ -125,6 +128,13 @@ type Config struct {
 	Timeout time.Duration
 	// Heartbeat 是补交与巡检间隔；0 用默认值。
 	Heartbeat time.Duration
+
+	// 归属字段：观测事实按项目、节点、Run、代际与用途记账。
+	// 它们由 maw 绑定（领取时冻结），来源自述不作数。
+	ProjectID string
+	NodeID    string
+	// Purpose 是用量用途（worker／lead／diagnose）；空表示未声明，按未知保留。
+	Purpose string
 }
 
 func (c Config) validate() []*model.Error {
@@ -182,6 +192,9 @@ type Report struct {
 	// Observed 是成功落库的观测条数。为 0 表示这次运行没有产生任何来源观测，
 	// 调用方可据此补一条基线，而不是让运行在统计里消失。
 	Observed int64
+	// ObservationBacklog 是写库失败、等待补录的 journal 序号。
+	// 非空说明观测有缺口：原始记录还在，可事后 BackfillObservations 补上。
+	ObservationBacklog []int64
 }
 
 // runState 是单次 Run 的幂等标记：终态只能提交一次。
@@ -311,6 +324,7 @@ loop:
 	rep.Pending = r.journal.Status().PendingRecords
 	rep.ObservationFailures = r.observationFailures.Load()
 	rep.Observed = r.observed.Load()
+	rep.ObservationBacklog = r.observationBacklogSeqs()
 	return rep, nil
 }
 
@@ -386,7 +400,7 @@ func (r *Runner) ingest(ctx context.Context, cfg Config, ch child) ingestResult 
 		if _, err := r.journal.Append(journal.Record{
 			Kind: kind,
 			Source: journal.Source{
-				Namespace:    "codebuddy",
+				Namespace:    sourceNamespace(cfg.Protocol),
 				ParseVersion: cfg.Protocol.Version,
 				Path:         cfg.Spec.Executable,
 				RecordIndex:  index,

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/runner/observe"
@@ -141,5 +142,194 @@ func TestWriteFactsWithoutSessionIdentityWritesNothing(t *testing.T) {
 	}
 	if n := countRows(t, st, `SELECT COUNT(*) FROM run_source_links`); n != 0 {
 		t.Fatalf("没有来源身份却写了 %d 条关联", n)
+	}
+}
+
+// TestWriteFactsPiCallAttribution 说明 Pi 的逐次调用落到用量行时带得住归属：
+// 项目、节点、Run、代际、会话、调用、用途、供应商模型、缓存归一与原始字段。
+func TestWriteFactsPiCallAttribution(t *testing.T) {
+	st, s := newObserveStore(t)
+	in, out := int64(900), int64(120)
+	cacheRead := int64(400)
+	facts := observe.Facts{
+		RunID:           "run_pi",
+		InstanceID:      "ti_pi",
+		ProjectID:       "p1",
+		NodeID:          "node_pi",
+		Generation:      2,
+		Purpose:         observe.PurposeWorker,
+		SourceNS:        observe.PiSourceNS,
+		SessionID:       "run:run_pi",
+		RecordUUID:      "call:pc_1",
+		RecordType:      "usage",
+		CallID:          "pc_1",
+		OccurredAt:      time.Date(2026, 11, 18, 2, 41, 9, 0, time.UTC),
+		Semantic:        "delta",
+		Scope:           observe.ScopeCall,
+		InputTokens:     &in,
+		OutputTokens:    &out,
+		CacheReadTokens: &cacheRead,
+		Quality:         "observed",
+		Provider:        "anthropic",
+		Model:           "claude-x",
+		CacheEvidence:   "runtime:C30",
+		Evidence:        "runtime",
+		Raw:             map[string]any{"type": "usage", "payload": map[string]any{"scope": "call"}},
+	}
+	included := true
+	facts.CacheIncludedInInput = &included
+	if err := s.WriteFacts(context.Background(), facts); err != nil {
+		t.Fatalf("WriteFacts: %v", err)
+	}
+	if err := st.Read(func(tx *sql.Tx) error {
+		rows, err := db.ListUsageFacts(tx, db.UsageQuery{RunID: "run_pi", CallID: "pc_1"})
+		if err != nil {
+			return err
+		}
+		if len(rows) != 1 {
+			t.Fatalf("应写入 1 行调用用量，得到 %d", len(rows))
+		}
+		u := rows[0]
+		if u.Scope != db.UsageScopeCall {
+			t.Fatalf("口径应为 call，得到 %q", u.Scope)
+		}
+		if u.ProjectID != "p1" || u.NodeID != "node_pi" || u.Generation != 2 ||
+			u.SessionID != "pi:run:run_pi" || u.Purpose != "worker" {
+			t.Fatalf("归属字段丢失: %+v", u)
+		}
+		if u.Model != "claude-x" || u.Provider != "anthropic" {
+			t.Fatalf("供应商模型丢失: %q/%q", u.Provider, u.Model)
+		}
+		if u.CacheState != db.CacheStateVerified {
+			t.Fatalf("缓存归一应为 verified，得到 %q", u.CacheState)
+		}
+		if u.TotalTokens == nil || *u.TotalTokens != in+out {
+			t.Fatalf("total 应为 input+output（不含缓存），得到 %v", u.TotalTokens)
+		}
+		if u.Raw["type"] != "usage" {
+			t.Fatalf("原始字段应保留: %+v", u.Raw)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 重放同一次调用：身份由 call 派生，不会多记一次。
+	if err := s.WriteFacts(context.Background(), facts); err != nil {
+		t.Fatalf("重放 WriteFacts: %v", err)
+	}
+	if n := countRows(t, st, `SELECT COUNT(*) FROM usage_records WHERE run_id = ?`, "run_pi"); n != 1 {
+		t.Fatalf("重放后用量行=%d 期望仍为 1", n)
+	}
+}
+
+// TestWriteFactsCallSupersedesRunBaseline 说明运行基线与调用事实分开存：
+// 基线标记 baseline，call 级证据到达后 run 级标 superseded 保留，汇总只取 call 级。
+func TestWriteFactsCallSupersedesRunBaseline(t *testing.T) {
+	st, s := newObserveStore(t)
+	// 先落运行基线：没有任何可用量。
+	if err := s.WriteFacts(context.Background(), observe.Facts{
+		RunID:      "run_bl",
+		InstanceID: "ti_bl",
+		ProjectID:  "p1",
+		Generation: 1,
+		SourceNS:   observe.PiSourceNS,
+		SessionID:  "run:run_bl",
+		RecordUUID: "run:run_bl",
+		RecordType: "result",
+		OccurredAt: time.Date(2026, 11, 18, 1, 0, 0, 0, time.UTC),
+		Scope:      observe.ScopeRun,
+		Baseline:   true,
+		Quality:    "unknown",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 再落一次真实调用。
+	in, out := int64(50), int64(10)
+	if err := s.WriteFacts(context.Background(), observe.Facts{
+		RunID:        "run_bl",
+		InstanceID:   "ti_bl",
+		ProjectID:    "p1",
+		Generation:   1,
+		SourceNS:     observe.PiSourceNS,
+		SessionID:    "run:run_bl",
+		RecordUUID:   "call:pc_bl",
+		RecordType:   "usage",
+		CallID:       "pc_bl",
+		OccurredAt:   time.Date(2026, 11, 18, 1, 1, 0, 0, time.UTC),
+		Semantic:     "delta",
+		Scope:        observe.ScopeCall,
+		InputTokens:  &in,
+		OutputTokens: &out,
+		Quality:      "observed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Read(func(tx *sql.Tx) error {
+		sum, err := db.SummarizeRunUsage(tx, "run_bl", 1)
+		if err != nil {
+			return err
+		}
+		if sum.Scope != db.UsageScopeCall {
+			t.Fatalf("应采用 call 口径，得到 %q", sum.Scope)
+		}
+		if sum.InputTokens == nil || *sum.InputTokens != 50 {
+			t.Fatalf("汇总应只算 call 级，得到 %+v", sum.InputTokens)
+		}
+		if sum.SupersededRunRows != 0 {
+			// 基线本身没有用量行（unknown 不写用量），因此没有被取代的行。
+			t.Fatalf("没有 run 级用量行，不该有取代计数: %d", sum.SupersededRunRows)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWriteFactsNormalizesUnknownUsage 说明 writer 走归一：
+// quality=unknown 却带了部分 token 时落库为 null（原始值留在 raw），不是 0。
+func TestWriteFactsNormalizesUnknownUsage(t *testing.T) {
+	st, s := newObserveStore(t)
+	in := int64(9)
+	if err := s.WriteFacts(context.Background(), observe.Facts{
+		RunID:       "run_unk",
+		InstanceID:  "ti_unk",
+		ProjectID:   "p1",
+		Generation:  1,
+		SourceNS:    observe.PiSourceNS,
+		SessionID:   "run:run_unk",
+		RecordUUID:  "call:pc_unk",
+		RecordType:  "usage",
+		CallID:      "pc_unk",
+		OccurredAt:  time.Now().UTC(),
+		Semantic:    "delta",
+		Scope:       observe.ScopeCall,
+		InputTokens: &in,
+		Quality:     "unknown",
+		Evidence:    "来源只给了 input；output 缺失",
+		Raw:         map[string]any{"input_tokens": 9},
+	}); err != nil {
+		t.Fatalf("WriteFacts: %v", err)
+	}
+	if err := st.Read(func(tx *sql.Tx) error {
+		rows, err := db.ListUsageFacts(tx, db.UsageQuery{RunID: "run_unk"})
+		if err != nil {
+			return err
+		}
+		if len(rows) != 1 {
+			t.Fatalf("应写 1 行未知用量，得到 %d", len(rows))
+		}
+		u := rows[0]
+		if u.InputTokens != nil || u.OutputTokens != nil || u.TotalTokens != nil {
+			t.Fatalf("未知用量必须保持 null（不是 0）: %+v", u)
+		}
+		if u.Raw["input_tokens"] == nil {
+			t.Fatalf("原始值应保留在 raw: %+v", u.Raw)
+		}
+		if u.Basis == "" {
+			t.Fatal("应写明为什么是未知")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -434,7 +434,9 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	startedAt := time.Now().UTC()
-	rep, err := r.Run(ctx, session.Config{
+	// 归属与用途在启动时冻结：项目来自 run_meta，用途取自本次运行配置里的模式。
+	// 两者都由 maw 绑定，不从模型输出里读（契约 §4）。
+	cfg := session.Config{
 		Instance:   model.InstanceID(meta.InstanceID),
 		RunID:      model.RunID(meta.RunID),
 		Generation: model.Generation(meta.Generation),
@@ -442,32 +444,54 @@ func maybeRunSession(opDir, opID string) (session.Report, bool, string, error) {
 		Protocol:   spec.ExpectedProtocol,
 		Context:    runCtx,
 		Heartbeat:  2 * time.Second,
-	})
+		ProjectID:  meta.ProjectID,
+		NodeID:     nodeForRun(store, meta.RunID),
+		Purpose:    purposeFromSpec(spec),
+	}
+	rep, err := r.Run(ctx, cfg)
+	// 观测补录结果：0 表示没有缺口，或补录本身也失败了（失败计数会写进 report）。
+	var backfill session.BackfillReport
 	// 来源没给出任何观测（passthrough 或解析失败）时补一条基线：
 	// 受管节点跑过的运行必须在统计里留下痕迹，而不是整段消失。
-	if w, ok := store.(observe.Writer); ok && rep.Observed == 0 {
-		_ = w.WriteFacts(context.Background(), observe.Facts{
-			RunID:      meta.RunID,
-			InstanceID: meta.InstanceID,
-			ProjectID:  meta.ProjectID,
-			SourceNS:   normalizeSourceNS("", filepath.Base(spec.Executable)),
-			SessionID:  "run:" + meta.RunID,
-			RecordType: "result",
-			RecordUUID: "run:" + meta.RunID,
-			RecordRef:  "runner:" + opID,
-			OccurredAt: startedAt,
-			Scope:      "run",
-			Quality:    model.QualityUnknown,
-		})
+	if w, ok := store.(observe.Writer); ok {
+		if rep.Observed == 0 {
+			// 运行基线：没有任何调用事实时的兜底痕迹，明确标 baseline，
+			// 免得被当成一次调用（契约 §9：两类事实分开存放）。
+			_ = w.WriteFacts(context.Background(), observe.Facts{
+				RunID:      meta.RunID,
+				InstanceID: meta.InstanceID,
+				ProjectID:  meta.ProjectID,
+				Generation: meta.Generation,
+				Purpose:    cfg.Purpose,
+				SourceNS:   normalizeSourceNS("", filepath.Base(spec.Executable)),
+				SessionID:  "run:" + meta.RunID,
+				RecordType: "result",
+				RecordUUID: "run:" + meta.RunID,
+				RecordRef:  "runner:" + opID,
+				OccurredAt: startedAt,
+				Scope:      observe.ScopeRun,
+				Baseline:   true,
+				Quality:    model.QualityUnknown,
+			})
+		}
+		// 写库短暂失败留下的观测缺口：原始记录还在 journal 里，这里独立补一次。
+		if len(rep.ObservationBacklog) > 0 {
+			if bf, berr := r.BackfillObservations(context.Background(), cfg); berr == nil {
+				rep.Observed += int64(bf.Written)
+				rep.ObservationBacklog = nil
+				backfill = bf
+			}
+		}
 	}
 	// 执行结束（无论成败）都把事实快照落盘，op 目录因此自解释。
-	return rep, true, writeSessionReport(opDir, opID, meta, rep, err), err
+	return rep, true, writeSessionReport(opDir, opID, meta, rep, backfill, err), err
 }
 
 // writeSessionReport 把一次执行的事实快照写到 op 目录的 report.json。
 //
 // 报告只描述已发生的事实；写盘失败不影响执行结论，返回空路径表示没写成。
-func writeSessionReport(opDir, opID string, meta RunMeta, rep session.Report, runErr error) string {
+func writeSessionReport(opDir, opID string, meta RunMeta, rep session.Report,
+	backfill session.BackfillReport, runErr error) string {
 	report := journal.Report{
 		RunID:               meta.RunID,
 		OperationID:         opID,
@@ -480,6 +504,10 @@ func writeSessionReport(opDir, opID string, meta RunMeta, rep session.Report, ru
 		Submitted:           rep.Submitted,
 		Pending:             rep.Pending,
 		ObservationFailures: rep.ObservationFailures,
+		Observed:            rep.Observed,
+		ObservationBacklog:  len(rep.ObservationBacklog),
+		Backfilled:          backfill.Written,
+		BackfillFailed:      backfill.Failed,
 		Stderr:              clipText(rep.Stderr, 2000),
 		InterpretError:      rep.InterpretError,
 	}
@@ -494,6 +522,48 @@ func writeSessionReport(opDir, opID string, meta RunMeta, rep session.Report, ru
 		return ""
 	}
 	return path
+}
+
+// nodeForRun 从 Run 持有的节点槽租约反查节点归属。
+//
+// 节点由 maw 绑定（占用链就是证据），不从模型输出或节点自述里读；查不到就留空（未知）。
+func nodeForRun(store session.Store, runID string) string {
+	ds, ok := store.(*dbstore.Store)
+	if !ok || ds.DB == nil {
+		return ""
+	}
+	var node string
+	_ = ds.DB.Read(func(tx *sql.Tx) error {
+		got, err := db.NodeForRun(tx, runID)
+		if err == nil {
+			node = got
+		}
+		// 读不出来按未声明处理：归属缺一列不该中断执行。
+		return nil
+	})
+	return node
+}
+
+// purposeFromSpec 从本次运行的冻结配置里取用途（worker／lead／diagnose）。
+//
+// 配置随启动规格走 stdin，形状由运行时约定（runtimes/pi 的 piRunConfig）。
+// 取不到就留空：用途未声明比猜一个更安全。
+func purposeFromSpec(spec model.LaunchSpec) string {
+	raw := strings.TrimSpace(spec.StdinData)
+	if raw == "" {
+		return ""
+	}
+	var cfg struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return ""
+	}
+	switch mode := strings.TrimSpace(cfg.Mode); mode {
+	case observe.PurposeWorker, observe.PurposeLead, observe.PurposeDiagnose:
+		return mode
+	}
+	return ""
 }
 
 // clipText 截断报告里的长文本字段（例如 stderr），保留尾部信息。

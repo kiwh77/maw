@@ -19,6 +19,10 @@ import (
 //
 // 四个动作合在一个事务里：会话、轮次、关联与用量要么都成立，要么都不成立——
 // 只写一半会留下「有会话却没有轮次」这种看着像事实的残缺状态。
+//
+// 归属随行：项目、节点、Run、代际、会话、任务实例、模型调用与用途逐列写进用量行，
+// 来源自报的供应商模型与原始字段也保留。run 级汇总碰到 call 级证据时只标 superseded，
+// 不删行——两类事实都真，只是不混算（契约 P176）。
 func (s *Store) WriteFacts(ctx context.Context, f observe.Facts) error {
 	_ = ctx
 	if s == nil || s.DB == nil {
@@ -59,7 +63,7 @@ func (s *Store) WriteFacts(ctx context.Context, f observe.Facts) error {
 			SessionID:  sessionID,
 			ExternalID: f.RecordUUID,
 			StartedAt:  occurredAt,
-			Meta:       map[string]any{"record_type": f.RecordType, "record_ref": f.RecordRef},
+			Meta:       turnMeta(f),
 		}); err != nil {
 			return err
 		}
@@ -70,7 +74,11 @@ func (s *Store) WriteFacts(ctx context.Context, f observe.Facts) error {
 			InstanceID: f.InstanceID,
 			SessionID:  sessionID,
 			TurnID:     turnID,
-			Attributed: true,
+			NodeID:     f.NodeID,
+			Generation: f.Generation,
+			CallID:     f.CallID,
+			Purpose:    f.Purpose,
+			Attributed: strings.TrimSpace(f.RunID) != "",
 		}); err != nil {
 			return err
 		}
@@ -82,13 +90,13 @@ func (s *Store) WriteFacts(ctx context.Context, f observe.Facts) error {
 		if !quality.Valid() {
 			quality = "unknown"
 		}
-		return db.PutUsageRecord(tx, db.UsageRecord{
+		rec := db.NormalizeUsage(db.UsageRecord{
 			UsageID:          observeUsageID(f, turnID),
 			SourceNS:         f.SourceNS,
 			TurnID:           turnID,
 			Epoch:            1,
 			Scope:            observeScope(f),
-			Semantic:         db.UsageSemantic(f.Semantic),
+			Semantic:         db.UsageSemantic(observeSemantic(f)),
 			InputTokens:      f.InputTokens,
 			OutputTokens:     f.OutputTokens,
 			CacheReadTokens:  f.CacheReadTokens,
@@ -96,8 +104,66 @@ func (s *Store) WriteFacts(ctx context.Context, f observe.Facts) error {
 			TotalTokens:      f.TotalTokens,
 			Quality:          quality,
 			Basis:            f.Evidence,
+			EventID:          strings.TrimSpace(f.CallID),
+			RecordedAt:       occurredAt,
+			ProjectID:        projectID,
+			SessionID:        sessionID,
+			NodeID:           f.NodeID,
+			RunID:            f.RunID,
+			InstanceID:       f.InstanceID,
+			Generation:       f.Generation,
+			CallID:           f.CallID,
+			Purpose:          f.Purpose,
+			Provider:         f.Provider,
+			Model:            f.Model,
+			CacheState:       cacheState(f),
+			CacheEvidence:    f.CacheEvidence,
+			Baseline:         f.Baseline,
+			Raw:              f.Raw,
 		})
+		if err := db.PutUsageRecord(tx, rec); err != nil {
+			return err
+		}
+		if rec.Scope == db.UsageScopeCall {
+			// 有 call 级证据时 run 级汇总降为「仅保留」：不参与汇总，也不删。
+			if _, err := db.SupersedeRunLevelUsage(tx, f.RunID, f.Generation); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
+}
+
+// turnMeta 是轮次行上的说明：记录类型、来源位置与调用身份。
+func turnMeta(f observe.Facts) map[string]any {
+	meta := map[string]any{"record_type": f.RecordType, "record_ref": f.RecordRef}
+	if call := strings.TrimSpace(f.CallID); call != "" {
+		meta["call_id"] = call
+	}
+	if purpose := strings.TrimSpace(f.Purpose); purpose != "" {
+		meta["purpose"] = purpose
+	}
+	return meta
+}
+
+// cacheState 把「有没有归一证据」翻成落库状态。
+func cacheState(f observe.Facts) string {
+	switch f.CacheState() {
+	case observe.CacheVerified:
+		return db.CacheStateVerified
+	case observe.CacheUnverified:
+		return db.CacheStateUnverified
+	default:
+		return db.CacheStateAbsent
+	}
+}
+
+// observeSemantic 是口径默认值：来源没写就是增量。
+func observeSemantic(f observe.Facts) string {
+	if s := strings.TrimSpace(f.Semantic); s != "" {
+		return s
+	}
+	return string(db.UsageDelta)
 }
 
 // observeSessionID 是本库里的会话身份：来源命名空间 + 来源侧会话身份。
@@ -132,7 +198,7 @@ func observeScope(f observe.Facts) string {
 	if s := strings.TrimSpace(f.Scope); s != "" {
 		return s
 	}
-	return "run"
+	return observe.ScopeRun
 }
 
 // shortHash 给没有自带身份的记录算一个稳定短标识。

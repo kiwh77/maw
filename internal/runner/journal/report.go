@@ -34,11 +34,16 @@ type Report struct {
 	Submitted           int    `json:"submitted"`
 	Pending             int    `json:"pending"`
 	ObservationFailures int64  `json:"observation_failures,omitempty"`
-	Stderr              string `json:"stderr,omitempty"`
-	InterpretError      string `json:"interpret_error,omitempty"`
-	Stop                string `json:"stop,omitempty"`
-	Error               string `json:"error,omitempty"`
-	WrittenAt           string `json:"written_at"`
+	Observed            int64  `json:"observed,omitempty"`
+	// ObservationBacklog 是写库失败、事后补录前的位置数；补录后应为 0。
+	ObservationBacklog int    `json:"observation_backlog,omitempty"`
+	Backfilled         int    `json:"backfilled,omitempty"`
+	BackfillFailed     int    `json:"backfill_failed,omitempty"`
+	Stderr             string `json:"stderr,omitempty"`
+	InterpretError     string `json:"interpret_error,omitempty"`
+	Stop               string `json:"stop,omitempty"`
+	Error              string `json:"error,omitempty"`
+	WrittenAt          string `json:"written_at"`
 }
 
 // WriteReport 原子写入 Run 目录的 report.json，返回路径与秘密过滤条数。
