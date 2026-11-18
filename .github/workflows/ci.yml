@@ -138,6 +138,41 @@ jobs:
         run: |
           echo "::notice::tests/platform 的交叉编译用例只证明六个目标能构建；managed 支持范围仅 darwin（见平台矩阵文档）。"
 
+  pi-runtime:
+    name: Pi 运行时（三模式执行器）
+    strategy:
+      fail-fast: false
+      matrix:
+        # 两个平台都跑同一条冒烟：npm ci → 单测 → 无密钥 --probe。
+        # 实际支持范围以这里通过的矩阵为准；没进矩阵的平台不宣称支持。
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: runtimes/pi/package-lock.json
+      - name: Install pinned Pi SDK
+        run: npm --prefix runtimes/pi ci
+      - name: node --test
+        run: npm --prefix runtimes/pi test
+      - name: Probe without model keys
+        run: |
+          set -euo pipefail
+          out="$(node runtimes/pi/src/main.mjs --probe)"
+          echo "$out"
+          node -e '
+            const r = JSON.parse(process.argv[1]);
+            if (!r.ok) { console.error("probe ok=false"); process.exit(1); }
+            if (r.protocol.format !== "pi-stream-json" || r.protocol.version !== "1") {
+              console.error(`protocol mismatch: ${r.protocol.format}/${r.protocol.version}`);
+              process.exit(1);
+            }
+            console.log(`pi-runtime smoke on ${process.env.RUNNER_OS}: sdk=${r.sdk} node=${r.node}`);
+          ' "$out"
+
   desktop-prereq:
     name: 桌面构建前置（macOS）
     runs-on: macos-latest

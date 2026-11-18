@@ -26,6 +26,46 @@ jobs:
       - name: Platform matrix guard
         run: CGO_ENABLED=0 go test ./tests/platform -count=1 -run 'OnlyDarwin|Matrix|ReleaseTargets'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: runtimes/pi/package-lock.json
+
+      # Pi 运行时与 Go 二进制一起发布：版本、协议与冒烟平台都写进 manifest，
+      # 用户装完可直接 `node runtimes/pi/src/main.mjs --probe` 核对，不需要另装 Pi CLI。
+      - name: Verify Pi runtime
+        run: |
+          set -euo pipefail
+          npm --prefix runtimes/pi ci
+          npm --prefix runtimes/pi test
+          node runtimes/pi/src/main.mjs --probe
+
+      - name: Package Pi runtime
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          sdk="$(node -p "require('./runtimes/pi/node_modules/@earendil-works/pi-coding-agent/package.json').version")"
+          node - "$sdk" "$ver" > dist/pi-runtime.json <<'NODE'
+          const [sdk, ver] = process.argv.slice(2);
+          const pkg = require("./runtimes/pi/package.json");
+          process.stdout.write(JSON.stringify({
+            name: "@maw/pi-runtime",
+            version: ver,
+            contract: "maw.pi.execution/v1",
+            protocol: { format: "pi-stream-json", version: "1" },
+            sdk_version: sdk,
+            node_engine: pkg.engines.node,
+            // 冒烟结论只覆盖 CI 矩阵里实际跑过的平台；其余平台不宣称支持。
+            smoke_platforms: ["linux", "darwin"],
+            unverified_platforms: ["windows"],
+            probe: "node runtimes/pi/src/main.mjs --probe",
+          }, null, 2) + "\n");
+          NODE
+          tar --exclude=node_modules -czf "dist/pi-runtime_${ver}.tar.gz" -C runtimes pi
+          ls -la dist/pi-runtime_${ver}.tar.gz dist/pi-runtime.json
+
       - name: Cross-compile binaries (非原生实测)
         run: |
           set -euo pipefail
@@ -72,6 +112,7 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/pi-runtime.json
             dist/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
