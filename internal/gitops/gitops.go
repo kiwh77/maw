@@ -158,28 +158,76 @@ func ChangedFiles(cwd, mainBranch string) ([]string, error) {
 }
 
 func SquashMerge(repo, branch, mainBranch, message string) error {
-	if _, err := home.Git(repo, "checkout", mainBranch); err != nil {
-		return i18n.EW("err.checkout_main", "next.clean_main", err)
+	_, err := SquashMergeIsolated(repo, branch, mainBranch, message)
+	return err
+}
+
+// SquashMergeIsolated 在临时 detached worktree 上 squash 合入，再 update-ref 推进主干。
+// 主检出可保持脏状态：不 checkout、不要求 AssertWorkingTreeClean(repo)。
+// 返回合入后的主干 tip commit。
+func SquashMergeIsolated(repo, branch, mainBranch, message string) (string, error) {
+	// 始终基于本地主干 tip：update-ref 也推进同一 refs/heads/<main>。
+	oldTip, err := home.Git(repo, "rev-parse", "--verify", mainBranch)
+	if err != nil {
+		return "", i18n.EW("err.checkout_main", "next.clean_main", err)
 	}
-	if out, err := home.Git(repo, "merge", "--squash", branch); err != nil {
-		_, _ = home.Git(repo, "merge", "--abort")
-		return i18n.E("err.squash_conflict", "next.inspect_conflict", branch, out)
+	tmp, err := os.MkdirTemp("", "maw-merge-*")
+	if err != nil {
+		return "", err
+	}
+	// worktree add 会创建目录；先去掉 MkdirTemp 占位，避免 "already exists"。
+	_ = os.RemoveAll(tmp)
+	defer func() {
+		RemoveWorktree(repo, tmp)
+		_ = os.RemoveAll(tmp)
+	}()
+	if out, err := home.Git(repo, "worktree", "add", "--detach", tmp, oldTip); err != nil {
+		return "", i18n.E("err.worktree_create", "next.worktree_list", out)
+	}
+	if out, err := home.Git(tmp, "merge", "--squash", branch); err != nil {
+		_, _ = home.Git(tmp, "merge", "--abort")
+		return "", i18n.E("err.squash_conflict", "next.inspect_conflict", branch, out)
 	}
 	cmd := exec.Command("git", "diff", "--cached", "--quiet")
-	cmd.Dir = repo
+	cmd.Dir = tmp
 	if err := cmd.Run(); err == nil {
-		// squash 不留 MERGE_HEAD；清掉可能的空暂存即可
-		_, _ = home.Git(repo, "reset", "--mixed", "HEAD")
-		return i18n.E("err.squash_empty", "next.ensure_commits", branch)
+		_, _ = home.Git(tmp, "reset", "--mixed", "HEAD")
+		return "", i18n.E("err.squash_empty", "next.ensure_commits", branch)
 	}
 	c := exec.Command("git", "commit", "-m", message)
-	c.Dir = repo
+	c.Dir = tmp
 	c.Env = append(os.Environ(), MergeEnv+"=1")
 	out, err := c.CombinedOutput()
 	if err != nil {
-		return i18n.E("err.merge_commit", "next.inspect_main", string(out))
+		return "", i18n.E("err.merge_commit", "next.inspect_main", string(out))
 	}
-	return nil
+	newTip, err := home.Git(tmp, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	ref := "refs/heads/" + mainBranch
+	if out, err := home.Git(repo, "update-ref", ref, newTip, oldTip); err != nil {
+		return "", i18n.E("err.merge_commit", "next.inspect_main", out)
+	}
+	return strings.TrimSpace(newTip), nil
+}
+
+// BranchHasUniqueChanges 报告 worktree HEAD 相对主干是否有树差异（空 squash 预检）。
+func BranchHasUniqueChanges(cwd, mainBranch string) (bool, error) {
+	base, err := EnsureBranchBase(cwd, mainBranch)
+	if err != nil {
+		return false, err
+	}
+	cmd := exec.Command("git", "diff", "--quiet", base, "HEAD")
+	cmd.Dir = cwd
+	err = cmd.Run()
+	if err == nil {
+		return false, nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, err
 }
 
 // MergeIgnorablePath reports whether a tracked dirty path is maw session/meta noise

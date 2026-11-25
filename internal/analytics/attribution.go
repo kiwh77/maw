@@ -245,6 +245,9 @@ func splitTimes(intervals []projection.Interval, w projection.Window) TimeSplit 
 }
 
 // attributionRollups 按维度分组聚合有效用量。
+//
+// 来源维度额外并入「只有 source_turns、没有 usage_records」的轮次：
+// Agent 常只报 --turns 省略 token，否则看板归属表会整页空。
 func (s *Service) attributionRollups(tx *sql.Tx, q AttributionQuery) ([]AttributionRollup, error) {
 	col := q.Dimension.column()
 	stmt := `SELECT ` + col + ` AS dim_value,
@@ -268,7 +271,8 @@ ORDER BY ` + col
 		return nil, err
 	}
 	defer rows.Close()
-	var out []AttributionRollup
+	byValue := map[string]AttributionRollup{}
+	var order []string
 	for rows.Next() {
 		var value string
 		var turns, inN, outN, cacheReadN, cacheWriteN, totalN, est, verified, unverified int
@@ -302,9 +306,88 @@ ORDER BY ` + col
 			"scope:" + strings.Join(r.Scopes, "+"),
 			"rows:" + itoa(turns),
 		}
-		out = append(out, r)
+		byValue[value] = r
+		order = append(order, value)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if q.Dimension == DimensionSource || q.Dimension == "" {
+		if err := s.mergeTurnOnlySourceRollups(tx, q, byValue, &order); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]AttributionRollup, 0, len(order))
+	seen := map[string]bool{}
+	for _, v := range order {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, byValue[v])
+	}
+	return out, nil
+}
+
+// mergeTurnOnlySourceRollups 把仅有轮次、无用量记账的来源并入 rollups。
+func (s *Service) mergeTurnOnlySourceRollups(tx *sql.Tx, q AttributionQuery, byValue map[string]AttributionRollup, order *[]string) error {
+	stmt := `SELECT source_ns, COUNT(DISTINCT turn_id) FROM source_turns
+WHERE started_at >= ? AND started_at < ?`
+	args := []any{q.Window.Start.UTC().Format(time.RFC3339Nano), q.Window.End.UTC().Format(time.RFC3339Nano)}
+	if q.SourceNS != "" {
+		stmt += ` AND source_ns = ?`
+		args = append(args, q.SourceNS)
+	}
+	if q.ProjectID != "" {
+		// 有工程过滤时：只计挂到该工程 Run 的轮次，或会话归属兜底。
+		stmt += ` AND (
+  turn_id IN (SELECT DISTINCT turn_id FROM run_source_links WHERE project_id = ? AND turn_id <> '')
+  OR session_id IN (SELECT session_id FROM source_sessions WHERE project_id = ?)
+)`
+		args = append(args, q.ProjectID, q.ProjectID)
+	}
+	stmt += ` GROUP BY source_ns ORDER BY source_ns`
+	rows, err := tx.Query(stmt, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ns string
+		var turns int
+		if err := rows.Scan(&ns, &turns); err != nil {
+			return err
+		}
+		if turns <= 0 {
+			continue
+		}
+		if existing, ok := byValue[ns]; ok {
+			// 用量行已覆盖该来源：轮次分母至少不少于 source_turns。
+			if turns > existing.Turns {
+				existing.Turns = turns
+				existing.UsageUnknown = true
+				existing.UsageObserved = ratioOf(existing.UsageObserved.Numerator, turns)
+				existing.Evidence = append(existing.Evidence, "source_turns:"+itoa(turns))
+				byValue[ns] = existing
+			}
+			continue
+		}
+		r := AttributionRollup{
+			Dimension:     DimensionSource,
+			Value:         ns,
+			Turns:         turns,
+			UsageUnknown:  true,
+			UsageObserved: ratioOf(0, turns),
+			Evidence: []string{
+				"dimension:source",
+				"source_turns:" + itoa(turns),
+				"usage_records:0",
+			},
+		}
+		byValue[ns] = r
+		*order = append(*order, ns)
+	}
+	return rows.Err()
 }
 
 // attributionFilters 拼归属过滤条件；空的过滤条件不进 SQL。

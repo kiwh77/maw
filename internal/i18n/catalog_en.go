@@ -279,6 +279,7 @@ var catalogEn = map[string]string{
 	"next.lane_empty":         "no activatable task in this lane; run `maw next --release-lane` or `maw next --claim --lane <other>`",
 	"next.lane_released":      "cleared lane binding for %s; next `maw next --claim` will auto-pick a lane by head priority",
 	"err.cannot_submit":       "task %s status %s cannot submit",
+	"err.cannot_unblock":      "task %s status %s cannot unblock",
 	"next.only_in_progress":   "only in_progress tasks can be submitted",
 	"err.author_review":       "author cannot review own task",
 	"next.other_agent":        "use another MAW_AGENT",

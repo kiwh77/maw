@@ -2,10 +2,12 @@ package app
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
+	"github.com/kiwh77/maw/internal/machine"
 )
 
 func TaskList(cwd string) (Result, error) {
@@ -100,27 +102,77 @@ func Unblock(cwd, taskID string) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	var prev string
+	var (
+		restored string
+		note     string
+	)
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
 		if err != nil || t == nil {
 			return i18n.E("err.unknown_task", "", taskID)
 		}
-		prev = t.PrevStatus
+		if t.Status != "blocked" {
+			return i18n.E("err.cannot_unblock", "next.task_list", taskID, t.Status)
+		}
+		prev := t.PrevStatus
 		if prev == "" {
 			prev = "ready"
 		}
+		cat := ""
+		if t.Extra != nil {
+			if v, ok := t.Extra["block_category"].(string); ok {
+				cat = v
+			}
+		}
+		if cat == "" {
+			cat = ClassifyBlockCategory(t.BlockedReason)
+		}
+		target := prev
+		// conflict／脏树类：若要回到 merging，须交付仍 merge-ready；否则落到 in_review 重交。
+		if (cat == BlockCatConflict || strings.Contains(strings.ToLower(t.BlockedReason), "dirty")) &&
+			prev == "merging" {
+			ready := false
+			if rec, e := latestDelivery(tx, pc.ID(), t); e == nil && rec != nil {
+				if r, e2 := db.DeliveryReadiness(tx, string(rec.Delivery.DeliveryID)); e2 == nil {
+					ready = r.PassingVerification && r.ApprovedReview &&
+						r.StaleVerifications == 0 && !r.ReviewStale
+				}
+			}
+			if !ready {
+				target = "in_review"
+				note = "delivery_not_merge_ready"
+			}
+		}
+		if err := machine.AssertTransition(t.Status, target); err != nil {
+			return err
+		}
 		from := t.Status
-		t.Status = prev
+		t.Status = target
 		t.BlockedReason = ""
 		t.PrevStatus = ""
+		if t.Extra != nil {
+			delete(t.Extra, "block_category")
+			delete(t.Extra, "suggested_followups")
+		}
 		t.Revision++
-		_ = db.AppendEvent(tx, pc.ID(), "orchestrator", "status_changed", taskID, map[string]any{"from": from, "to": prev})
+		payload := map[string]any{"from": from, "to": target}
+		if note != "" {
+			payload["note"] = note
+		}
+		_ = db.AppendEvent(tx, pc.ID(), "orchestrator", "status_changed", taskID, payload)
+		restored = target
 		return db.UpsertTask(tx, t)
 	})
 	if err != nil {
 		return nil, err
 	}
 	_, _ = refreshBoard(pc)
-	return Result{"ok": true, "task_id": taskID, "status": prev, "project_id": pc.ID()}, nil
+	res := Result{"ok": true, "task_id": taskID, "status": restored, "project_id": pc.ID()}
+	if note == "delivery_not_merge_ready" {
+		res["next"] = "交付证据已失效；请重新 maw submit 后再 maw merge --yes"
+		res["note"] = note
+	} else if restored == "merging" {
+		res["next"] = "maw merge --yes"
+	}
+	return res, nil
 }

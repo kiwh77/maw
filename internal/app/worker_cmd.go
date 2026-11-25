@@ -880,6 +880,7 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	files = filterScopeFiles(files)
 
 	var fromStatus string
+	var taskBranch string
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
 		if err != nil || t == nil {
@@ -892,6 +893,7 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 			return i18n.E("err.cannot_submit", "next.only_in_progress", taskID, t.Status)
 		}
 		fromStatus = t.Status
+		taskBranch = t.Branch
 		if bad := scope.OutOfScopeFiles(files, t.WriteScope); len(bad) > 0 {
 			_ = db.AppendEvent(tx, pc.ID(), who, "scope_violation", taskID, map[string]any{
 				"files": files, "out_of_scope": bad, "write_scope": t.WriteScope,
@@ -909,6 +911,18 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	// 未 commit 的 staged/unstaged 不能进 merging：否则 merge rebase 必因 dirty 掉 conflict
 	if err := gitops.AssertWorkingTreeClean(wt); err != nil {
 		return nil, err
+	}
+	// 空 squash 早拒：相对主干无树差异（已合入／空提交／基线错）
+	hasDiff, err := gitops.BranchHasUniqueChanges(wt, pc.Config.Project.MainBranch)
+	if err != nil {
+		return nil, err
+	}
+	if !hasDiff {
+		label := taskBranch
+		if label == "" {
+			label = taskID
+		}
+		return nil, i18n.E("err.squash_empty", "next.ensure_commits", label)
 	}
 	// 结构化完成物是**可选**载荷：解析失败必须整次拒绝，不能带病提交。
 	result, err := loadSubmitResult(wt)
@@ -1486,12 +1500,14 @@ func ensureManualCompatRun(tx *sql.Tx, pc *projCtx, task *db.Task, actor, wt str
 	if inst.ActiveVersion == nil {
 		return nil, 0, errx.New("instance has no active version", "maw plan apply")
 	}
-	version := *inst.ActiveVersion
+	activeVersion := *inst.ActiveVersion
 
+	// 复用已有 Run 时必须绑定该 Run 冻结的 version_no，不能返回当前 active_version：
+	// plan apply 中途升版后 active 可能已前进，若仍把新版本塞进旧 Run 的交付会触发 E330。
 	if active, err := db.ActiveRunForInstance(tx, task.InstanceID); err != nil {
 		return nil, 0, err
 	} else if active != nil {
-		return active, version, nil
+		return active, active.VersionNo, nil
 	}
 	runs, err := db.ListRuns(tx, pc.ID())
 	if err != nil {
@@ -1507,7 +1523,7 @@ func ensureManualCompatRun(tx *sql.Tx, pc *projCtx, task *db.Task, actor, wt str
 		}
 		// 已冻结的完成 Run 可复用：同实例再次 submit 只追加新交付。
 		if r.Phase == model.PhaseCompleted && r.DeliveryFrozen {
-			return r, version, nil
+			return r, r.VersionNo, nil
 		}
 	}
 
@@ -1522,7 +1538,7 @@ func ensureManualCompatRun(tx *sql.Tx, pc *projCtx, task *db.Task, actor, wt str
 	out, err := db.ClaimRun(tx, db.ClaimSpec{
 		ProjectID:      pc.ID(),
 		InstanceID:     task.InstanceID,
-		VersionNo:      version,
+		VersionNo:      activeVersion,
 		Generation:     gen,
 		NodeID:         manualCompatNode,
 		Workspace:      absWT,
@@ -1532,7 +1548,7 @@ func ensureManualCompatRun(tx *sql.Tx, pc *projCtx, task *db.Task, actor, wt str
 	if err != nil {
 		return nil, 0, err
 	}
-	return out.Run, version, nil
+	return out.Run, activeVersion, nil
 }
 
 func completeCompatRun(tx *sql.Tx, projectID string, run *db.Run, instanceID string, deliveryFrozen bool) error {
@@ -1674,27 +1690,39 @@ func deliveryBlock(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, error
 		if err := identity.RequireOwner(in.Actor, t); err != nil {
 			return err
 		}
+		from := t.Status
+		cat := ClassifyBlockCategory(in.Message)
+		// merging 上的可恢复冲突／环境／闸门：保留已批准交付，避免 unblock 后
+		// 立刻 merge 报 delivery not accepted 被迫重做。
+		preserveDelivery := from == "merging" &&
+			(cat == BlockCatConflict || cat == BlockCatEnv || cat == BlockCatGate)
 		if rec, err := latestDelivery(tx, pc.ID(), t); err != nil {
 			return err
 		} else if rec != nil {
 			deliveryID = string(rec.Delivery.DeliveryID)
-			now := time.Now().UTC()
-			// 阻塞走同一评审表：记 changes_requested，避免 CLI 只改任务行绕过验收。
-			if err := db.AddReview(tx, deliveryID, model.Review{
-				Required: true, Verdict: model.VerdictChangesRequired,
-				Reviewer: in.Actor, ReviewedAt: &now,
-			}); err != nil {
-				return err
+			if !preserveDelivery {
+				now := time.Now().UTC()
+				// 阻塞走同一评审表：记 changes_requested，避免 CLI 只改任务行绕过验收。
+				if err := db.AddReview(tx, deliveryID, model.Review{
+					Required: true, Verdict: model.VerdictChangesRequired,
+					Reviewer: in.Actor, ReviewedAt: &now,
+				}); err != nil {
+					return err
+				}
 			}
 		}
-		from := t.Status
 		t.PrevStatus = t.Status
 		t.Status = "blocked"
 		t.BlockedReason = in.Message
+		if t.Extra == nil {
+			t.Extra = map[string]any{}
+		}
+		t.Extra["block_category"] = cat
 		t.Revision++
 		_ = db.AppendEvent(tx, pc.ID(), in.Actor, "status_changed", in.TaskID, map[string]any{
 			"from": from, "to": "blocked", "reason": in.Message,
 			"delivery_id": deliveryID, "strategy": manualCompatStrategy,
+			"block_category": cat, "preserve_delivery": preserveDelivery,
 		})
 		if err := db.UpsertTask(tx, t); err != nil {
 			return err

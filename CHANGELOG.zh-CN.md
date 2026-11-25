@@ -8,6 +8,9 @@
 
 ### Changed
 
+- **隔离合入（脏主干不再拦）**：`maw merge` 在临时 detached worktree 上 squash，再 `update-ref` 推进主干；主检出可有无关未提交改动。`merging` 上 `[conflict]/`[env]`/`[gate]` 的 `maw block` 不再把交付打成 `changes_requested`；`unblock` 回 merging 前校验交付，失效则落到 `in_review`。
+- **空 squash 早拒**：`maw submit` 发现相对主干无树差异时直接失败，避免拖到 merge 才爆。
+- **统计归属**：仅上报轮次、无 `usage_records` 时，来源维度仍按 `source_turns` 出表（`usage_unknown`）。
 - **仓外-only 接入（破坏性）**：运行时配置与蓝图一律在 `~/.maw/projects/<id>/`；不再读取仓内 `.multiagent/`、不再由 `maw init` 注入协议段或安装 git hooks。`register`/`next`/`board` 自动 `EnsureAttached`。旧仓内 config 需手工拷到仓外 home。
 - **合入后清 worktree（协议 v8 / CLI 0.4.1）**：`maw merge --yes` 成功后删除 `.worktrees/{agent}` 与题分支；下一题 `maw next` 重建同路径树。`maw prune` 不再保留 idle 48h 温热树，仅保留 `working` / 进行中题占用。
 

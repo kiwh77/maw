@@ -8,6 +8,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ### Changed
 
+- **Isolated merge (dirty main OK)**: `maw merge` squash-merges in a detached temp worktree and `update-ref`s the trunk; unrelated dirty files on the primary checkout no longer block. `maw block` from `merging` with `[conflict]`/`[env]`/`[gate]` keeps an approved delivery; `unblock` checks readiness and falls back to `in_review` when stale.
+- **Empty-squash reject at submit**: `maw submit` fails early when the task branch has no tree diff vs trunk.
+- **Attribution with turns-only stats**: source-dimension rollups include `source_turns` even when `usage_records` is empty (`usage_unknown`).
 - **Out-of-tree-only attach (breaking)**: runtime config/blueprint live under `~/.maw/projects/<id>/`; in-repo `.multiagent/` is ignored; `maw init` no longer injects protocol files or git hooks. `register`/`next`/`board` auto-`EnsureAttached`. Copy legacy in-repo config by hand if needed.
 - **Remove worktree after merge (protocol v8 / CLI 0.4.1)**: successful `maw merge --yes` deletes `.worktrees/{agent}` and the task branch; the next `maw next` recreates the same path. `maw prune` no longer keeps idle trees warm for 48h — only `working` / in-progress task holds remain.
 

@@ -102,6 +102,127 @@ func TestSubmitReviewMergeShareDeliveryCase(t *testing.T) {
 	}
 }
 
+// TestSubmitRejectsEmptyTreeDiff 相对主干无树差异时 submit 早拒（防空 squash）。
+func TestSubmitRejectsEmptyTreeDiff(t *testing.T) {
+	f := newFixture(t)
+	const id = "VN-EMPTY"
+	f.seedTask(id, "ready", "", []string{"mod_empty/**"})
+	_ = os.MkdirAll(filepath.Join(f.repo, "mod_empty"), 0o755)
+	t.Setenv("MAW_AGENT", "cursor-empty")
+	if _, err := Next(f.repo, "cursor-empty", false, ""); err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	wt := filepath.Join(f.repo, ".worktrees", "cursor-empty")
+	// 空 commit：树与主干相同
+	c := exec.Command("git", "commit", "--allow-empty", "-m", "empty")
+	c.Dir = wt
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("empty commit: %v\n%s", err, out)
+	}
+	_, err := Submit(wt, id, false)
+	if err == nil {
+		t.Fatal("expected empty-tree submit to fail")
+	}
+	if !strings.Contains(err.Error(), "无变更") && !strings.Contains(err.Error(), "no changes") {
+		t.Fatalf("want squash_empty message, got %v", err)
+	}
+	if f.task(id).Status != "in_progress" {
+		t.Fatalf("must stay in_progress, got %s", f.task(id).Status)
+	}
+}
+
+// TestMergeSucceedsWithDirtyMainCheckout 主检出有无关脏文件时仍可合入。
+func TestMergeSucceedsWithDirtyMainCheckout(t *testing.T) {
+	f := newFixture(t)
+	const id = "VN-DIRTY-MAIN"
+	f.seedTask(id, "ready", "", []string{"mod_dm/**"})
+	_ = os.MkdirAll(filepath.Join(f.repo, "mod_dm"), 0o755)
+	t.Setenv("MAW_AGENT", "cursor-dm")
+	if _, err := Next(f.repo, "cursor-dm", false, ""); err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	wt := filepath.Join(f.repo, ".worktrees", "cursor-dm")
+	writeAndCommit(t, wt, "mod_dm/a.txt", "a\n", "dm")
+	if _, err := Submit(wt, id, false); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	// 主检出留脏文件（模拟维护者未提交编辑）
+	_ = os.WriteFile(filepath.Join(f.repo, "HUMAN_WIP.md"), []byte("do not touch\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(f.repo, "README.md"), []byte("# proj\ndirty\n"), 0o644)
+	mergeRes, err := Merge(f.repo, true, false)
+	if err != nil {
+		t.Fatalf("merge with dirty main: %v", err)
+	}
+	if ok, _ := mergeRes["ok"].(bool); !ok {
+		t.Fatalf("merge should succeed: %v", mergeRes)
+	}
+	if f.task(id).Status != "done" {
+		t.Fatalf("want done, got %s", f.task(id).Status)
+	}
+	if _, err := os.Stat(filepath.Join(f.repo, "HUMAN_WIP.md")); err != nil {
+		t.Fatal("human WIP must remain")
+	}
+}
+
+// TestBlockFromMergingPreservesDelivery conflict block 不抹掉已批准交付；unblock 可直接 merge。
+func TestBlockFromMergingPreservesDelivery(t *testing.T) {
+	f := newFixture(t)
+	const id = "VN-PRESERVE"
+	f.seedTask(id, "ready", "", []string{"mod_pv/**"})
+	_ = os.MkdirAll(filepath.Join(f.repo, "mod_pv"), 0o755)
+	t.Setenv("MAW_AGENT", "cursor-pv")
+	if _, err := Next(f.repo, "cursor-pv", false, ""); err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	wt := filepath.Join(f.repo, ".worktrees", "cursor-pv")
+	writeAndCommit(t, wt, "mod_pv/a.txt", "a\n", "pv")
+	sub, err := Submit(wt, id, false)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	deliveryID, _ := sub["delivery_id"].(string)
+	if f.task(id).Status != "merging" {
+		t.Fatalf("want merging after auto review, got %s", f.task(id).Status)
+	}
+	blk, err := Block(wt, "[conflict] 主工作区脏文件阻塞 merge：M README.md", id)
+	if err != nil {
+		t.Fatalf("block: %v", err)
+	}
+	if blk["block_category"] != BlockCatConflict {
+		t.Fatalf("category=%v", blk["block_category"])
+	}
+	err = db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		ready, e := db.DeliveryReadiness(tx, deliveryID)
+		if e != nil {
+			return e
+		}
+		if !ready.ApprovedReview || !ready.PassingVerification {
+			t.Fatalf("merging conflict block must preserve approval: %+v", ready)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ub, err := Unblock(f.repo, id)
+	if err != nil {
+		t.Fatalf("unblock: %v", err)
+	}
+	if ub["status"] != "merging" {
+		t.Fatalf("want merging after unblock, got %v", ub["status"])
+	}
+	mergeRes, err := Merge(f.repo, true, false)
+	if err != nil {
+		t.Fatalf("merge after unblock: %v", err)
+	}
+	if ok, _ := mergeRes["ok"].(bool); !ok {
+		t.Fatalf("merge should succeed: %v", mergeRes)
+	}
+	if f.task(id).Status != "done" {
+		t.Fatalf("want done, got %s", f.task(id).Status)
+	}
+}
+
 // TestBlockUsesDeliveryCase 阻塞也走同一验收用例（有交付时写入评审）。
 func TestBlockUsesDeliveryCase(t *testing.T) {
 	f := newFixture(t)

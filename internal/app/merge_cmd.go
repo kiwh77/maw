@@ -28,9 +28,7 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 	if pc.Config.Approvals.Merge == "manual" && !yes {
 		return nil, i18n.E("err.merge_need_yes", "next.merge_yes")
 	}
-	if err := gitops.AssertWorkingTreeClean(pc.Repo); err != nil {
-		return nil, err
-	}
+	// 主检出允许脏：squash 在临时 worktree 完成，不触碰主工作区未提交改动。
 	var queue []*db.Task
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		tasks, err := db.ListTasks(tx, pc.ID())
@@ -86,13 +84,8 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 			if err := gitops.RunGates(pc.Config.Gates.Commands, gateCwd, pc.Config.Gates.TimeoutSec); err != nil {
 				return err
 			}
-			if cur, _ := gitops.CurrentBranch(pc.Repo); cur != pc.Config.Project.MainBranch {
-				_, _ = home.Git(pc.Repo, "checkout", pc.Config.Project.MainBranch)
-			}
-			if err := gitops.AssertWorkingTreeClean(pc.Repo); err != nil {
-				return err
-			}
-			return gitops.SquashMerge(pc.Repo, task.Branch, pc.Config.Project.MainBranch, "maw: merge "+tid+" "+task.Title)
+			_, err := gitops.SquashMergeIsolated(pc.Repo, task.Branch, pc.Config.Project.MainBranch, "maw: merge "+tid+" "+task.Title)
+			return err
 		}()
 		if mergeErr != nil {
 			msg := mergeErr.Error()
@@ -209,7 +202,8 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 		}
 		// 合入成功：删除 per-agent worktree 与题分支（下一题 next 会重建同路径树）
 		gitops.CleanupMergedTask(pc.Repo, task.Worktree, task.Branch, false)
-		mergedCommit, _ := home.Git(pc.Repo, "rev-parse", "HEAD")
+		// 主检出可能不在主干或仍脏；以主干 ref 为准，勿用 HEAD。
+		mergedCommit, _ := home.Git(pc.Repo, "rev-parse", pc.Config.Project.MainBranch)
 		mergeOK := false
 		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 			t, _ := db.GetTask(tx, pc.ID(), tid)

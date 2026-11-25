@@ -161,6 +161,54 @@ func TestAttributionRollupsUseExplicitDenominators(t *testing.T) {
 	})
 }
 
+// TestAttributionSourceTurnsWithoutUsage 只有轮次、无 usage_records 时来源维度仍出表。
+func TestAttributionSourceTurnsWithoutUsage(t *testing.T) {
+	f := newFixture(t)
+	f.write(t, func(tx *sql.Tx) error {
+		if err := db.UpsertProject(tx, &db.Project{
+			ID: "p1", Name: "proj", Path: t.TempDir(), MainBranch: "main",
+		}); err != nil {
+			return err
+		}
+		if err := db.UpsertSourceSession(tx, db.SourceSession{
+			SessionID: "ext:s1", ProjectID: "p1", SourceNS: "external", ExternalID: "s1",
+		}); err != nil {
+			return err
+		}
+		for i, id := range []string{"ext:s1:t1", "ext:s1:t2", "ext:s1:t3"} {
+			_ = i
+			if err := db.UpsertSourceTurn(tx, db.SourceTurn{
+				TurnID: id, SourceNS: "external", SessionID: "ext:s1",
+				StartedAt: "2026-11-18T03:00:00Z", ExternalID: id,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	svc := &Service{}
+	f.read(t, func(tx *sql.Tx) error {
+		report, err := svc.Attribution(tx, AttributionQuery{
+			Query:     Query{ProjectID: "p1", Window: attrWindow()},
+			Dimension: DimensionSource,
+		}, nil, projection.Cursors{})
+		if err != nil {
+			return err
+		}
+		if len(report.Rollups) != 1 {
+			t.Fatalf("want 1 rollup from turns-only, got %d", len(report.Rollups))
+		}
+		r := report.Rollups[0]
+		if r.Value != "external" || r.Turns != 3 || !r.UsageUnknown {
+			t.Fatalf("rollup=%+v", r)
+		}
+		if report.Totals.Turns.Denominator < 3 {
+			t.Fatalf("totals turns denom=%d", report.Totals.Turns.Denominator)
+		}
+		return nil
+	})
+}
+
 // TestAttributionDimensionsAndFilters 说明维度可切换，过滤条件生效且不串味。
 func TestAttributionDimensionsAndFilters(t *testing.T) {
 	f := newFixture(t)

@@ -275,6 +275,7 @@ var catalogZh = map[string]string{
 	"next.lane_empty":         "本队暂无激活题；可 `maw next --release-lane` 后重选，或 `maw next --claim --lane <其他队>` 显式换队",
 	"next.lane_released":      "已解除 %s 的子队列绑定；再 `maw next --claim` 将按队首序位自动选队",
 	"err.cannot_submit":       "任务 %s 状态 %s 不能 submit",
+	"err.cannot_unblock":      "任务 %s 状态为 %s，不能 unblock",
 	"next.only_in_progress":   "仅 in_progress 任务可提交",
 	"err.author_review":       "作者不能评审自己的任务",
 	"next.other_agent":        "换用另一个 MAW_AGENT",
