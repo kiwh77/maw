@@ -177,6 +177,38 @@ func NextWith(cwd, agentFlag string, opts NextOptions) (Result, error) {
 		// Per-agent worktree is reused across tasks; do not wipe it on card write failure.
 		return nil, err
 	}
+	if missing := missingRequiredPaths(wt, task); len(missing) > 0 {
+		reason := "[baseline] 领取预检缺少路径：" + strings.Join(missing, ", ") + "；补齐主干/基线后 unblock"
+		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+			t, e := db.GetTask(tx, pc.ID(), task.ID)
+			if e != nil || t == nil {
+				return e
+			}
+			from := t.Status
+			t.PrevStatus = from
+			t.Status = "blocked"
+			t.BlockedReason = reason
+			if t.Extra == nil {
+				t.Extra = map[string]any{}
+			}
+			t.Extra["block_category"] = BlockCatBaseline
+			t.Revision++
+			_ = db.UpsertTask(tx, t)
+			return db.AppendEvent(tx, pc.ID(), who, "status_changed", task.ID, map[string]any{
+				"from": from, "to": "blocked", "reason": reason,
+			})
+		})
+		task, _ = getTask(pc, task.ID)
+		_, _ = refreshBoard(pc)
+		res := Result{
+			"ok": true, "task": task, "worktree": wt, "branch": task.Branch, "agent": who,
+			"project_id": pc.ID(), "registered": true, "blocked_baseline": true,
+			"missing_paths": missing, "block_category": BlockCatBaseline,
+			"next": reason,
+		}
+		attachAgentNameMeta(res, who, allocated, nameWarn)
+		return res, nil
+	}
 	if logPath != "" {
 		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 			return bindAgent(tx, pc.ID(), who, "worker", "working", task.ID, task.Worktree, task.Branch, logPath)
@@ -1138,24 +1170,50 @@ func deliverySubmit(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, erro
 		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "gate_env_failed", in.TaskID, map[string]any{
 				"error": verifyOut.Reason, "phase": "submit", "delivery_id": string(frozen.Delivery.DeliveryID),
+				"category": BlockCatEnv,
 			})
 			return nil
 		})
-		return deliveryCaseResult{}, errx.New(verifyOut.Reason, "检查验证环境后重试 maw submit")
+		return deliveryCaseResult{}, errx.New(verifyOut.Reason,
+			"maw node list --json；确认 manual-compat/local_cli 心跳后重试 maw submit；仍失败则 maw block -m \"[env] …\"")
 	}
 	if !verifyOut.SupportsDone && verifyOut.Kind == verification.KindMachine && verifyOut.Verification.Result == model.VerifyFail {
+		unrelated := gitops.IsUnrelatedRepoGate(verifyOut.Reason, task.WriteScope)
 		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 			t, _ := db.GetTask(tx, pc.ID(), in.TaskID)
 			if t != nil {
-				t.Attempts++
+				if !unrelated {
+					t.Attempts++
+				} else {
+					from := t.Status
+					t.PrevStatus = from
+					t.Status = "blocked"
+					snip := verifyOut.Reason
+					if len(snip) > 280 {
+						snip = snip[:280] + "…"
+					}
+					t.BlockedReason = "[gate] submit 闸门失败且失败面不在 write_scope：" + snip
+					if t.Extra == nil {
+						t.Extra = map[string]any{}
+					}
+					t.Extra["block_category"] = BlockCatGate
+					_ = db.AppendEvent(tx, pc.ID(), in.Actor, "status_changed", in.TaskID, map[string]any{
+						"from": from, "to": "blocked", "reason": t.BlockedReason,
+					})
+				}
 				t.Revision++
 				_ = db.UpsertTask(tx, t)
 			}
 			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "gate_failed", in.TaskID, map[string]any{
 				"error": verifyOut.Reason, "phase": "submit", "delivery_id": string(frozen.Delivery.DeliveryID),
+				"unrelated_gate": unrelated,
 			})
 			return nil
 		})
+		if unrelated {
+			return deliveryCaseResult{}, errx.New(verifyOut.Reason,
+				"主干先修门禁或人工放行；勿改 write_scope 外代码")
+		}
 		return deliveryCaseResult{}, errx.New(verifyOut.Reason, "修复验证失败后重试 maw submit")
 	}
 

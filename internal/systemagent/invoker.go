@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/kiwh77/maw/internal/config"
 )
 
 // DiagnoseRequest 是发给 LLM 系统 Agent 的诊断输入。
@@ -34,6 +36,29 @@ type FuncInvoker func(ctx context.Context, req DiagnoseRequest) (string, error)
 
 func (f FuncInvoker) Diagnose(ctx context.Context, req DiagnoseRequest) (string, error) {
 	return f(ctx, req)
+}
+
+// ConfigInvoker 按当前配置选择调用方式：llm_command 非空时起本机 CLI，
+// 否则退回「无法判断则升级人工」的规则层。
+//
+// 与 ExecInvoker 的差别只有一条：命令每轮从 Config 重读，所以改 llm_command
+// 或 llm_node 不需要重启常驻循环。
+type ConfigInvoker struct {
+	// Config 必填：返回当前生效的系统 Agent 配置。
+	Config func() config.SystemAgent
+	// Timeout 透传给 ExecInvoker。
+	Timeout time.Duration
+}
+
+func (c ConfigInvoker) Diagnose(ctx context.Context, req DiagnoseRequest) (string, error) {
+	var cmd []string
+	if c.Config != nil {
+		cmd = c.Config().LLMCommand
+	}
+	if len(cmd) == 0 {
+		return `{"action":"escalate_human","reason":"llm_command 未配置，默认升级人工"}`, nil
+	}
+	return ExecInvoker{Argv: cmd, Timeout: c.Timeout}.Diagnose(ctx, req)
 }
 
 // ExecInvoker 用配置的 argv 起进程：prompt 进 stdin，stdout 为决策原文。

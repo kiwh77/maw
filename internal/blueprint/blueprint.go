@@ -199,6 +199,8 @@ func Validate(f *File) []string {
 		errs = append(errs, "iteration dependency cycle: "+cyc)
 	}
 
+	_ = SanitizeFileScopes(f)
+
 	ids := map[string]bool{}
 	for _, t := range f.Tasks {
 		if t.ID == "" {
@@ -480,10 +482,11 @@ func TasksForDB(f *File) []*db.Task {
 		if len(t.NotDoing) > 0 {
 			extra["not_doing"] = t.NotDoing
 		}
+		scope, _ := SanitizeWriteScope(t.WriteScope)
 		out = append(out, &db.Task{
 			ID: t.ID, IterationID: strings.TrimSpace(t.Iteration), Title: t.Title, Status: status,
 			Priority: prio, MergeOrder: mo, Lane: strings.TrimSpace(t.Lane), Deps: t.Deps,
-			WriteScope: t.WriteScope, ReadScope: t.ReadScope, Acceptance: t.Acceptance,
+			WriteScope: scope, ReadScope: t.ReadScope, Acceptance: t.Acceptance,
 			Extra: extra,
 		})
 	}

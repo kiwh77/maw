@@ -288,10 +288,20 @@ func main() {
 		Short: i18n.T("cmd.prune.short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			yes, _ := cmd.Flags().GetBool("yes")
+			history, _ := cmd.Flags().GetBool("history")
+			older, _ := cmd.Flags().GetInt("older-than-hours")
+			if history {
+				printRes(app.CleanupHistory(cwd, app.CleanupHistoryOptions{
+					Yes: yes, DryRun: dryRun, OlderThanHours: older,
+				}))
+				return
+			}
 			printRes(app.Prune(cwd, yes, dryRun))
 		},
 	}
 	pruneCmd.Flags().Bool("yes", false, i18n.T("flag.yes_delete"))
+	pruneCmd.Flags().Bool("history", false, "清理已消化的历史 block 事件与过期 unblock_assist（先导出 JSON）")
+	pruneCmd.Flags().Int("older-than-hours", 24, "history 模式下终态 unblock_assist 保留龄（小时）")
 	root.AddCommand(pruneCmd)
 
 	boardFilters := func(cmd *cobra.Command) app.BoardFilters {
@@ -518,6 +528,11 @@ func main() {
 		Use:   "list",
 		Short: i18n.T("cmd.project.list.short"),
 		Run:   func(cmd *cobra.Command, args []string) { printRes(app.ProjectList(cwd)) },
+	})
+	projectCmd.AddCommand(&cobra.Command{
+		Use:   "add",
+		Short: "登记当前 git 仓到本机 maw（仓外 home，不写工程文件）",
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.ProjectAdd(cwd)) },
 	})
 	projectRmCmd := &cobra.Command{
 		Use:   "rm [id|名称]",

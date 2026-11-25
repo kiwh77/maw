@@ -3,19 +3,19 @@ package app
 import (
 	"database/sql"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/home"
 )
 
-// 工程编辑要同时落到两处：中枢 projects 行与工程目录 config.toml。
+// 工程编辑要同时落到两处：中枢 projects 行与仓外 config.toml。
 // 少写一处，下次看板/调度就会拿旧值，界面上「改成功了」却依然按老策略跑。
 func TestProjectUpdateAppliesPolicyAndWritesConfig(t *testing.T) {
 	f := newFixture(t)
-	cfgPath := filepath.Join(f.repo, ".multiagent", "config.toml")
+	cfgPath := home.ConfigPath(f.pc.LocalHome)
 
 	name, mainBranch, worker, llm := "renamed", "trunk", "node-a", "node-b"
 	maxP, limit, auto := 3, 2, true
@@ -73,7 +73,7 @@ func TestProjectUpdateAppliesPolicyAndWritesConfig(t *testing.T) {
 
 func TestProjectUpdateDryRunDoesNotWrite(t *testing.T) {
 	f := newFixture(t)
-	cfgPath := filepath.Join(f.repo, ".multiagent", "config.toml")
+	cfgPath := home.ConfigPath(f.pc.LocalHome)
 	before, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatal(err)

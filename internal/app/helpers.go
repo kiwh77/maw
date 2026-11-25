@@ -322,6 +322,7 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 	var agents []*db.Agent
 	var projects []*db.Project
 	var iterations []*db.Iteration
+	var systemJobs []*db.SystemJob
 	var eventID int64
 	var lastEvent string
 	maxP := maxParallelFallback
@@ -347,6 +348,12 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 		if e != nil {
 			return e
 		}
+		// Router 介入情况要跟任务一起取：问题审查页要知道「这条阻塞有没有人管」，
+		// 而这只能由 system_jobs 与 blocked 任务对账得出。
+		systemJobs, e = db.ListSystemJobs(tx, projectID, "", 200)
+		if e != nil {
+			return e
+		}
 		// 数据水位取「最近一条事件发生时间」：它不是渲染时刻，停更时不会假装在更新。
 		if projectID == "" {
 			return tx.QueryRow(`SELECT COALESCE(MAX(id), 0), COALESCE(MAX(ts), '') FROM events`).
@@ -366,6 +373,7 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 		}
 	}
 	snap := board.BuildSnapshot(tasks, agents, maxP)
+	snap.Problems = append(snap.Problems, board.BuildRouterProblems(tasks, systemJobs, time.Now())...)
 	snap.EventID = eventID
 	// 没有任何事件时留空：让前端显示「尚无事件」，而不是编一个时间。
 	if ts, perr := time.Parse(time.RFC3339, strings.TrimSpace(lastEvent)); perr == nil {

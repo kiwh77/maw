@@ -119,13 +119,35 @@ func RequestChange(cwd string, opts RequestChangeOptions) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 扩 scope 后必须重写 worktree 任务卡，避免 pre-commit / Agent 仍读旧 .maw/task.json。
+	var refreshed *db.Task
+	_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		refreshed, _ = db.GetTask(tx, pc.ID(), taskID)
+		return nil
+	})
+	cardAgent := who
+	cardWT := wt
+	if refreshed != nil {
+		if refreshed.Owner != "" {
+			cardAgent = refreshed.Owner
+		}
+		// 优先任务登记的 worktree（cwd 若落在主仓子目录，show-toplevel 会指回主干）。
+		if refreshed.Worktree != "" {
+			abs := refreshed.Worktree
+			if !filepath.IsAbs(abs) {
+				abs = filepath.Join(pc.Repo, refreshed.Worktree)
+			}
+			cardWT = abs
+		}
+		_ = writeTaskCard(cardWT, refreshed, cardAgent)
+	}
 	_, _ = refreshBoard(pc)
 	return Result{
 		"ok": true, "task_id": taskID, "added": adds,
 		"write_scope": after, "auto_detected": autoDetected,
-		"project_id": pc.ID(),
-		"next":       i18n.T("next.after_request_change", taskID),
-		"note":       i18n.T("note.request_change_blueprint"),
+		"project_id": pc.ID(), "task_card_refreshed": refreshed != nil,
+		"next": i18n.T("next.after_request_change", taskID),
+		"note": i18n.T("note.request_change_blueprint"),
 	}, nil
 }
 

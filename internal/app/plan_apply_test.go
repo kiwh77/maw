@@ -10,6 +10,7 @@ import (
 
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 // TestPlanApplyPreservesHistory：增量 apply 不得抹掉 done / in_progress。
@@ -292,7 +293,16 @@ func TestPlanApplySyncsMainBranch(t *testing.T) {
 	if out, err := run("init"); err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
-	cfgPath := filepath.Join(repo, ".multiagent", "config.toml")
+	t.Setenv("MAW_GLOBAL", globalDir)
+	root, err := home.RepoRoot(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := home.ProjectHome(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := home.ConfigPath(local)
 	cfg0, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)

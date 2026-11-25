@@ -104,3 +104,85 @@ func FilterActivity(tasks []*Task, includeDone, includeArchived bool) []*Task {
 	}
 	return out
 }
+
+// taskKey 工程内任务键：任务 ID 只在工程内唯一，跨工程可能撞号。
+func taskKey(projectID, taskID string) string {
+	return projectID + "\x00" + taskID
+}
+
+// FilterActivityKeepingUpstream 在活动视图过滤之上，保留「仍被活动题直接依赖」
+// 的上游（含 done / cancelled / archived）。
+//
+// 否则默认隐藏终态后，看板 chips／等待行／依赖拓扑只能把上游标成「未知」，
+// 连标题都解析不到。只补一层直接依赖，不递归整条历史链，避免 Done 泳道被灌满。
+func FilterActivityKeepingUpstream(tasks []*Task, includeDone, includeArchived bool) []*Task {
+	base := FilterActivity(tasks, includeDone, includeArchived)
+	if len(base) == 0 || len(base) == len(tasks) {
+		return base
+	}
+
+	kept := make(map[string]struct{}, len(base))
+	for _, t := range base {
+		kept[taskKey(t.ProjectID, t.ID)] = struct{}{}
+	}
+
+	byProj := make(map[string]map[string]*Task, 8)
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		m := byProj[t.ProjectID]
+		if m == nil {
+			m = make(map[string]*Task)
+			byProj[t.ProjectID] = m
+		}
+		m[t.ID] = t
+	}
+
+	need := make(map[string]struct{})
+	for _, t := range base {
+		m := byProj[t.ProjectID]
+		if m == nil {
+			continue
+		}
+		for _, d := range t.Deps {
+			d = strings.TrimSpace(d)
+			if d == "" {
+				continue
+			}
+			up := m[d]
+			if up == nil {
+				continue
+			}
+			k := taskKey(up.ProjectID, up.ID)
+			if _, ok := kept[k]; ok {
+				continue
+			}
+			need[k] = struct{}{}
+		}
+	}
+	if len(need) == 0 {
+		return base
+	}
+
+	// 按全量列表原序输出，避免依赖补回后打乱相对顺序。
+	out := make([]*Task, 0, len(base)+len(need))
+	seen := make(map[string]struct{}, len(base)+len(need))
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		k := taskKey(t.ProjectID, t.ID)
+		_, inBase := kept[k]
+		_, inNeed := need[k]
+		if !inBase && !inNeed {
+			continue
+		}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, t)
+	}
+	return out
+}

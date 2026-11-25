@@ -46,6 +46,43 @@ func TestArchiveDefaultViewHidesDoneAndArchived(t *testing.T) {
 	}
 }
 
+// 活动题依赖的终态上游必须留在列表里，chips／拓扑才能解析标题与状态。
+func TestActiveViewKeepsDirectUpstreamDeps(t *testing.T) {
+	tasks := []*db.Task{
+		{ProjectID: "p1", ID: "T-done", Title: "上游已完成", Status: "done"},
+		{ProjectID: "p1", ID: "T-arch", Title: "上游已归档", Status: "done",
+			Extra: map[string]any{db.TaskArchivedKey: true}},
+		{ProjectID: "p1", ID: "T-orphan-done", Title: "无人引用的完成题", Status: "done"},
+		{ProjectID: "p1", ID: "T-active", Title: "活动题", Status: "ready",
+			Deps: []string{"T-done", "T-arch"}},
+		{ProjectID: "p2", ID: "T-done", Title: "别的工程同号", Status: "done"},
+	}
+	snap := BuildSnapshot(tasks, nil, 1)
+	view := snap.WithTaskView(TaskView{})
+	got := map[string]string{}
+	for _, tsk := range view.Tasks {
+		got[tsk.ProjectID+"/"+tsk.ID] = tsk.Title
+	}
+	if got["p1/T-active"] != "活动题" {
+		t.Fatalf("活动题应保留：%+v", got)
+	}
+	if got["p1/T-done"] != "上游已完成" {
+		t.Fatalf("直接依赖的 done 上游应保留标题：%+v", got)
+	}
+	if got["p1/T-arch"] != "上游已归档" {
+		t.Fatalf("直接依赖的 archived 上游应保留标题：%+v", got)
+	}
+	if _, ok := got["p1/T-orphan-done"]; ok {
+		t.Fatalf("无人引用的完成题不应回流：%+v", got)
+	}
+	if _, ok := got["p2/T-done"]; ok {
+		t.Fatalf("不得跨工程补同号上游：%+v", got)
+	}
+	if view.Total != snap.Total || view.Done != snap.Done {
+		t.Fatalf("补上游不得改动全量聚合")
+	}
+}
+
 // 显式 include 才能看到被隐藏的题；未知值忽略而不是猜。
 func TestArchiveIncludeShowsHidden(t *testing.T) {
 	snap := BuildSnapshot(archiveFixture(), nil, 1)

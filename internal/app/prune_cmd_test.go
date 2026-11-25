@@ -10,7 +10,7 @@ import (
 	"github.com/kiwh77/maw/internal/db"
 )
 
-func TestPruneRemovesStaleIdleWorktree(t *testing.T) {
+func TestPruneRemovesIdleWorktree(t *testing.T) {
 	f := newFixture(t)
 	agentID := "cursor-demo-9"
 	wt := filepath.Join(f.repo, ".worktrees", agentID)
@@ -24,16 +24,16 @@ func TestPruneRemovesStaleIdleWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 登记为 idle，但 last_seen 过期 → 应可 prune
+	// idle（即使 last_seen 很新）→ 应可 prune
 	err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
 		return bindAgent(tx, f.pc.ID(), agentID, "worker", "idle", "", "", "", "")
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale := time.Now().UTC().Add(-72 * time.Hour).Format(time.RFC3339)
+	fresh := time.Now().UTC().Format(time.RFC3339)
 	err = db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
-		_, e := tx.Exec(`UPDATE agents SET last_seen=? WHERE project_id=? AND id=?`, stale, f.pc.ID(), agentID)
+		_, e := tx.Exec(`UPDATE agents SET last_seen=? WHERE project_id=? AND id=?`, fresh, f.pc.ID(), agentID)
 		return e
 	})
 	if err != nil {
@@ -58,5 +58,35 @@ func TestPruneRemovesStaleIdleWorktree(t *testing.T) {
 	}
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Fatalf("worktree still on disk: %v", err)
+	}
+}
+
+func TestPruneKeepsWorkingWorktree(t *testing.T) {
+	f := newFixture(t)
+	agentID := "cursor-demo-10"
+	wt := filepath.Join(f.repo, ".worktrees", agentID)
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		return bindAgent(tx, f.pc.ID(), agentID, "worker", "working", "T-1", "", "", "")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Prune(f.repo, true, false)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	removed, _ := res["removed_worktrees"].([]string)
+	for _, p := range removed {
+		if filepath.Base(p) == agentID {
+			t.Fatalf("working agent worktree should be kept, removed=%v kept=%v", removed, res["kept_reasons"])
+		}
+	}
+	if st, err := os.Stat(wt); err != nil || !st.IsDir() {
+		t.Fatalf("working worktree should remain: %v", err)
 	}
 }

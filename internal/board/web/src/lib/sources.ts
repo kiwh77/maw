@@ -73,6 +73,36 @@ export type RemovalOutcome = {
   unauthenticated?: boolean
 }
 
+/** 自动执行开关里的一个候选节点。 */
+export type AutoExecutionNode = {
+  id: string
+  label?: string
+  ready: boolean
+  reason?: string
+  detail?: string
+  slots?: number
+}
+
+/** 自动执行开关的完整状态（服务端 GET/PUT 同一形状）。 */
+export type AutoExecutionState = {
+  project_id: string
+  enabled: boolean
+  node_id: string
+  node?: AutoExecutionNode
+  nodes?: AutoExecutionNode[]
+  limit?: number
+  ready: boolean
+  reasons?: string[]
+  detail?: string
+  serve_running: boolean
+  applied: boolean
+  reason?: string
+  last_attempt?: Record<string, unknown>
+}
+
+/** 开关写入结果：applied=false 表示现场不满足（不是请求错误）。 */
+export type AutoExecutionOutcome = RemovalOutcome & { state?: AutoExecutionState }
+
 /** 一次 CLI 环境自检的同步结果（POST /api/v1/nodes/{id}/checks）。 */
 export type NodeCheckReport = {
   node_id: string
@@ -549,6 +579,88 @@ export function createDefaultSources(win: Window | null, fetchImpl: typeof fetch
         }
       }
       return { ok: true, status: res.status, report: payload as NodeCheckReport }
+    },
+
+    /**
+     * 读「自动执行」开关状态（GET /projects/{id}/auto-execution）。
+     *
+     * 返回的是服务端判定过的就绪结论，不是本地猜测：开关该显示「未就绪」
+     * 还是「已开启」，只能由它说了算。
+     */
+    async getAutoExecution(projectId: string): Promise<AutoExecutionState | null> {
+      const id = String(projectId || '').trim()
+      if (!id || !doFetch) return null
+      const authed = await ensureSession()
+      if (!authed) return null
+      const url = '/api/v1/projects/' + encodeURIComponent(id) + '/auto-execution'
+      let res: Response
+      try {
+        res = await doFetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+      } catch {
+        return null
+      }
+      if (!res.ok) return null
+      const payload = (await res.json().catch(() => null)) as Record<string, unknown> | null
+      const state = payload?.auto_execution
+      return state && typeof state === 'object' ? (state as AutoExecutionState) : null
+    },
+
+    /**
+     * 打开／关闭自动执行（PUT 同一路径）。
+     *
+     * 成功与否只看 2xx + auto_execution 载荷；服务端拒绝开启（节点接不了活）
+     * 也回 200，但 applied=false 并带 reasons——那不是错误，是现场不满足。
+     */
+    async setAutoExecution(
+      projectId: string,
+      enabled: boolean,
+      nodeId = '',
+    ): Promise<AutoExecutionOutcome> {
+      const id = String(projectId || '').trim()
+      if (!id) return { ok: false, status: 0, code: 'invalid_project_id' }
+      if (!doFetch) return { ok: false, status: 0, code: 'network_error' }
+      const authed = await ensureSession()
+      if (!authed) return { ok: false, status: 401, code: 'unauthenticated', unauthenticated: true }
+      const csrf = readCookie(win, CSRF_COOKIE)
+      if (!csrf) return { ok: false, status: 403, code: 'csrf_failed' }
+      const url = '/api/v1/projects/' + encodeURIComponent(id) + '/auto-execution'
+      let res: Response
+      try {
+        res = await doFetch(url, {
+          method: 'PUT',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrf,
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ enabled, node_id: nodeId }),
+        })
+      } catch {
+        return { ok: false, status: 0, code: 'network_error' }
+      }
+      let body: Record<string, unknown> = {}
+      try {
+        body = (await res.json()) as Record<string, unknown>
+      } catch {
+        body = {}
+      }
+      if (!res.ok) {
+        const detail = (body?.error || null) as { code?: string; message?: string } | null
+        return {
+          ok: false,
+          status: res.status,
+          code: detail?.code,
+          message: detail?.message,
+          unauthenticated: res.status === 401,
+        }
+      }
+      const state = body?.auto_execution
+      return {
+        ok: true,
+        status: res.status,
+        state: state && typeof state === 'object' ? (state as AutoExecutionState) : undefined,
+      }
     },
 
     async updateProject(

@@ -14,6 +14,7 @@ import (
 	"github.com/kiwh77/maw/internal/app"
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/engine/model"
+	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/systemagent"
 	"github.com/kiwh77/maw/tests/testsupport"
 )
@@ -37,10 +38,14 @@ func readTx(t *testing.T, gdb string, fn func(*sql.Tx) error) {
 	}
 }
 
-// setTOMLValue 把 config.toml 里某个段落的键改成指定值，不动其它行。
+// setTOMLValue 把仓外 config.toml 里某个段落的键改成指定值，不动其它行。
 func setTOMLValue(t *testing.T, repo, section, key, value string) {
 	t.Helper()
-	path := filepath.Join(repo, ".multiagent", "config.toml")
+	local, err := home.MawHome(repo)
+	if err != nil {
+		t.Fatalf("maw home: %v", err)
+	}
+	path := home.ConfigPath(local)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读配置: %v", err)
@@ -74,6 +79,10 @@ func setTOMLValue(t *testing.T, repo, section, key, value string) {
 func enableSystemAgent(t *testing.T, repo string) {
 	t.Helper()
 	setTOMLValue(t, repo, "system_agent", "enabled", "true")
+	// 本文件的场景只验证「回收／编排是否按预期走」，不验证队列卡死信号入队。
+	// RT-1 之后五类卡死信号会按 auto_kinds 产作业，那会让这里的 enqueued 计数
+	// 混入无关来源；因此把 auto_kinds 收窄到队列信号不用的类型。
+	setTOMLValue(t, repo, "system_agent", "auto_kinds", `["ops_run"]`)
 }
 
 // enableManagedAuto 打开受管自动执行（自动执行开关 + 并发上限）。

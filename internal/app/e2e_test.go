@@ -138,12 +138,12 @@ merge_order = 2
 	if !strings.Contains(string(log), "maw: merge") {
 		t.Fatalf("expected merge commits, got %s", log)
 	}
-	// 合入后保留 per-agent worktree，仅删除 agent 题分支
-	if st, err := os.Stat(wt1); err != nil || !st.IsDir() {
-		t.Fatalf("worktree should be kept after merge: %s (%v)", wt1, err)
+	// 合入后删除 per-agent worktree 与 agent 题分支
+	if _, err := os.Stat(wt1); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be removed after merge: %s (%v)", wt1, err)
 	}
-	if st, err := os.Stat(wt2); err != nil || !st.IsDir() {
-		t.Fatalf("worktree should be kept after merge: %s (%v)", wt2, err)
+	if _, err := os.Stat(wt2); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be removed after merge: %s (%v)", wt2, err)
 	}
 	branches, _ := exec.Command("git", "-C", repo, "branch", "--list", "agent/*").CombinedOutput()
 	if strings.TrimSpace(string(branches)) != "" {
@@ -261,22 +261,19 @@ merge_order = 2
 	if out, err := run([]string{"MAW_AGENT=w1"}, "merge", "--yes"); err != nil {
 		t.Fatalf("merge T-001: %v\n%s", err, out)
 	}
-	if st, err := os.Stat(wt); err != nil || !st.IsDir() {
-		t.Fatalf("worktree should survive merge: %v", err)
-	}
-	if b, err := os.ReadFile(ignored); err != nil || string(b) != "deps\n" {
-		t.Fatalf("ignored deps should survive merge: %v %q", err, b)
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be removed after merge: %v", err)
 	}
 
 	if out, err := run([]string{"MAW_AGENT=w1"}, "next", "--claim"); err != nil {
 		t.Fatalf("next T-002: %v\n%s", err, out)
 	}
-	// Same path reused
+	// Same path recreated for the next task
 	if st, err := os.Stat(wt); err != nil || !st.IsDir() {
-		t.Fatalf("reused worktree missing: %v", err)
+		t.Fatalf("recreated worktree missing: %v", err)
 	}
-	if b, err := os.ReadFile(ignored); err != nil || string(b) != "deps\n" {
-		t.Fatalf("ignored deps should survive next reset: %v %q", err, b)
+	if _, err := os.Stat(ignored); !os.IsNotExist(err) {
+		t.Fatalf("ignored deps from prior tree should not survive recreate: %v", err)
 	}
 	// Second task branch from main tip should already include a.txt from merge
 	if _, err := os.Stat(filepath.Join(wt, "mod_a", "a.txt")); err != nil {
@@ -296,15 +293,15 @@ merge_order = 2
 	if out, err := run([]string{"MAW_AGENT=w1"}, "merge", "--yes"); err != nil {
 		t.Fatalf("merge T-002: %v\n%s", err, out)
 	}
-	if st, err := os.Stat(wt); err != nil || !st.IsDir() {
-		t.Fatalf("worktree should still exist after second merge: %v", err)
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be removed after second merge: %v", err)
 	}
 	branches, _ := exec.Command("git", "-C", repo, "branch", "--list", "agent/*").CombinedOutput()
 	if strings.TrimSpace(string(branches)) != "" {
 		t.Fatalf("agent branches should be deleted, still have:\n%s", branches)
 	}
 
-	// Seed a legacy leftover and ensure prune removes it while keeping agent tree
+	// Seed a legacy leftover and ensure prune removes it
 	legacy := filepath.Join(repo, ".worktrees", "w1-T-OLD")
 	_ = os.MkdirAll(legacy, 0o755)
 	_ = os.WriteFile(filepath.Join(legacy, "junk"), []byte("x"), 0o644)
@@ -320,9 +317,6 @@ merge_order = 2
 	}
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Fatalf("legacy worktree should be removed, err=%v", err)
-	}
-	if st, err := os.Stat(wt); err != nil || !st.IsDir() {
-		t.Fatalf("per-agent worktree should be kept by prune: %v", err)
 	}
 }
 

@@ -33,20 +33,8 @@ func writeProjectMeta(localHome string, p *db.Project) error {
 }
 
 func resolveProject(cwd string) (*projCtx, error) {
-	repo, err := home.RepoRoot(cwd)
+	repo, local, gdb, _, _, err := EnsureAttached(cwd, false)
 	if err != nil {
-		return nil, err
-	}
-	local, err := home.RequireHome(cwd)
-	if err != nil {
-		return nil, err
-	}
-	gdb, err := home.GlobalDBPath()
-	if err != nil {
-		return nil, err
-	}
-	// 写路径：升级必须走停写与备份入口，禁止只读查询顺手 Migrate。
-	if err := ensureWritableDB(gdb); err != nil {
 		return nil, err
 	}
 	cfg, err := config.Load(home.ConfigPath(local))

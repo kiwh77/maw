@@ -23,6 +23,7 @@ type ProjectUpdateInput struct {
 	MainBranch   *string
 	MaxParallel  *int
 	AutoEnabled  *bool
+	AutoSelect   *bool
 	Limit        *int
 	AllowedNodes *[]string
 	WorkerNode   *string
@@ -78,7 +79,11 @@ func ProjectUpdate(cwd string, in ProjectUpdateInput) (Result, error) {
 		return nil, err
 	}
 
-	cfgPath := filepath.Join(project.Path, ".multiagent", "config.toml")
+	localHome, err := home.ProjectHome(project.Path)
+	if err != nil {
+		return nil, err
+	}
+	cfgPath := home.ConfigPath(localHome)
 	wroteConfig := false
 	if !in.DryRun && projectConfigNeedsWrite(in) {
 		if err := patchProjectConfig(cfgPath, in); err != nil {
@@ -97,13 +102,13 @@ func ProjectUpdate(cwd string, in ProjectUpdateInput) (Result, error) {
 }
 
 func projectConfigNeedsWrite(in ProjectUpdateInput) bool {
-	return in.AutoEnabled != nil || in.Limit != nil || in.AllowedNodes != nil ||
+	return in.AutoEnabled != nil || in.AutoSelect != nil || in.Limit != nil || in.AllowedNodes != nil ||
 		in.WorkerNode != nil || in.LLMNode != nil || in.MainBranch != nil || in.MaxParallel != nil
 }
 
 func patchProjectConfig(path string, in ProjectUpdateInput) error {
 	if _, err := os.Stat(path); err != nil {
-		return errx.New("找不到工程配置: "+path, "确认工程 path 正确且已 maw init")
+		return errx.New("找不到工程配置: "+path, "确认工程 path 正确且已 maw init / project add")
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
@@ -117,6 +122,9 @@ func patchProjectConfig(path string, in ProjectUpdateInput) error {
 	}
 	if in.AutoEnabled != nil {
 		cfg.Managed.AutoEnabled = *in.AutoEnabled
+	}
+	if in.AutoSelect != nil {
+		cfg.Managed.AutoSelect = *in.AutoSelect
 	}
 	if in.Limit != nil {
 		cfg.Managed.Limit = *in.Limit
@@ -143,6 +151,7 @@ func writeProjectConfig(path string, cfg *config.Config) error {
 	text = setTOMLString(text, "project", "main_branch", cfg.Project.MainBranch)
 	text = setTOMLInt(text, "project", "max_parallel", cfg.Project.MaxParallel)
 	text = setTOMLBool(text, "managed", "auto_enabled", cfg.Managed.AutoEnabled)
+	text = setTOMLBool(text, "managed", "auto_select", cfg.Managed.AutoSelect)
 	text = setTOMLInt(text, "managed", "limit", cfg.Managed.Limit)
 	text = setTOMLStringArray(text, "managed", "allowed_nodes", cfg.Managed.AllowedNodes)
 	text = setTOMLString(text, "system_agent", "worker_node", cfg.SystemAgent.WorkerNode)

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/errx"
@@ -14,19 +13,14 @@ import (
 	"github.com/kiwh77/maw/internal/machine"
 )
 
-// pruneIdleGrace 是 idle Agent 的 worktree 宽限期：last_seen 在此之内仍保留，
-// 避免刚交题就立刻被 prune 砍掉温热依赖缓存。超时或 offline 则可清。
-const pruneIdleGrace = 48 * time.Hour
-
 // Prune lists or removes leftover worktrees and agent/* branches.
 //
 // 保留规则（kept_reasons 会写明）：
 //   - ActiveOwner 任务占用的 worktree / 分支 / owner 树
 //   - status=working 的 Agent 树
-//   - idle 且 last_seen 在 pruneIdleGrace 内的 Agent 树（温热复用）
 //   - unknown / stop-unconfirmed / pending-acceptance 占用（blocked_holds）
 //
-// idle 过期、offline、以及磁盘有树但 agents.worktree 空挂的目录，均可清。
+// idle / offline、以及磁盘有树但无占用的目录，均可清（合入主干后不再温热保留）。
 // Default is dry-run (yes=false); pass yes=true to delete.
 func Prune(cwd string, yes, dryRun bool) (Result, error) {
 	pc, err := resolveProject(cwd)
@@ -54,7 +48,6 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 	protectedBranch := map[string]bool{}
 	keptReasons := map[string]string{}
 	blockedHolds := []string{}
-	now := time.Now().UTC()
 
 	for _, t := range tasks {
 		if t == nil || !machine.ActiveOwner[t.Status] {
@@ -79,7 +72,7 @@ func Prune(cwd string, yes, dryRun bool) (Result, error) {
 			continue
 		}
 		abs := filepath.Join(pc.Repo, ".worktrees", a.ID)
-		reason, keep := agentWorktreeKeepReason(a, now)
+		reason, keep := agentWorktreeKeepReason(a)
 		if !keep {
 			continue
 		}
@@ -215,39 +208,15 @@ func absWorktree(repo, relOrAbs string) string {
 }
 
 // agentWorktreeKeepReason 决定是否因 Agent 注册而保留其持久树。
-func agentWorktreeKeepReason(a *db.Agent, now time.Time) (reason string, keep bool) {
+// 仅 working 保留；idle / offline 在合入后可清。
+func agentWorktreeKeepReason(a *db.Agent) (reason string, keep bool) {
 	if a == nil || a.ID == "" {
 		return "", false
 	}
-	switch strings.TrimSpace(a.Status) {
-	case "working":
+	if strings.TrimSpace(a.Status) == "working" {
 		return "agent_working:" + a.ID, true
-	case "offline", "":
-		return "", false
-	default:
-		// idle 等：宽限期内保留，超时可清。
-		seen := parseAgentLastSeen(a.LastSeen)
-		if seen.IsZero() {
-			return "", false
-		}
-		if now.Sub(seen) <= pruneIdleGrace {
-			return "agent_idle_fresh:" + a.ID, true
-		}
-		return "", false
 	}
-}
-
-func parseAgentLastSeen(s string) time.Time {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}
-	}
-	for _, layout := range []string{time.RFC3339, time.RFC3339Nano, "2006-01-02T15:04:05Z"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.UTC()
-		}
-	}
-	return time.Time{}
+	return "", false
 }
 
 // stripMawSessionArtifacts 删除 worktree 根上的 TASK.md 与 .maw/，

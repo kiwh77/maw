@@ -15,14 +15,14 @@ description: >-
 
 | 阶段 | 技能 | 何时 |
 |---|---|---|
-| 1. 接入仓库 | **[maw-init](../maw-init/SKILL.md)** | 无 `.multiagent/`、doctor 未 init、首次挂看板 |
+| 1. 接入仓库 | **[maw-init](../maw-init/SKILL.md)** | 首次挂看板 / doctor 未接线（仓外 `~/.maw/projects/<id>/`；进仓 next 也会自动登记） |
 | 2. 拆任务边界 | **[maw-task-list](../maw-task-list/SKILL.md)** | 建可执行任务清单、Surface/Deps/粒度 |
 | 3. 灌任务 | **[maw-plan-push](../maw-plan-push/SKILL.md)** | 一次压入剩余题到 blueprint / apply |
 | 4. **拉取任务** | **[maw-task-pull](../maw-task-pull/SKILL.md)** | 本工程或全局看板选仓后 `maw next` |
 | 4b. **旁路接入** | **[maw-status-attach](../maw-status-attach/SKILL.md)** | 不走 next 的用户指派/adhoc 工作；`maw status report` 及时告之中枢 |
 | 5. 执行中 | （本页速查） | progress / submit / merge / board；旁路用 status report |
 
-要求 **maw CLI ≥ 0.4.0**（每 Agent 持久 worktree；主干由清单指定需 **≥ 0.3.9**）。安装：本仓库 `./install.sh` → `~/.local/bin/maw`。
+要求 **maw CLI ≥ 0.4.1**（每 Agent 一路径 worktree，合入后删除；主干由清单指定需 **≥ 0.3.9**）。安装：本仓库 `./install.sh` → `~/.local/bin/maw`。
 
 ## 推荐全流程
 
@@ -51,11 +51,11 @@ maw next -C "<project_path>" --claim --json # 再领取
 
 maw progress -m "里程碑"
 maw submit
-maw merge --yes          # 成功后保留 .worktrees/{agent}，仅删除 agent/{agent}/{task} 分支
-# 仍有 ready 则继续（同树 reset 到主干 tip 后换新题分支）
+maw merge --yes          # 成功后删除 .worktrees/{agent} 与 agent/{agent}/{task} 分支
+# 仍有 ready 则继续（重建 .worktrees/{agent} 到主干 tip 后换新题分支）
 maw next          # 查询
 maw next --claim  # 领取
-# 历史「一题一树」残留：
+# 历史残留：
 # maw prune            # 预览
 # maw prune --yes      # 删除
 
@@ -64,14 +64,17 @@ maw status report -m "实现中" --phase code --pct 40 --status working
 
 # 中枢维护：工程登记清单 / 移除（有未完成任务或在线 Agent 时默认拒绝）
 maw project list
+maw project add                 # 显式登记当前仓（不写工程文件）
 maw project rm <id|名称>        # --force 连现场一起清
 ```
 
 **铁律**
 
-- 只改任务 `write_scope`；越界用 `maw request-change --add 'path/**'`；状态在 `~/.maw/maw.db`
-- 非领取任务接入看板时必须 `maw status report` 及时上报（开工/里程碑/收工），勿沉默
-- 每个 Agent 一个持久 worktree：`.worktrees/{agent}`；题间复用，不新建目录
+- 只改任务 `write_scope`；越界用 `maw request-change --add 'path/**'`（成功后任务卡会刷新）；状态在 `~/.maw/maw.db`
+- **遇阻一律 `maw block -m "[类别] 卡点：…；需要：…"`**（类别：scope/deps/env/spec/conflict/gate/baseline/human/other）；禁止只聊天汇报。scope 不够先 `request-change`，失败再 block。
+- 非领取任务接入看板时必须 `maw status report` 及时上报（开工/里程碑/收工），勿沉默；旁路阻塞用 `--phase blocked`
+- 主工作区脏导致 merge 失败时 **禁止**清别人改动；应 block 等人处理
+- 每个 Agent 一个 worktree 路径：`.worktrees/{agent}`；合入后删除，下一题再重建
 - **`maw submit` 前必须 `git commit`**（仅 scope 内）；未提交的 staged/unstaged 会被 submit 直接拒绝，避免 merge 报 `working tree dirty` 进 conflict
 - submit 后可自行 `maw merge --yes`；禁止直接 git merge/rebase/push 主干
 - 合入后若仍有 ready，继续 `maw next` 领下一题，直至无题可领或用户叫停
@@ -86,6 +89,6 @@ maw project rm <id|名称>        # --force 连现场一起清
 
 ## 相关文件
 
-- `.multiagent/config.toml` / `blueprint.toml` / `STATUS.md`
+- `~/.maw/maw.db` · `~/.maw/projects/<id>/config.toml` / `blueprint.toml`
 - `docs/**可执行任务清单*.md`
-- `AGENTS.md` / `.cursor/rules/maw.mdc`
+- （可选）仓库内 Agent 提示词与 IDE rules——CLI 不读

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,37 +55,7 @@ func probeDueNodes(gdb string) error {
 			if !last.IsZero() && now.Sub(last) < time.Duration(interval)*time.Second {
 				continue
 			}
-			entry := nodeEntryPath(meta)
-			ok, detail := probeNodeEntry(entry)
-			// Pi 节点：入口存在还不够，必须让运行时自报版本与协议。
-			if ok && metaString(meta, "adapter_kind") == "pi" {
-				if argv := metaStrings(meta["argv"]); len(argv) >= 2 {
-					var info map[string]any
-					ok, detail, info = probePiRuntime(argv)
-					if ok {
-						for k, v := range info {
-							meta[k] = v
-						}
-					}
-				}
-			}
-			meta["last_probe_at"] = nowStr
-			meta["observed_at"] = nowStr
-			meta["auto_probe"] = true
-			meta["heartbeat_interval_sec"] = interval
-			if ok {
-				meta["entry_state"] = "ready"
-				meta["auth_state"] = "ready"
-				meta["connection_state"] = "fresh"
-				meta["capacity_state"] = "available"
-				meta["last_probe_ok"] = true
-				delete(meta, "last_probe_error")
-			} else {
-				meta["entry_state"] = "unavailable"
-				meta["connection_state"] = "stale"
-				meta["last_probe_ok"] = false
-				meta["last_probe_error"] = detail
-			}
+			applyNodeProbe(meta, now, interval)
 			n.Meta = meta
 			n.LastSeen = nowStr
 			if err := db.UpsertNode(tx, n); err != nil {
@@ -116,7 +87,7 @@ func probePiRuntime(argv []string) (bool, string, map[string]any) {
 		line = line[:i]
 	}
 	var report struct {
-		OK       bool   `json:"ok"`
+		OK       bool `json:"ok"`
 		Protocol struct {
 			Format  string `json:"format"`
 			Version string `json:"version"`
@@ -139,6 +110,80 @@ func probePiRuntime(argv []string) (bool, string, map[string]any) {
 		"protocol_version": report.Protocol.Version,
 		"runtime_node":     report.Node,
 	}
+}
+
+// applyNodeProbe 刷新一次节点观测证据（只改 meta，不碰库）。
+//
+// 抽出来是为了让两条路径共用同一套判定：周期探测（probeDueNodes）与
+// 「打开自动执行时立刻探活」（probeNodeNow）。两边各写一份的实现迟早会分叉，
+// 而分叉的后果是「界面说就绪、匹配层说过期」。
+func applyNodeProbe(meta map[string]any, now time.Time, interval int) (ok bool, detail string) {
+	if meta == nil {
+		return false, "missing meta"
+	}
+	nowStr := now.Format(time.RFC3339)
+	entry := nodeEntryPath(meta)
+	ok, detail = probeNodeEntry(entry)
+	// Pi 节点：入口存在还不够，必须让运行时自报版本与协议。
+	if ok && metaString(meta, "adapter_kind") == "pi" {
+		if argv := metaStrings(meta["argv"]); len(argv) >= 2 {
+			var info map[string]any
+			ok, detail, info = probePiRuntime(argv)
+			if ok {
+				for k, v := range info {
+					meta[k] = v
+				}
+			}
+		}
+	}
+	meta["last_probe_at"] = nowStr
+	meta["observed_at"] = nowStr
+	meta["auto_probe"] = true
+	if interval > 0 {
+		meta["heartbeat_interval_sec"] = interval
+	}
+	if ok {
+		meta["entry_state"] = "ready"
+		meta["auth_state"] = "ready"
+		meta["connection_state"] = "fresh"
+		meta["capacity_state"] = "available"
+		meta["last_probe_ok"] = true
+		delete(meta, "last_probe_error")
+	} else {
+		meta["entry_state"] = "unavailable"
+		meta["connection_state"] = "stale"
+		meta["last_probe_ok"] = false
+		meta["last_probe_error"] = detail
+	}
+	return ok, detail
+}
+
+// probeNodeNow 立刻探测一个节点并回写证据，不看间隔、不排队。
+//
+// 用在「打开自动执行」这类必须当场知道节点能不能接活的场景：匹配层只认
+// 5 分钟内的观测，等下一次周期探测意味着开关先失灵几分钟。
+func probeNodeNow(gdb, nodeID string) error {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return fmt.Errorf("probeNodeNow: 缺少 node_id")
+	}
+	return db.WithTx(gdb, func(tx *sql.Tx) error {
+		n, err := db.GetNode(tx, nodeID)
+		if err != nil {
+			return err
+		}
+		if n == nil {
+			return fmt.Errorf("节点 %s 不存在", nodeID)
+		}
+		meta := n.Meta
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		applyNodeProbe(meta, time.Now().UTC(), nodeHeartbeatInterval(meta))
+		n.Meta = meta
+		n.LastSeen = time.Now().UTC().Format(time.RFC3339)
+		return db.UpsertNode(tx, n)
+	})
 }
 
 func nodeAutoProbeEnabled(meta map[string]any) bool {

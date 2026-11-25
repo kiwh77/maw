@@ -413,3 +413,54 @@ select.theme-select { height: var(--control-height-compact); font-size: 11px; ba
   .sidebar .nav-item { min-height: 44px; }
   .sidebar-toggle, .sidebar-close { min-height: 40px; width: 40px; }
 }
+
+/* 工具栏「自动执行」开关：与「接入」并排，处在筛选左侧。
+   三态用圆点颜色区分：就绪=强调色、开启=绿色、未就绪=灰；未就绪仍可聚焦，
+   因为 title 里写着原因，键盘与读屏用户也能知道为什么点不动。 */
+.auto-exec { display: inline-flex; align-items: center; gap: 6px; }
+.auto-exec__node {
+  height: 30px;
+  /* 节点名（如「DeepSeek Harness（本机）」）比通用下拉更长：给到 220px，
+     再窄就只剩「DeepSeek Harness (」这种看不出是哪个节点的残句。 */
+  max-width: 220px;
+  font-size: var(--font-small, 12px);
+  color: var(--muted);
+}
+.auto-exec__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  font-size: var(--font-small, 12px);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.auto-exec__toggle:hover:not(:disabled) { background: var(--hover); border-color: var(--line-strong); color: var(--text); }
+.auto-exec__toggle:disabled { opacity: .62; cursor: not-allowed; }
+.auto-exec__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--muted) 35%, transparent);
+}
+.auto-exec[data-mode="on"] .auto-exec__toggle { color: var(--text); border-color: var(--line-strong); }
+.auto-exec[data-mode="on"] .auto-exec__dot { background: var(--ok, #35c07a); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok, #35c07a) 45%, transparent); }
+.auto-exec[data-mode="off"] .auto-exec__dot { background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.auto-exec[data-mode="blocked"] .auto-exec__toggle { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+
+.auto-exec-modal { width: min(460px, calc(100vw - 32px)); }
+.auto-exec-modal__foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.auto-exec-modal__ok { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+.auto-exec-modal__ok:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-ink); }
+
+@media (max-width: 1100px) {
+  .auto-exec__node { max-width: 140px; }
+  .auto-exec__toggle { font-size: 11px; }
+}

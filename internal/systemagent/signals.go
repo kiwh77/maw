@@ -251,6 +251,19 @@ func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Tim
 	var out []Signal
 	seen := make(map[string]bool)
 	emit := func(s Signal) {
+		// 队列卡死类信号以前一律 JobKind=""（只上报）。现在按 auto_kinds
+		// 的白名单偏好挑一个作业类型：操作员没放行的类型仍然只上报，语义不变。
+		if s.JobKind == "" {
+			s.JobKind = queueStallJobKind(s.Kind, cfg)
+			if s.JobKind == "" && signalJobPreferences(s.Kind) != nil {
+				// 偏好序非空却一个都没放行：显式标注「只上报」，
+				// 让看板与审计能把它和「没有处置偏好」的信号区分开。
+				if s.Decision == nil {
+					s.Decision = map[string]any{}
+				}
+				s.Decision["report_only"] = true
+			}
+		}
 		key := s.Key()
 		if seen[key] {
 			return
@@ -387,15 +400,15 @@ func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Tim
 			if !dispatchOpStalled(op, now) {
 				continue
 			}
+			// JobKind 留空由 emit 按 auto_kinds 解析：放行了 unblock_assist 才入队，
+			// 否则仍只上报（契约 §2 的默认档位）。
 			emit(Signal{
 				Kind:        SignalDispatchOpStalled,
 				ProjectID:   op.ProjectID,
 				ResourceKey: op.OperationID,
-				Reason: fmt.Sprintf("操作 %s（%s）处于 pending 且租约已过期超过 %s，仅上报",
+				Reason: fmt.Sprintf("操作 %s（%s）处于 pending 且租约已过期超过 %s",
 					op.OperationID, op.Kind, dispatchOpStallThreshold),
-				JobKind: "",
 				Decision: map[string]any{
-					"report_only":    true,
 					"operation_id":   op.OperationID,
 					"operation_kind": op.Kind,
 				},
@@ -423,12 +436,10 @@ func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Tim
 				Kind:      SignalClaimedNotStarted,
 				ProjectID: t.ProjectID,
 				TaskID:    t.TaskID,
-				Reason:    reason + "，仅上报",
-				JobKind:   "",
+				Reason:    reason,
 				Decision: map[string]any{
-					"report_only": true,
-					"task_id":     t.TaskID,
-					"run_phase":   t.RunPhase,
+					"task_id":   t.TaskID,
+					"run_phase": t.RunPhase,
 				},
 			})
 		}
@@ -440,14 +451,14 @@ func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Tim
 			var reason string
 			switch {
 			case len(d.Cycle) > 0:
-				reason = "任务依赖成环：" + strings.Join(d.Cycle, " -> ") + "，仅上报"
+				reason = "任务依赖成环：" + strings.Join(d.Cycle, " -> ")
 			case !d.BlockedSince.IsZero() && now.Sub(d.BlockedSince) > depDeadlockThreshold:
-				reason = fmt.Sprintf("全部 ready 题被未完成依赖堵住超过 %s（%s），仅上报",
+				reason = fmt.Sprintf("全部 ready 题被未完成依赖堵住超过 %s（%s）",
 					depDeadlockThreshold, strings.Join(d.BlockedTasks, ","))
 			default:
 				continue
 			}
-			decision := map[string]any{"report_only": true}
+			decision := map[string]any{}
 			if len(d.Cycle) > 0 {
 				decision["cycle"] = d.Cycle
 			}
@@ -459,7 +470,6 @@ func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Tim
 				ProjectID:   d.ProjectID,
 				ResourceKey: d.ProjectID,
 				Reason:      reason,
-				JobKind:     "",
 				Decision:    decision,
 			})
 		}
@@ -476,12 +486,10 @@ func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Tim
 				Kind:      SignalNoCapableNode,
 				ProjectID: n.ProjectID,
 				TaskID:    n.TaskID,
-				Reason:    reason + "，仅上报，不放宽匹配",
-				JobKind:   "",
+				Reason:    reason + "（不放宽匹配）",
 				Decision: map[string]any{
-					"report_only": true,
-					"task_id":     n.TaskID,
-					"reason":      n.Reason,
+					"task_id": n.TaskID,
+					"reason":  n.Reason,
 				},
 			})
 		}
@@ -497,24 +505,63 @@ func DetectSystemSignals(facts SignalFacts, cfg config.SystemAgent, now time.Tim
 			if f.Failures < maxAttempts {
 				continue
 			}
+			// Escalate=true：留一条可见的介入记录，但预置动作是升级人工，
+			// 编排器不会调 LLM、也不会自动重派——防无限重试的边界不变。
 			emit(Signal{
 				Kind:        SignalRepeatedFailure,
 				ProjectID:   f.ProjectID,
 				TaskID:      f.TaskID,
 				ResourceKey: f.InstanceID,
-				Reason: fmt.Sprintf("实例 %s 在 %s 内失败 %d 次（阈值 %d），仅上报，不自动重派",
+				Reason: fmt.Sprintf("实例 %s 在 %s 内失败 %d 次（阈值 %d），不自动重派",
 					f.InstanceID, RepeatedFailureWindow, f.Failures, maxAttempts),
-				JobKind: "",
 				Decision: map[string]any{
-					"report_only":  true,
 					"instance_id":  f.InstanceID,
 					"failures":     f.Failures,
 					"max_attempts": maxAttempts,
 				},
+				Escalate: true,
 			})
 		}
 	}
 	return out
+}
+
+// queueStallJobKind 给「队列卡死」类信号挑一个作业类型。
+//
+// 判定顺序：
+//  1. 信号有偏好序（见 signalJobPreferences）；
+//  2. 只取 auto_kinds 里已放行的类型——操作员没授权的类型仍然只上报；
+//  3. 全都没放行就返回空串（保持契约 §2 的「只上报」默认）。
+//
+// 这条规则让 Router 能在默认配置（auto_kinds=["unblock_assist"]）下就介入
+// 卡住的队列，而放开 task_split 这类更激进的处置仍需显式配置。
+func queueStallJobKind(kind SignalKind, cfg config.SystemAgent) string {
+	for _, candidate := range signalJobPreferences(kind) {
+		if KindAllowed(candidate, cfg, false) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// signalJobPreferences 是各类信号期望的处置类型偏好序。
+//
+// 留空的信号（stale_lock）属于「占用者不明」的安全边界：契约要求只上报，
+// 不允许自动释放或自动处置，因此这里不给它任何候选。
+func signalJobPreferences(kind SignalKind) []string {
+	switch kind {
+	case SignalDispatchOpStalled, SignalClaimedNotStarted, SignalNoCapableNode:
+		// 队列/节点层面的卡死：先诊断，能解就解。
+		return []string{SystemKindUnblock}
+	case SignalDepDeadlock:
+		// 依赖死锁：拆题比反复重试更有意义，拆不动再退回诊断。
+		return []string{SystemKindTaskSplit, SystemKindUnblock}
+	case SignalRepeatedFailure:
+		// 反复失败：留一条可审计的介入记录，但不允许它自动重派。
+		return []string{SystemKindUnblock}
+	default:
+		return nil
+	}
 }
 
 // dispatchOpStalled 判定一条 pending 操作是否停滞：租约过期超过阈值；
@@ -612,6 +659,20 @@ func SignalCooldown(cfg config.SystemAgent) time.Duration {
 	return time.Duration(cfg.CooldownoutSec) * time.Second
 }
 
+// queueStallCooldown 队列卡死类信号（lease/心跳/无节点）使用更长冷却，避免刷数百条 unblock_assist。
+const queueStallCooldown = 30 * time.Minute
+
+func signalCooldownFor(kind SignalKind, cfg config.SystemAgent) time.Duration {
+	base := SignalCooldown(cfg)
+	switch kind {
+	case SignalDispatchOpStalled, SignalClaimedNotStarted, SignalNoCapableNode:
+		if base < queueStallCooldown {
+			return queueStallCooldown
+		}
+	}
+	return base
+}
+
 // WithinCooldown 报告距同 key 上次入队是否仍在冷却窗口内（纯函数，便于假时间测）。
 // last 为零值表示从未入队；cooldown<=0 表示不冷却；时钟回拨（now<last）保守判冷却。
 func WithinCooldown(last, now time.Time, cooldown time.Duration) bool {
@@ -630,7 +691,6 @@ func WithinCooldown(last, now time.Time, cooldown time.Duration) bool {
 //   - needs_human / auth_required 类信号写 action=escalate_human，由编排层升级人工，
 //     不自动处置；max_attempts 由 Enqueue 从 cfg 带入。
 func EnqueueSignals(tx *sql.Tx, cfg config.SystemAgent, signals []Signal, now time.Time) ([]*db.SystemJob, error) {
-	cooldown := SignalCooldown(cfg)
 	last, err := recentSignalTimes(tx)
 	if err != nil {
 		return nil, err
@@ -643,6 +703,7 @@ func EnqueueSignals(tx *sql.Tx, cfg config.SystemAgent, signals []Signal, now ti
 		if !KindAllowed(s.JobKind, cfg, false) {
 			continue
 		}
+		cooldown := signalCooldownFor(s.Kind, cfg)
 		if WithinCooldown(last[s.Key()], now, cooldown) {
 			continue
 		}
@@ -673,7 +734,8 @@ func EnqueueSignals(tx *sql.Tx, cfg config.SystemAgent, signals []Signal, now ti
 // signal key 是入队时写进 decision.signal_key 的，老路径（task.blocked）没有该字段，
 // 会被自然忽略，不参与信号冷却。
 func recentSignalTimes(tx *sql.Tx) (map[string]time.Time, error) {
-	jobs, err := db.ListSystemJobs(tx, "", "", 200)
+	// 拉长回看窗口，避免刷屏后旧 signal_key 掉出冷却表。
+	jobs, err := db.ListSystemJobs(tx, "", "", 2000)
 	if err != nil {
 		return nil, err
 	}

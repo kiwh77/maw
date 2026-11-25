@@ -303,9 +303,11 @@ func ParseTaskView(include string) TaskView {
 // 只改 Tasks 列表：Total/Done/Percent/Counts 仍描述全量数据，
 // 「隐藏已完成」不会让进度条失真。叠加迭代筛选时应先 WithIteration
 // 再 WithTaskView，否则迭代重算会基于已过滤的列表。
+//
+// 过滤时仍保留活动题直接依赖的上游（含 done），避免 chips／拓扑把上游标成未知。
 func (s Snapshot) WithTaskView(v TaskView) Snapshot {
 	out := s
-	out.Tasks = db.FilterActivity(s.Tasks, v.IncludeDone, v.IncludeArchived)
+	out.Tasks = db.FilterActivityKeepingUpstream(s.Tasks, v.IncludeDone, v.IncludeArchived)
 	out.IncludeDone = v.IncludeDone
 	out.IncludeArchived = v.IncludeArchived
 	out.Normalize()

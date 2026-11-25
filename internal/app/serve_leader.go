@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/kiwh77/maw/internal/engine/dispatch"
 	"github.com/kiwh77/maw/internal/engine/matching"
 	"github.com/kiwh77/maw/internal/engine/model"
+	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/systemagent"
 )
 
@@ -27,6 +29,8 @@ const (
 	leadLoopErrorEvent       = "lead_loop_error"
 	leadLoopAttemptEvent     = "lead_loop_attempt"
 	leadLoopLockSkippedEvent = "lead_loop_lock_skipped"
+	// leadSwitchesEvent 记录常驻循环的三开关快照（含热重载后的变化）。
+	leadSwitchesEvent = "lead_switches_changed"
 )
 
 // serveLeaderProject 是启动器需要的工程登记视图（不直接暴露 db.Project，便于替换来源）。
@@ -50,6 +54,8 @@ type serveLeaderBundle struct {
 	// producer 为 true 表示 auto_select 已开启：即使两个既有开关全关，
 	// leader 仍要起循环来跑生产者（三开关互不推导）。
 	producer bool
+	// hot 是热开关源；非空时它的回调已挂到 runner 上，开关可随时翻转。
+	hot *serveLeaderHot
 }
 
 // serveLeaderOutcome 记录每个工程的处置结果：尝试了什么、有没有起 goroutine、为什么跳过。
@@ -119,9 +125,19 @@ func startServeLeaders(ctx context.Context, deps serveLeaderDeps) []serveLeaderO
 				case buildErr != nil:
 					o.Reason = "build_error"
 					deps.logf("serve leader: project=%s 装配失败: %v\n", p.ID, buildErr)
-				case b == nil || b.runner == nil || (!b.dispatch && !b.system && !b.producer):
-					// 三个开关全关：一条循环都不该跑，也不该留下空转的 leader 占着锁。
-					o.Reason = "no_switches"
+				case b == nil || b.runner == nil:
+					// 装配不出循环才是跳过；「开关全关」不再是跳过理由：
+					// leader 必须在跑，工作台上的开关才能在下一轮被它看见并生效。
+					o.Reason = "build_error"
+				case !b.dispatch && !b.system && !b.producer:
+					// 全关时仍然启动，只是空转待命（standby）。不启动就等于
+					// 「必须重启 serve 才能打开自动执行」，那正是要修掉的体验。
+					o.Started = true
+					o.Reason = "standby"
+					projectID := pc.ID()
+					deps.launch(pc, b, func(runErr error) {
+						recordServeLeaderExit(deps, rec, projectID, runErr)
+					})
 				default:
 					o.Started = true
 					o.Reason = "started"
@@ -136,6 +152,7 @@ func startServeLeaders(ctx context.Context, deps serveLeaderDeps) []serveLeaderO
 		_ = deps.write(p.ID, "system", leadLoopAttemptEvent, "", map[string]any{
 			"project_id": p.ID, "project": p.Name,
 			"dispatch": o.Reason == "started", "started": o.Started, "reason": o.Reason,
+			"standby": o.Reason == "standby",
 		})
 		out = append(out, o)
 	}
@@ -252,38 +269,22 @@ func buildServeLeaderBundle(pc *projCtx, cfg config.SystemAgent, onError func(er
 		// 受管执行在当前平台/上限下不可用：不推进排队操作，等人或 CLI 处理。
 		auto = false
 	}
-	// 系统 Agent 开关与派发开关互不推导；平台限制不影响阻塞自愈。
-	systemOn := cfg.Enabled
-	if pc.Config != nil {
-		systemOn = pc.Config.SystemAgentEnabled()
-	}
-	autoSelect := pc.Config != nil && pc.Config.Managed.AutoSelect
-
 	leader := &dispatch.Leader{Coord: coord, Dispatch: auto, OnError: onError}
-	b := &serveLeaderBundle{dispatch: auto, producer: autoSelect}
-	// 自愈轮询与自动选题都需要编排器；后者即便 system_agent.enabled=false
-	// 也必须能 RunJobID，所以装配条件是两个开关的并集。
-	if systemOn || autoSelect {
-		orch, err := buildOrchestratorWithCoord(pc, cfg, coord)
-		if err != nil {
-			// 单个工程编排器装配失败不该拖垮其它工程：保留派发循环，只丢自愈/生产。
-			fmt.Fprintf(os.Stderr, "serve leader: project=%s build orchestrator: %v\n", pc.ID(), err)
-		} else {
-			if systemOn {
-				w := buildServeWatcher(pc, cfg, orch)
-				b.watcher = w
-				leader.System = func(ctx context.Context) error {
-					_, _, err := w.PollOnce(ctx)
-					return err
-				}
-				leader.SystemInterval = time.Duration(cfg.PollIntervalSec) * time.Second
-			}
-			if autoSelect {
-				leader.Producer = buildAutoSelectProducer(pc, cfg, store, rt, orch, limit)
-			}
-		}
+
+	// 首轮就交给热开关源：它读到当前配置后自行装配编排器／Watcher／生产者，
+	// 之后每次 config.toml 变化都在同一循环里重算。启动时不再把开关算死，
+	// 因此工作台打开自动执行不需要重启 serve。
+	hot := newServeLeaderHot(pc, store, rt, coord, home.ConfigPath(pc.LocalHome), cfg, leader, onError)
+	leader.Reload = hot.Reload
+	if err := hot.Reload(); err != nil {
+		// 首轮读配置失败：保留装配现场，循环下一轮会重试。
+		fmt.Fprintf(os.Stderr, "serve leader: project=%s 初始重载失败: %v\n", pc.ID(), err)
 	}
-	b.system = leader.System != nil
+
+	b := &serveLeaderBundle{
+		dispatch: hot.curAuto, producer: hot.curSelect, system: hot.curSystem,
+		watcher: hot.watcher, hot: hot,
+	}
 	b.runner = leader
 	// 中枢重启后先按持久化证据重建目标视图：只读、幂等，不推进状态。
 	// 失败只记录到 stderr，不影响派发循环启动（恢复不是启动的前提）。
@@ -291,6 +292,134 @@ func buildServeLeaderBundle(pc *projCtx, cfg config.SystemAgent, onError func(er
 		onError(fmt.Errorf("recover goals: %w", err))
 	}
 	return b, nil
+}
+
+// serveLeaderHot 是 leader 的热开关源。
+//
+// 一次装配之后，开关的每一次变化（工作台上的自动执行、System Agent 的
+// llm_command、上限调整）都要在同一个循环里被看见，否则用户必须先重启
+// serve——那正是「打开了却不自动执行」的第二层原因。
+//
+// 重载只看 config.toml 的 (mtime, size)：不额外引入文件监听依赖，也不需要
+// 跨进程通知；代价是最多一个 Idle 周期（默认 500ms）的延迟。
+//
+// 并发约定：reload 只由 dispatch.Leader.Run 在同一 goroutine 内调用，
+// 因此这里读写字段不加锁；Watch 不持有它的引用。
+type serveLeaderHot struct {
+	pc      *projCtx
+	store   *db.Store
+	rt      *Runtime
+	coord   *dispatch.Coordinator
+	cfgPath string
+	base    config.SystemAgent
+
+	leader  *dispatch.Leader
+	onError func(error)
+
+	seenMod   time.Time
+	seenSize  int64
+	loaded    bool
+	orch      *systemagent.Orchestrator
+	watcher   *systemagent.Watcher
+	curCfg    config.SystemAgent
+	logged    bool
+	curAuto   bool
+	curSelect bool
+	curSystem bool
+}
+
+// newServeLeaderHot 构造热开关源；它不读配置，第一次 reload 才读。
+func newServeLeaderHot(pc *projCtx, store *db.Store, rt *Runtime, coord *dispatch.Coordinator,
+	cfgPath string, base config.SystemAgent, leader *dispatch.Leader, onError func(error)) *serveLeaderHot {
+	return &serveLeaderHot{
+		pc: pc, store: store, rt: rt, coord: coord,
+		cfgPath: cfgPath, base: base, leader: leader, onError: onError,
+	}
+}
+
+// Reload 实现 dispatch.Leader.Reload 的语义：配置变了才动手。
+func (h *serveLeaderHot) Reload() error {
+	if h == nil {
+		return nil
+	}
+	st, err := os.Stat(h.cfgPath)
+	if err != nil {
+		// 配置暂时读不到时保留上一轮开关，不把正在跑的循环停掉。
+		return nil
+	}
+	if h.loaded && st.ModTime().Equal(h.seenMod) && st.Size() == h.seenSize {
+		return nil
+	}
+	cfg, err := config.Load(h.cfgPath)
+	if err != nil {
+		return err
+	}
+	h.seenMod, h.seenSize, h.loaded = st.ModTime(), st.Size(), true
+	h.apply(cfg)
+	return nil
+}
+
+// apply 把一份新配置折算成三个开关与两个回调。
+func (h *serveLeaderHot) apply(cfg *config.Config) {
+	supported := runtime.GOOS == "darwin"
+	auto := cfg.Managed.AutoEnabled && cfg.Managed.Limit >= 1 && supported
+	autoSelect := cfg.Managed.AutoSelect
+	systemOn := cfg.SystemAgent.Enabled
+	h.curCfg = cfg.SystemAgent
+
+	// 自愈与选题都需要编排器；两者都关时不必装配，也不必留着旧回调。
+	if autoSelect || systemOn {
+		if h.orch == nil {
+			orch, err := buildOrchestratorWithCoord(h.pc, cfg.SystemAgent, h.coord)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "serve leader: project=%s 热重载编排器失败: %v\n", h.pc.ID(), err)
+				// 装配失败时退回安全侧：不派发、不自愈，但循环继续等下一次重载。
+				h.leader.Dispatch = false
+				h.leader.Producer = nil
+				h.leader.System = nil
+				return
+			}
+			h.orch = orch
+		}
+		// 编排器与 Watcher 都要跟着新配置走：llm_command／auto_kinds／
+		// ops_allowlist 改了，下一轮就该用新值，而不是等进程重启。
+		h.orch.Config = cfg.SystemAgent
+		h.orch.ConfigFunc = func() config.SystemAgent { return h.curCfg }
+	}
+	if systemOn && h.orch != nil {
+		if h.watcher == nil {
+			h.watcher = buildServeWatcher(h.pc, cfg.SystemAgent, h.orch)
+			h.watcher.LeaderLock = nil // leader 已持锁，Watcher 不再自己抢
+			h.watcher.OnError = h.onError
+		}
+		w := h.watcher
+		w.Config = cfg.SystemAgent
+		w.ConfigFunc = func() config.SystemAgent { return h.curCfg }
+		h.leader.System = func(ctx context.Context) error {
+			_, _, err := w.PollOnce(ctx)
+			return err
+		}
+		h.leader.SystemInterval = time.Duration(cfg.SystemAgent.PollIntervalSec) * time.Second
+	} else {
+		h.leader.System = nil
+	}
+	if autoSelect && h.orch != nil {
+		h.leader.Producer = buildAutoSelectProducer(h.pc, cfg.SystemAgent, h.store, h.rt, h.orch, cfg.Managed.Limit)
+	} else {
+		h.leader.Producer = nil
+	}
+	h.leader.Dispatch = auto
+	if !h.logged || h.curAuto != auto || h.curSelect != autoSelect || h.curSystem != systemOn {
+		// 开关每变一次就留一条事实：「打开之后它到底有没有跑起来」不该靠猜。
+		_ = db.WithTx(h.pc.GlobalDB, func(tx *sql.Tx) error {
+			return db.AppendEvent(tx, h.pc.ID(), "system", leadSwitchesEvent, "", map[string]any{
+				"dispatch": auto, "auto_select": autoSelect, "system_agent": systemOn,
+				"limit": cfg.Managed.Limit,
+			})
+		})
+		h.logged = true
+	}
+	h.curAuto, h.curSelect, h.curSystem = auto, autoSelect, systemOn
 }
 
 // buildAutoSelectProducer 装配 auto_select 生产者回调。

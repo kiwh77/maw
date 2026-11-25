@@ -6,12 +6,12 @@
 
 - Language: Go, `CGO_ENABLED=0` + modernc.org/sqlite
 - **Global state**: `~/.maw/maw.db` (override with `MAW_GLOBAL`), tables `projects` / `tasks` / `agents` (all with `project_id`)
-- **Per project**: `.multiagent/` holds `config.toml`, `blueprint.toml`, `project.json` (legacy local `maw.db` migrates once on init)
+- **Per project (out-of-tree)**: `~/.maw/projects/<id>/` holds `config.toml`, `blueprint.toml`, `project.json`; in-repo `.multiagent/` is ignored. `maw init` / `project add` / in-repo commands auto-attach without writing the repo tree
 - Blueprint: `blueprint.toml` → `maw plan apply` (**incremental merge from 0.3.2**; `--reset` clears and reloads)
-- **Trunk branch (0.3.9)**: not hard-coded to `main`; `init` only probes a placeholder. Task lists / blueprints set `[meta] main_branch`; `plan apply` syncs `.multiagent/config.toml` and global `projects.main_branch`. Missing meta keeps existing config
+- **Trunk branch (0.3.9)**: not hard-coded to `main`; `init` only probes a placeholder. Task lists / blueprints set `[meta] main_branch`; `plan apply` syncs out-of-tree `config.toml` and global `projects.main_branch`. Missing meta keeps existing config
 - **Merge cleanup (0.3.10)**: after successful `maw merge`, best-effort delete matching `agent/*` local branches
-- **Persistent worktree per agent (0.4.0 / protocol v7)**: `.worktrees/{agent}`; `next` resets to trunk tip and `checkout -B` a new task branch; successful `merge` **keeps** the worktree and only deletes the task branch. `maw prune` removes orphan `agent/*` branches and offline / idle>48h agent trees (reports `kept_reasons`). Terminal cleanup: `merge` / `task cancel` clear `blocked_reason` into `extra.block_history`
-- Protocol: `AGENTS.md` fallback + Cursor/Qoder/Trae/CodeBuddy rules + git hooks (v7: worker name `{app}-{project}-{n}`, agents may merge, then continue with `next`). Language follows `MAW_LANG` / system locale at `maw init`
+- **Persistent worktree per agent (0.4.1 / protocol v8)**: `.worktrees/{agent}`; `next` creates/resets to trunk tip and `checkout -B` a new task branch; successful `merge` **deletes** the worktree and task branch (next task recreates the same path). `maw prune` removes orphan `agent/*` branches and non-`working` agent trees (reports `kept_reasons`). Terminal cleanup: `merge` / `task cancel` clear `blocked_reason` into `extra.block_history`
+- Protocol: repos may keep their own agent prompt files; CLI attach no longer injects protocol segments or installs hooks (v7 naming still applies to orchestration)
 - **Global board**: `maw board --serve`, HTTP `/api/board?project=&agent=&status=`, in-page filters; UI language switchable (en/zh)
 - **Scheduling (0.3.1)**: `internal/schedule` — overlapping `write_scope` may coexist; `promoteReady` / `maw next` activate only when deps are satisfied and write-scope order is first (`priority` → `merge_order` → `id`)
 - **Lane sticky claim**: tasks carry a `lane` (context sub-queue); agents stick to a lane after first claim (or `--lane`), and only pull from that lane; `--release-lane` clears binding; no auto jump when the lane is empty

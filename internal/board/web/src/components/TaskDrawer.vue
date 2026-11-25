@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useBoard } from '../stores/board'
 import { buildTaskPrompt, copyText } from '../lib/prompts'
 import { depRows, depTone, taskDeps, type DepRow } from '../lib/deps'
+import { statusLabel } from '../lib/status'
 
 const board = useBoard()
 const open = computed(() => Boolean(board.state.drawer))
@@ -358,7 +359,7 @@ onBeforeUnmount(() => {
                   @click="jumpDep(row)"
                 >
                   <span class="dep-id">{{ row.id }}</span>
-                  <span class="dep-status">{{ row.status || (zh ? '未知' : 'unknown') }}</span>
+                  <span class="dep-status">{{ row.status ? statusLabel(row.status, board.state.lang) : (zh ? '未知' : 'unknown') }}</span>
                   <span class="dep-title">{{ row.title || '—' }}</span>
                 </button>
               </li>
@@ -377,7 +378,7 @@ onBeforeUnmount(() => {
                   @click="jumpDep(row)"
                 >
                   <span class="dep-id">{{ row.id }}</span>
-                  <span class="dep-status">{{ row.status || (zh ? '未知' : 'unknown') }}</span>
+                  <span class="dep-status">{{ row.status ? statusLabel(row.status, board.state.lang) : (zh ? '未知' : 'unknown') }}</span>
                   <span class="dep-title">{{ row.title || '—' }}</span>
                 </button>
               </li>

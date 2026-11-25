@@ -68,7 +68,7 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 	if err != nil {
 		return nil, err
 	}
-	// 若当前在工程内，同步写一份到工程 .multiagent/board
+	// 若当前在工程内，同步写一份到仓外 project home 的 board/
 	if pc, err := resolveProject(cwd); err == nil {
 		_, _ = board.Write(pc.LocalHome, snap)
 	}
@@ -151,10 +151,12 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 	// 工程登记写资源：看板「工程」页的移除走这一条，与 CLI 同一套用例。
 	// 节点写口接到本机 nodes 表（通用 local_cli），结束 501。
 	resAPI := &httpresources.API{
-		Projects:   projectRemovalPort{cwd: cwd},
-		Nodes:      hubDBNodes{gdb: gdb},
-		NodeChecks: hubNodeChecks{gdb: gdb},
-		Auth:       auth,
+		Projects:      projectRemovalPort{cwd: cwd},
+		Nodes:         hubDBNodes{gdb: gdb},
+		NodeChecks:    hubNodeChecks{gdb: gdb},
+		AutoExecution: autoExecutionPort{},
+		SystemAgent:   systemAgentPort{},
+		Auth:          auth,
 	}
 	resH := resAPI.Handler()
 
@@ -426,15 +428,7 @@ func hubProjectContext(cwd, gdb, projectID string) (*projCtx, error) {
 	if proj == nil {
 		return nil, httpcommands.ErrNotFound{Message: "工程 " + projectID + " 未登记"}
 	}
-	local, err := home.RequireHome(proj.Path)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := config.Load(home.ConfigPath(local))
-	if err != nil {
-		return nil, err
-	}
-	return &projCtx{Repo: proj.Path, LocalHome: local, GlobalDB: gdb, Project: proj, Config: cfg}, nil
+	return resolveProject(proj.Path)
 }
 
 // ensureHubDispatchNode 保证中枢派发节点已登记（同工程复用，不重复建）。
@@ -738,6 +732,11 @@ func v1Route(path string) v1HandlerKind {
 		}
 		if strings.Contains(path, "/system-jobs") {
 			return v1System
+		}
+		// 工作台开关与 Router 配置是「读写同源」的资源：读也要走同一棵树，
+		// 否则 GET 会落到只读任务树并 404，界面拿不到就绪结论就只能靠猜。
+		if strings.HasSuffix(path, "/auto-execution") || strings.HasSuffix(path, "/system-agent") {
+			return v1Resources
 		}
 		for _, suffix := range observabilitySuffixes {
 			if strings.Contains(path, suffix) {

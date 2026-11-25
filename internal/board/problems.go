@@ -40,6 +40,7 @@ type Problem struct {
 	Kind        string `json:"kind"`
 	Severity    string `json:"severity"`
 	Message     string `json:"message"`
+	Category    string `json:"category,omitempty"` // block 类别：scope/env/gate/…
 	TS          string `json:"ts"`
 }
 
@@ -79,10 +80,19 @@ func BuildProblems(tasks []*db.Task, agents []*db.Agent) []Problem {
 			if reason == "" {
 				reason = "未填写原因"
 			}
+			cat := ""
+			if t.Extra != nil {
+				if v, ok := t.Extra["block_category"].(string); ok {
+					cat = strings.TrimSpace(v)
+				}
+			}
+			if cat != "" {
+				reason = "[" + cat + "] " + reason
+			}
 			problems = append(problems, Problem{
 				ProjectID: t.ProjectID, ProjectName: t.ProjectName, TaskID: t.ID,
 				Kind: ProblemKindBlocked, Severity: ProblemSeverityHigh,
-				Message: reason, TS: t.Heartbeat,
+				Message: reason, Category: cat, TS: t.Heartbeat,
 			})
 		case "conflict":
 			problems = append(problems, Problem{
@@ -162,4 +172,114 @@ func severityRank(s string) int {
 		return 1
 	}
 	return 0
+}
+
+// ProblemKindRouter 是「Router 已经介入」的条目：有人（系统 Agent）在处理这条阻塞。
+const ProblemKindRouter = "router"
+
+// ProblemKindRouterIdle 是「阻塞还没有 Router 接管」的条目。
+//
+// 单独一个 kind 而不是复用 blocked：blocked 回答「这件事卡住了」，
+// router-idle 回答「没人会来救它」——后者才是需要人动手的那一条。
+const ProblemKindRouterIdle = "router-idle"
+
+// routerJobWindow 是「算一次介入」的时间窗：超过它的旧作业不再当作仍在处理。
+const routerJobWindow = 24 * time.Hour
+
+// BuildRouterProblems 把阻塞任务与系统作业对账，回答「Router 有没有介入」。
+//
+// 只看 blocked 任务：其它状态没有「需要被救」的语义。判定按最近一条相关
+// 作业（unblock_assist / task_split / run_reconcile）的状态分档：
+//   - queued/running → medium，「处理中」；
+//   - done          → low，「已介入」，带决策动作与结果摘要；
+//   - escalated     → medium，「已升级人工」，带原因；
+//   - 没有作业      → medium，router-idle，「无人接管」。
+//
+// 同档按 (project_id, task_id) 稳定排序，输出与输入顺序无关。
+func BuildRouterProblems(tasks []*db.Task, jobs []*db.SystemJob, now time.Time) []Problem {
+	now = now.UTC()
+	// 每个任务只保留最近一条作业：更早的尝试已经被后来的覆盖。
+	latest := map[string]*db.SystemJob{}
+	for _, j := range jobs {
+		if j == nil || j.TaskID == "" {
+			continue
+		}
+		switch j.Kind {
+		case "unblock_assist", "task_split", "run_reconcile":
+		default:
+			continue
+		}
+		if ts, err := time.Parse(time.RFC3339, j.CreatedAt); err == nil && now.Sub(ts) > routerJobWindow {
+			continue
+		}
+		key := j.ProjectID + "\x00" + j.TaskID
+		if prev, ok := latest[key]; !ok || j.CreatedAt > prev.CreatedAt {
+			latest[key] = j
+		}
+	}
+	out := []Problem{}
+	for _, t := range tasks {
+		if t == nil || t.Status != "blocked" {
+			continue
+		}
+		p := Problem{
+			ProjectID: t.ProjectID, ProjectName: t.ProjectName,
+			TaskID: t.ID, Severity: ProblemSeverityMedium,
+		}
+		job := latest[t.ProjectID+"\x00"+t.ID]
+		if job == nil {
+			p.Kind = ProblemKindRouterIdle
+			p.Message = "阻塞未被 Router 接管：system_agent 未启用，或该处置类型未在 auto_kinds 放行"
+			p.TS = t.Heartbeat
+			out = append(out, p)
+			continue
+		}
+		p.Kind = ProblemKindRouter
+		p.TS = job.CreatedAt
+		action := stringOf(job.Decision["action"])
+		switch job.Status {
+		case "done":
+			p.Severity = ProblemSeverityLow
+			p.Message = "Router 已介入：" + job.Kind
+			if action != "" {
+				p.Message += " → " + action
+			}
+			if note := stringOf(job.Result["note"]); note != "" {
+				p.Message += "（" + note + "）"
+			}
+		case "escalated":
+			p.Message = "Router 已升级人工：" + firstNonEmptyText(stringOf(job.Decision["reason"]), job.Reason)
+		case "queued", "running":
+			p.Message = fmt.Sprintf("Router 处理中：%s（第 %d/%d 次）", job.Kind, job.Attempts, job.MaxAttempts)
+		case "failed":
+			p.Message = "Router 处理失败：" + firstNonEmptyText(stringOf(job.Result["error"]), job.Reason)
+		default:
+			p.Message = "Router 状态：" + job.Status + "（" + job.Kind + "）"
+		}
+		out = append(out, p)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].ProjectID != out[j].ProjectID {
+			return out[i].ProjectID < out[j].ProjectID
+		}
+		if out[i].TaskID != out[j].TaskID {
+			return out[i].TaskID < out[j].TaskID
+		}
+		return out[i].Kind < out[j].Kind
+	})
+	return out
+}
+
+func stringOf(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func firstNonEmptyText(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return "未提供原因"
 }

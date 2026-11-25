@@ -3,11 +3,11 @@ package app
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/systemagent"
 )
@@ -28,7 +28,7 @@ func leadActor(cwd string) (string, error) {
 	}
 	if err := identity.RequireLead(actor, pc.Config); err != nil {
 		return actor, fmt.Errorf(
-			"%w；请在 .multiagent/config.toml 的 [identity] leads 中加入 %q，或用 MAW_AGENT 指定已授权身份",
+			"%w；请在仓外 config.toml 的 [identity] leads 中加入 %q，或用 MAW_AGENT 指定已授权身份",
 			err, actor)
 	}
 	return actor, nil
@@ -110,7 +110,11 @@ func LeadSplit(cwd, brief, fromPath, lane string, ids []string, write bool) (Res
 	if err != nil {
 		return nil, err
 	}
-	bp := filepath.Join(cwd, ".multiagent", "blueprint.toml")
+	pc, err := resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	bp := home.BlueprintPath(pc.LocalHome)
 	diff, err := AppendTasks(bp, blocks, !write)
 	if err != nil {
 		return nil, err
@@ -118,7 +122,7 @@ func LeadSplit(cwd, brief, fromPath, lane string, ids []string, write bool) (Res
 	return Result{
 		"ok": true, "actor": actor, "ids": generated, "count": len(generated),
 		"written": write, "blueprint": bp, "diff": diff,
-		"next": "maw plan check .multiagent/blueprint.toml --json → 人工确认后 maw plan apply",
+		"next": "maw plan check " + bp + " --json → 人工确认后 maw plan apply",
 	}, nil
 }
 

@@ -1,8 +1,8 @@
 ---
 name: maw-init
 description: >-
-  Initialize or upgrade maw multi-agent setup in a git repo (maw init, protocol,
-  config). Use when there is no .multiagent/, doctor says not init, or first board hookup.
+  Attach a git repo to local maw (maw init / project add, out-of-tree config, doctor).
+  Use when doctor says not wired, first board hookup, or user asks to init/attach maw.
 ---
 
 # maw-init
@@ -11,21 +11,27 @@ description: >-
 
 ## When
 
-- Repo has no `.multiagent/` or `maw doctor` says not initialized
-- Need protocol / config upgrade (`maw init --upgrade`)
+- First time registering a repo on the local board
+- `maw doctor` says not attached
+- Optional: refresh out-of-tree defaults with `maw init --upgrade`
+
+`register` / `next` / `board` also auto-`EnsureAttached` — explicit init is often unnecessary.
 
 ## Steps
 
 ```bash
 cd /path/to/git-repo
-maw init                 # or: maw init --upgrade
+maw init                 # or: maw project add
+# maw init --upgrade     # rewrite out-of-tree config.toml defaults
 maw doctor
 ```
 
-Writes `.multiagent/config.toml`, protocol into `AGENTS.md` / IDE rules (language from `MAW_LANG` / system locale, default **en**), and registers the project in `~/.maw/maw.db`.
+Writes **only** under `~/.maw/` (`maw.db` + `projects/<id>/config.toml` + example blueprint).  
+Does **not** create in-repo `.multiagent/`, protocol files, git hooks, or `.gitignore` changes.  
+In-repo legacy files are **ignored** at runtime.
 
 `main_branch` from init is only a probe placeholder — set the real trunk in the task list / blueprint `[meta] main_branch` before `plan apply`.
 
 ## Next
 
-Use **maw-task-list** then **maw-plan-push**.
+[maw-task-list](../maw-task-list/SKILL.md) → [maw-plan-push](../maw-plan-push/SKILL.md)

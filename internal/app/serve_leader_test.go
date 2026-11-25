@@ -207,7 +207,7 @@ func TestServeLeaderOnErrorWritesThrottledEvent(t *testing.T) {
 	}
 }
 
-func TestServeLeaderBothSwitchesOffDoesNotLaunch(t *testing.T) {
+func TestServeLeaderBothSwitchesOffStartsStandby(t *testing.T) {
 	projects := []serveLeaderProject{
 		{ID: "off", Name: "off", Path: "/tmp/off"},
 		{ID: "on", Name: "on", Path: "/tmp/on"},
@@ -220,11 +220,13 @@ func TestServeLeaderBothSwitchesOffDoesNotLaunch(t *testing.T) {
 	})
 	out := startServeLeaders(context.Background(), e.deps)
 
-	if len(e.launches) != 1 || e.launches[0] != "on" {
-		t.Fatalf("两个开关全关的工程不该起 goroutine，实际启动 %v", e.launches)
+	// 全关也要起循环：工作台上的开关只能被一条活着的 leader 看见并生效，
+	// 否则每次打开都得重启 serve。这类工程以 standby 启动、空转待命。
+	if len(e.launches) != 2 {
+		t.Fatalf("两个工程都应起 goroutine（全关的待命），实际启动 %v", e.launches)
 	}
-	if out[0].Started || out[0].Reason != "no_switches" {
-		t.Fatalf("全关工程处置不对: %+v", out[0])
+	if !out[0].Started || out[0].Reason != "standby" {
+		t.Fatalf("全关工程应以 standby 启动: %+v", out[0])
 	}
 	if !out[1].Started {
 		t.Fatalf("有开关的工程应正常启动: %+v", out[1])

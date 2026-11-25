@@ -34,7 +34,12 @@ test('按 severity → kind 分组，六类问题都有归属且顺序稳定', a
   assert.deepEqual(out.counts, { high: 3, medium: 3, low: 1, other: 0 })
 
   const kinds = out.groups.flatMap((g) => g.kinds.map((k) => k.kind))
-  for (const kind of KIND_ORDER.filter((k) => k !== 'blocker')) {
+  // KIND_ORDER 是全集排序表（含 router 等本 fixture 没有的类型），
+  // 所以这里断言的是反方向：本批数据里的每个 kind 都必须登记过顺序与词表。
+  for (const kind of kinds) {
+    assert.ok(KIND_ORDER.includes(kind), `KIND_ORDER 缺少 ${kind}`)
+  }
+  for (const kind of ['blocked', 'conflict', 'retry', 'question', 'stalled', 'dep-wait']) {
     assert.ok(kinds.includes(kind), `缺少分组：${kind}`)
   }
   assert.equal(out.groups[0].label, '高优先级')
@@ -111,4 +116,29 @@ test('Vue 壳接线：problems 路由走新视图、抽屉动作与内联样式�
   // 旧挂载层映射保留，既有 page.test.cjs 断言不受影响。
   const host = src('components/VnextHost.vue')
   assert.match(host, /problems: renderProblems as never/)
+})
+
+// RT-4：Router 介入与否要在问题审查页一眼看出来。
+// 两者是不同的 kind，不能合并：blocked 说「卡住了」，router-idle 说「没人来救」。
+test('Router 介入面：router / router-idle 有独立类型词且排在高优先之前', async () => {
+  const m = await load()
+  assert.equal(m.kindLabel('router', 'zh'), 'Router 介入')
+  assert.equal(m.kindLabel('router-idle', 'zh'), '无人接管')
+  assert.equal(m.kindLabel('router', 'en'), 'Router tasked')
+  assert.equal(m.kindLabel('router-idle', 'en'), 'Unattended')
+  // 无人接管排最前：它是唯一需要人立刻动手的一条。
+  assert.equal(m.KIND_ORDER[0], 'router-idle')
+
+  const groups = m.buildProblemGroups([
+    { project_id: 'p1', task_id: 'T-1', kind: 'router-idle', severity: 'medium', message: '阻塞未被 Router 接管', ts: '2026-11-04T01:00:00Z' },
+    { project_id: 'p1', task_id: 'T-2', kind: 'router', severity: 'low', message: 'Router 已介入：unblock_assist → unblock_and_retry', ts: '2026-11-04T02:00:00Z' },
+  ], { lang: 'zh', project: '' })
+  const kinds = groups.groups.flatMap((g) => g.kinds.map((k) => k.kind))
+  assert.ok(kinds.includes('router-idle') && kinds.includes('router'), kinds.join(','))
+  assert.equal(groups.total, 2)
+  // 无人接管需要人动手，必须排在已介入之前。
+  assert.ok(
+    kinds.indexOf('router-idle') < kinds.indexOf('router'),
+    'router-idle 应排在 router 之前：' + kinds.join(','),
+  )
 })

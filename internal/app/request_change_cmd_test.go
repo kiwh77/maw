@@ -2,6 +2,9 @@ package app
 
 import (
 	"database/sql"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,12 +14,19 @@ import (
 func TestRequestChangeExpandsWriteScope(t *testing.T) {
 	f := newFixture(t)
 	task := f.seedTask("T-RC1", "in_progress", "cursor-demo-1", []string{"mod_a/**"})
+	wt := filepath.Join(f.repo, ".worktrees", "cursor-demo-1")
+	if err := os.MkdirAll(filepath.Join(wt, ".maw"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = writeTaskCard(wt, task, "cursor-demo-1")
 	_ = db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
-		return bindAgent(tx, f.pc.ID(), "cursor-demo-1", "worker", "working", task.ID, "", "", "")
+		task.Worktree = ".worktrees/cursor-demo-1"
+		_ = db.UpsertTask(tx, task)
+		return bindAgent(tx, f.pc.ID(), "cursor-demo-1", "worker", "working", task.ID, task.Worktree, "", "")
 	})
 	t.Setenv("MAW_AGENT", "cursor-demo-1")
 
-	res, err := RequestChange(f.repo, RequestChangeOptions{
+	res, err := RequestChange(wt, RequestChangeOptions{
 		TaskID:  "T-RC1",
 		Add:     []string{"backend/internal/bootstrap/**"},
 		Message: "need wire",
@@ -37,6 +47,23 @@ func TestRequestChangeExpandsWriteScope(t *testing.T) {
 	got := f.task("T-RC1")
 	if got.Extra["scope_expand_reason"] != "need wire" {
 		t.Fatalf("reason=%v", got.Extra["scope_expand_reason"])
+	}
+	raw, err := os.ReadFile(filepath.Join(wt, ".maw", "task.json"))
+	if err != nil {
+		t.Fatalf("task card not refreshed: %v", err)
+	}
+	var card db.Task
+	if err := json.Unmarshal(raw, &card); err != nil {
+		t.Fatal(err)
+	}
+	cardFound := false
+	for _, p := range card.WriteScope {
+		if p == "backend/internal/bootstrap/**" {
+			cardFound = true
+		}
+	}
+	if !cardFound {
+		t.Fatalf("task.json missing expanded scope: %#v", card.WriteScope)
 	}
 }
 
@@ -105,5 +132,22 @@ func TestBlockSuggestsRequestChange(t *testing.T) {
 	fu, _ := res["suggested_followups"].([]string)
 	if len(fu) == 0 {
 		t.Fatalf("expected followups, got %#v", res)
+	}
+	if res["block_category"] != BlockCatScope {
+		t.Fatalf("category=%v", res["block_category"])
+	}
+	got := f.task("T-BLK")
+	if got.Extra["block_category"] != BlockCatScope {
+		t.Fatalf("extra category=%v", got.Extra["block_category"])
+	}
+}
+
+func TestClassifyBlockCategoryExplicit(t *testing.T) {
+	t.Parallel()
+	if ClassifyBlockCategory("[gate] 主干 go test 红灯") != BlockCatGate {
+		t.Fatal("explicit gate")
+	}
+	if ClassifyBlockCategory("类别:env 验证失联") != BlockCatEnv {
+		t.Fatal("explicit env")
 	}
 }

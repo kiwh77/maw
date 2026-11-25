@@ -190,7 +190,7 @@ maw next --claim               # 确认后领取，拿到 worktree 路径与 wri
 maw progress -m "完成一半"      # 心跳 + 进度；这不是可选项
 git commit -am "..."
 maw submit                     # 范围检查 → 门禁 → merging
-maw merge --yes                # 串行合入；保留 worktree，删题分支
+maw merge --yes                # 串行合入；删除 worktree 与题分支
 maw next                       # 还有 ready：先查询预览
 maw next --claim               # 确认后领下一题
 ```

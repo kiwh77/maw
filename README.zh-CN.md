@@ -144,7 +144,7 @@ maw board --serve     # http://127.0.0.1:7420/
 | `maw plan apply / check` | 蓝图校验与落盘 |
 | `maw next` | 领取任务 + 复用/创建持久 worktree |
 | `maw submit` | 范围检查 → 合并队列 |
-| `maw merge --yes` | 串行合入；保留 worktree、删题分支 |
+| `maw merge --yes` | 串行合入；删除 worktree 与题分支 |
 | `maw prune` | 清理残留（默认预览，`--yes` 删除） |
 | `maw board` | 终端摘要 + HTML |
 | `maw board --serve` / `maw serve` | 本机中枢（看板 + 状态注入 + SSE） |

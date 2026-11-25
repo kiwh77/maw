@@ -423,7 +423,7 @@ func RenderDefault(repo string) string {
 main_branch = "` + main + `"
 merge_strategy = "squash"
 max_parallel = 0
-blueprint = ".multiagent/blueprint.toml"
+blueprint = "blueprint.toml"
 
 [approvals]
 plan = "manual"

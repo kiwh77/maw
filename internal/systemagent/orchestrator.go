@@ -12,6 +12,7 @@ import (
 
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 // Effects 是编排器对外的副作用端口（由 app 层注入，避免循环依赖）。
@@ -33,7 +34,11 @@ func (NopEffects) RelaunchWorker(context.Context, string, string, string) error 
 	return fmt.Errorf("systemagent: relaunch 未接线")
 }
 func (NopEffects) WriteSplitProposal(_ context.Context, projectPath, taskID, blueprint string) (string, error) {
-	dir := filepath.Join(projectPath, ".multiagent", "handoffs")
+	local, err := home.ProjectHome(projectPath)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(local, "handoffs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -60,10 +65,13 @@ func sanitize(s string) string {
 
 // Orchestrator 领取并执行 system_jobs。
 type Orchestrator struct {
-	Store   *db.Store
-	Config  config.SystemAgent
-	Invoker Invoker
-	Effects Effects
+	Store  *db.Store
+	Config config.SystemAgent
+	// ConfigFunc 可选：非空时每次取值都重读配置，使 llm_command / auto_kinds /
+	// ops_allowlist 的改动不必重启常驻循环。
+	ConfigFunc func() config.SystemAgent
+	Invoker    Invoker
+	Effects    Effects
 	// Dispatch 处理 dispatch_ready：Match → Claim → launch_spec → Coordinator.Step。
 	// 为空时该 kind 的作业按「派发未接线」升级人工，不做空转。
 	Dispatch DispatchPort
@@ -75,6 +83,17 @@ type Orchestrator struct {
 	ResolvePath func(projectID string) (string, error)
 	WorkerID    string
 	Clock       func() time.Time
+}
+
+// conf 返回本轮生效的系统 Agent 配置：有热配置源时先刷新一次。
+func (o *Orchestrator) conf() config.SystemAgent {
+	if o == nil {
+		return config.SystemAgent{}
+	}
+	if o.ConfigFunc != nil {
+		o.Config = o.ConfigFunc()
+	}
+	return o.Config
 }
 
 func (o *Orchestrator) now() time.Time {
@@ -96,11 +115,11 @@ func (o *Orchestrator) Step(ctx context.Context) (int, error) {
 	if o == nil || o.Store == nil {
 		return 0, fmt.Errorf("systemagent: 缺少 Store")
 	}
-	n := o.Config.MaxConcurrent
+	n := o.conf().MaxConcurrent
 	if n <= 0 {
 		n = 1
 	}
-	kinds := append([]string{}, o.Config.AutoKinds...)
+	kinds := append([]string{}, o.conf().AutoKinds...)
 	// 显式入队的 task_split / ops_run / dispatch_ready / run_reconcile 也要能被消费
 	for _, extra := range []string{SystemKindTaskSplit, SystemKindOpsRun, SystemKindDispatchReady, SystemKindRunReconcile} {
 		found := false
@@ -266,17 +285,17 @@ func (o *Orchestrator) runJob(ctx context.Context, job *db.SystemJob) error {
 			return err
 		}
 		result["unblocked"] = true
-		if o.Config.WorkerNode != "" {
-			if err := eff.RelaunchWorker(ctx, projectPath, job.TaskID, o.Config.WorkerNode); err != nil {
+		if o.conf().WorkerNode != "" {
+			if err := eff.RelaunchWorker(ctx, projectPath, job.TaskID, o.conf().WorkerNode); err != nil {
 				result["relaunch_error"] = err.Error()
 			} else {
 				result["relaunched"] = true
 			}
 		}
 	case ActionRelaunchWorker:
-		node := o.Config.WorkerNode
+		node := o.conf().WorkerNode
 		if node == "" {
-			node = o.Config.LLMNode
+			node = o.conf().LLMNode
 		}
 		if err := eff.RelaunchWorker(ctx, projectPath, job.TaskID, node); err != nil {
 			return err
@@ -296,11 +315,18 @@ func (o *Orchestrator) runJob(ctx context.Context, job *db.SystemJob) error {
 			}
 		}
 	case ActionOpsRun:
-		if !OpsAllowed(decision.OpsCommand, o.Config.OpsAllowlist) {
+		allow := o.conf().OpsAllowlist
+		rule, ok := OpsAllowlistRule(decision.OpsCommand, allow)
+		if !ok {
 			return fmt.Errorf("systemagent: ops_command 不在白名单: %s", decision.OpsCommand)
 		}
-		out, err := runOps(ctx, projectPath, decision.OpsCommand)
+		// Router 放开运维命令等于允许无人值守改仓库状态，所以每条命令都要
+		// 留下「执行的原文、命中的白名单前缀、退出码」，结果与决策侧车同源可查。
+		result["ops_command"] = decision.OpsCommand
+		result["ops_allowlist_rule"] = rule
+		out, exitCode, err := runOps(ctx, projectPath, decision.OpsCommand)
 		result["stdout"] = truncate(out, 2000)
+		result["ops_exit_code"] = exitCode
 		if err != nil {
 			return err
 		}
@@ -376,15 +402,26 @@ func (o *Orchestrator) runDispatchJob(ctx context.Context, job *db.SystemJob, pr
 	return o.finish(job, Decision{Action: ActionDispatchReady, Reason: "dispatch_ready"}, result, db.SystemJobDone)
 }
 
-func runOps(ctx context.Context, dir, cmdline string) (string, error) {
+// runOps 执行一条白名单运维命令，返回合并输出与退出码。
+//
+// 退出码单独回传：以前只看到 err 的非 nil，看不出「命令跑起来了但返回 1」
+// 还是「进程根本没起来」，而这两件事的处置完全不同。
+func runOps(ctx context.Context, dir, cmdline string) (string, int, error) {
 	parts := strings.Fields(cmdline)
 	if len(parts) == 0 {
-		return "", fmt.Errorf("空命令")
+		return "", -1, fmt.Errorf("空命令")
 	}
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
 	out, err := cmd.CombinedOutput()
-	return string(out), err
+	code := 0
+	if cmd.ProcessState != nil {
+		code = cmd.ProcessState.ExitCode()
+	}
+	if err != nil && cmd.ProcessState == nil {
+		code = -1
+	}
+	return string(out), code, err
 }

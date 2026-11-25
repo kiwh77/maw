@@ -73,7 +73,10 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.Fatalf("seed runs/operations: %v", err)
 	}
 
+	// 只上报是「没放行任何处置类型」时的档位：auto_kinds 清空后，
+	// 五类队列卡死信号必须停在观测态，不产出作业。
 	cfg := f.pc.Config.SystemAgent
+	cfg.AutoKinds = nil
 	facts := newHubSignalFacts(f.pc.GlobalDB, cfg)
 	signals := systemagent.DetectSystemSignals(facts, cfg, time.Now().UTC())
 
@@ -117,8 +120,10 @@ func TestLeadSignalsJSONIncludesQueueKinds(t *testing.T) {
 			if reason, _ := row["reason"].(string); reason == "" {
 				t.Fatalf("no_capable_node 应带 reason: %v", row)
 			}
-			if row["job_kind"] != "" {
-				t.Fatalf("no_capable_node 不应产出作业: %v", row)
+			// 默认 auto_kinds 放行 unblock_assist：Router 可以介入，
+			// 但处置方式仍然只是「诊断」，不会放宽匹配或改节点声明。
+			if row["job_kind"] != string(systemagent.SystemKindUnblock) {
+				t.Fatalf("no_capable_node 应产出 unblock_assist 供 Router 诊断: %v", row)
 			}
 		}
 	}

@@ -73,6 +73,10 @@ func SystemStatus(cwd string) (Result, error) {
 		"worker_node":             cfg.WorkerNode,
 		"diagnose_backend":        backend.Kind,
 		"diagnose":                diagnoseBackendStatus(cfg, backend),
+		// llm_ready 为假时 Router 只会升级人工：这是「遇阻能不能被自动处理」
+		// 的第一前提，必须在状态里直说，而不是让人去翻 config.toml。
+		"llm_ready":     len(cleanList(cfg.LLMCommand)) > 0,
+		"ops_allowlist": cfg.OpsAllowlist,
 		"queue": map[string]any{
 			"queued": queued, "running": running, "done": done,
 			"failed": failed, "escalated": escalated, "recent": len(jobs),

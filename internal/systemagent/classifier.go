@@ -46,6 +46,27 @@ func KindAllowed(kind string, cfg config.SystemAgent, explicit bool) bool {
 	return false
 }
 
+// OpsAllowlistRule 返回命中的白名单前缀。
+//
+// 与 OpsAllowed 同一套判定，只是把「命中哪一条」也带出来：Router 自动执行
+// 运维命令时，审计要能回答「它是凭什么被放行的」，而不是只有一句 allowed=true。
+func OpsAllowlistRule(cmd string, allowlist []string) (string, bool) {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return "", false
+	}
+	for _, a := range allowlist {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		if cmd == a || strings.HasPrefix(cmd, a+" ") {
+			return a, true
+		}
+	}
+	return "", false
+}
+
 // OpsAllowed 检查运维命令是否在白名单（整串前缀匹配）。
 func OpsAllowed(cmd string, allowlist []string) bool {
 	cmd = strings.TrimSpace(cmd)

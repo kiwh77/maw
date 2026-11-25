@@ -123,25 +123,58 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 					return nil
 				}
 				from := t.Status
-				if envFail || dirtyFail {
-					// A8：环境失败 / 脏树 → blocked（可恢复），不累加 attempts，不进 conflict
+				gateUnrelated := gitops.IsUnrelatedRepoGate(msg, t.WriteScope)
+				if envFail || dirtyFail || gateUnrelated {
+					// A8：环境失败 / 脏树 / 无关闸门 → blocked（可恢复），不累加 attempts，不进 conflict
 					t.PrevStatus = from
 					t.Status = "blocked"
-					t.BlockedReason = msg
+					reasonMsg := msg
+					cat := BlockCatEnv
+					if dirtyFail && !envFail {
+						cat = BlockCatConflict
+						if paths, _ := gitops.DirtyTrackedPaths(pc.Repo); len(paths) > 0 {
+							list := strings.Join(paths, "; ")
+							if len(list) > 240 {
+								list = list[:240] + "…"
+							}
+							reasonMsg = "[conflict] 主工作区脏文件阻塞 merge：" + list +
+								"。建议：维护者提交/stash 这些文件；Agent 勿擅清他人改动。"
+						} else {
+							reasonMsg = "[conflict] " + msg
+						}
+					} else if gateUnrelated && !envFail {
+						cat = BlockCatGate
+						snip := msg
+						if len(snip) > 280 {
+							snip = snip[:280] + "…"
+						}
+						reasonMsg = "[gate] 合入闸门失败且失败面不在本卡 write_scope（疑似主干预置红灯）：" + snip
+					}
+					t.BlockedReason = reasonMsg
 					if len(t.BlockedReason) > 500 {
 						t.BlockedReason = t.BlockedReason[:500]
 					}
+					if t.Extra == nil {
+						t.Extra = map[string]any{}
+					}
+					t.Extra["block_category"] = cat
 					t.Revision++
 					_ = db.UpsertTask(tx, t)
 					evType := "gate_env_failed"
-					reason := "env_failure"
+					reasonCode := "env_failure"
 					if dirtyFail && !envFail {
 						evType = "gate_failed"
-						reason = "dirty_tree"
+						reasonCode = "dirty_tree"
+					} else if cat == BlockCatGate {
+						evType = "gate_failed"
+						reasonCode = "unrelated_gate"
 					}
-					_ = db.AppendEvent(tx, pc.ID(), who, evType, tid, map[string]any{"error": msg, "phase": "merge", "recoverable": true})
+					_ = db.AppendEvent(tx, pc.ID(), who, evType, tid, map[string]any{
+						"error": reasonMsg, "phase": "merge", "recoverable": true,
+						"category": cat, "reason_code": reasonCode,
+					})
 					_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", tid, map[string]any{
-						"from": from, "to": "blocked", "reason": reason,
+						"from": from, "to": "blocked", "reason": reasonMsg,
 					})
 					return nil
 				}
@@ -164,7 +197,7 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 			_ = os.WriteFile(filepath.Join(noteDir, tid+"-conflict.md"), []byte("# Conflict: "+tid+"\n\n"+msg+"\n"), 0o644)
 			// conflict/blocked 保留题分支供修复；残留由 maw prune 在 agent offline / 题终态后回收
 			st := "conflict"
-			if envFail || dirtyFail {
+			if envFail || dirtyFail || gitops.IsUnrelatedRepoGate(msg, task.WriteScope) {
 				st = "blocked"
 			}
 			if skipped {
@@ -174,8 +207,8 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 			// A6：冲突题隔离，继续后续队列
 			continue
 		}
-		// 合入成功：保留 per-agent worktree（依赖可复用），仅 detach 后删除题分支
-		gitops.CleanupMergedTask(pc.Repo, task.Worktree, task.Branch, true)
+		// 合入成功：删除 per-agent worktree 与题分支（下一题 next 会重建同路径树）
+		gitops.CleanupMergedTask(pc.Repo, task.Worktree, task.Branch, false)
 		mergedCommit, _ := home.Git(pc.Repo, "rev-parse", "HEAD")
 		mergeOK := false
 		_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
@@ -206,7 +239,7 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 			t.Revision++
 			_ = db.UpsertTask(tx, t)
 			_ = db.AppendEvent(tx, pc.ID(), who, "merged", tid, map[string]any{
-				"branch": task.Branch, "worktree_kept": true, "branch_deleted": true,
+				"branch": task.Branch, "worktree_kept": false, "worktree_removed": true, "branch_deleted": true,
 			})
 			_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", tid, map[string]any{
 				"from": from, "to": "done",
@@ -226,8 +259,9 @@ func Merge(cwd string, yes, dryRun bool) (Result, error) {
 			})
 			results = append(results, map[string]any{
 				"id": tid, "status": "done",
-				"worktree_kept":  task.Worktree != "",
-				"branch_deleted": task.Branch,
+				"worktree_kept":     false,
+				"worktree_removed":  task.Worktree != "",
+				"branch_deleted":    task.Branch,
 			})
 		} else {
 			results = append(results, map[string]any{"id": tid, "status": "skipped"})

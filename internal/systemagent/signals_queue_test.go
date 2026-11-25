@@ -243,9 +243,9 @@ func TestQueueSignalKeysDoNotCollide(t *testing.T) {
 	}
 }
 
-// TestEnqueueQueueSignalsReportOnly 覆盖验收 2：五类信号入队时全部被跳过，
-// 作业表为零、任务表一行不动。
-func TestEnqueueQueueSignalsReportOnly(t *testing.T) {
+// TestEnqueueQueueSignalsOptOut 覆盖「没放行就只上报」：auto_kinds 为空时
+// 五类队列信号全部被跳过，作业表为零、任务表一行不动。
+func TestEnqueueQueueSignalsOptOut(t *testing.T) {
 	st, err := db.OpenStore(filepath.Join(t.TempDir(), "maw.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -255,15 +255,8 @@ func TestEnqueueQueueSignalsReportOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	cfg := config.SystemAgent{
-		// 故意把能想到的 kind 全放行：只上报由「JobKind 为空」保证，不靠配置。
-		AutoKinds: []string{
-			SystemKindUnblock, SystemKindOpsRun, SystemKindDispatchReady,
-			SystemKindTaskSplit, SystemKindRunReconcile,
-		},
-		CooldownoutSec: 300,
-		MaxAttempts:    3,
-	}
+	// 空 auto_kinds：一个处置类型都没授权，信号必须停在只上报。
+	cfg := config.SystemAgent{CooldownoutSec: 300, MaxAttempts: 3}
 	signals := DetectSystemSignals(queueFacts{
 		// 有新鲜心跳，避免 all_agents_offline 额外产出一条观察作业，
 		// 让这里的断言只针对五类队列信号。
@@ -286,11 +279,13 @@ func TestEnqueueQueueSignalsReportOnly(t *testing.T) {
 		failures: []FailureFact{{ProjectID: "p1", TaskID: "T-1", InstanceID: "ti_1", Failures: 3}},
 	}, cfg, signalTestNow)
 
-	var countBefore int
-	if err := st.Read(func(tx *sql.Tx) error {
-		return tx.QueryRow(`SELECT COUNT(*) FROM tasks`).Scan(&countBefore)
-	}); err != nil {
-		t.Fatalf("count tasks: %v", err)
+	for _, s := range signals {
+		if s.JobKind != "" {
+			t.Fatalf("未授权时应只上报，%s 却是 JobKind=%q", s.Kind, s.JobKind)
+		}
+		if s.Decision["report_only"] != true {
+			t.Fatalf("%s 未授权时应标注 report_only: %v", s.Kind, s.Decision)
+		}
 	}
 
 	var queued []*db.SystemJob
@@ -302,21 +297,75 @@ func TestEnqueueQueueSignalsReportOnly(t *testing.T) {
 		t.Fatalf("enqueue: %v", err)
 	}
 	if len(queued) != 0 {
-		t.Fatalf("五类信号不应入队，实际 %d 条: %+v", len(queued), queued)
+		t.Fatalf("未授权时五类信号不应入队，实际 %d 条: %+v", len(queued), queued)
 	}
-	var nJobs, countAfter int
-	if err := st.Read(func(tx *sql.Tx) error {
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM system_jobs`).Scan(&nJobs); err != nil {
-			return err
-		}
-		return tx.QueryRow(`SELECT COUNT(*) FROM tasks`).Scan(&countAfter)
+}
+
+// TestEnqueueQueueSignalsIntervene 是 RT-1 的主验收：放行 unblock_assist 后，
+// 五类队列信号真的产出作业，Router 因此能介入卡住的队列。
+func TestEnqueueQueueSignalsIntervene(t *testing.T) {
+	st, err := db.OpenStore(filepath.Join(t.TempDir(), "maw.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	cfg := config.SystemAgent{
+		AutoKinds:      []string{SystemKindUnblock},
+		CooldownoutSec: 300,
+		MaxAttempts:    3,
+	}
+	signals := DetectSystemSignals(queueFacts{
+		fakeFacts: fakeFacts{
+			projects: []string{"p1"},
+			agents: []AgentHeartbeatFact{{
+				ProjectID: "p1", AgentID: "a1", Status: "idle",
+				LastSeen: signalTestNow.Add(-time.Minute),
+			}},
+		},
+		stalled: []StalledOperationFact{{
+			ProjectID: "p1", OperationID: "op_1", Kind: "dispatch", Result: "pending",
+			LeaseExpiresAt: signalTestNow.Add(-time.Hour),
+		}},
+		claimed:   []ClaimedTaskFact{{ProjectID: "p1", TaskID: "T-1"}},
+		deadlocks: []DependencyDeadlockFact{{ProjectID: "p1", Cycle: []string{"T-1", "T-2", "T-1"}}},
+		noNodes:   []NoCapableNodeFact{{ProjectID: "p1", TaskID: "T-1", Reason: "no_candidate_node"}},
+		failures:  []FailureFact{{ProjectID: "p1", TaskID: "T-1", InstanceID: "ti_1", Failures: 3}},
+	}, cfg, signalTestNow)
+
+	var queued []*db.SystemJob
+	if err := st.Write(func(tx *sql.Tx) error {
+		var e error
+		queued, e = EnqueueSignals(tx, cfg, signals, signalTestNow)
+		return e
 	}); err != nil {
-		t.Fatalf("read counts: %v", err)
+		t.Fatalf("enqueue: %v", err)
 	}
-	if nJobs != 0 {
-		t.Fatalf("system_jobs 应为空，实际 %d 条", nJobs)
+	// 五类各一条：stalled / claimed / deadlock / no_capable_node / repeated_failure。
+	if len(queued) != 5 {
+		t.Fatalf("放行 unblock_assist 后应有 5 条作业，实际 %d: %+v", len(queued), queued)
 	}
-	if countAfter != countBefore {
-		t.Fatalf("tasks 表应不变: before=%d after=%d", countBefore, countAfter)
+	kinds := map[string]int{}
+	for _, j := range queued {
+		kinds[j.Kind]++
+		if j.Kind != SystemKindUnblock {
+			t.Fatalf("默认只放行 unblock_assist，出现了 %q", j.Kind)
+		}
+	}
+	if kinds[SystemKindUnblock] != 5 {
+		t.Fatalf("五条都应是 unblock_assist: %v", kinds)
+	}
+	// 反复失败的那条必须预置升级人工：放行不等于允许自动重派。
+	var escalated int
+	for _, j := range queued {
+		if j.Decision["action"] == string(ActionEscalateHuman) {
+			escalated++
+		}
+	}
+	if escalated != 1 {
+		t.Fatalf("应恰好一条预置 escalate_human（repeated_failure），实际 %d", escalated)
 	}
 }

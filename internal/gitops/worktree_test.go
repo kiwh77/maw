@@ -111,6 +111,24 @@ func TestCleanupMergedTaskKeepWorktree(t *testing.T) {
 	}
 }
 
+func TestCleanupMergedTaskRemoveWorktree(t *testing.T) {
+	repo := initRepo(t)
+	wtRel := filepath.Join(".worktrees", "drop")
+	wt := filepath.Join(repo, wtRel)
+	branch := "agent/drop/T-1"
+	if err := CreateWorktree(repo, wt, branch, "main"); err != nil {
+		t.Fatal(err)
+	}
+	CleanupMergedTask(repo, wtRel, branch, false)
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be removed: %v", err)
+	}
+	out, _ := exec.Command("git", "-C", repo, "branch", "--list", branch).CombinedOutput()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("branch should be deleted: %s", out)
+	}
+}
+
 func TestIsEnvFailure(t *testing.T) {
 	if !IsEnvFailure("command not found: foo") {
 		t.Fatal("expected env failure")

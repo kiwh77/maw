@@ -148,7 +148,7 @@ maw board --serve     # http://127.0.0.1:7420/
 | `maw plan apply / check` | Validate and apply blueprints |
 | `maw next` | Claim a task + reuse/create persistent worktree |
 | `maw submit` | Scope check → merge queue |
-| `maw merge --yes` | Serial merge; keep worktree, delete task branch |
+| `maw merge --yes` | Serial merge; delete worktree and task branch |
 | `maw prune` | Clean leftovers (preview; `--yes` deletes) |
 | `maw board` | Terminal summary + HTML |
 | `maw board --serve` / `maw serve` | Local hub (board + status + SSE) |

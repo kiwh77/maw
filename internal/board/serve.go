@@ -179,9 +179,12 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 			"percent":      snap.Percent,
 			"next_hint":    snap.NextHint,
 			"risks":        snap.Risks,
-			"counts":       snap.Counts,
-			"tasks":        snap.Tasks,
-			"agents":       snap.Agents,
+			// 问题审查视图读的就是这一份快照：以前漏了这个字段，
+			// 界面拿到 undefined 只能显示「没有问题」，把真实阻塞藏了起来。
+			"problems": snap.Problems,
+			"counts":   snap.Counts,
+			"tasks":    snap.Tasks,
+			"agents":   snap.Agents,
 			// 与 agents 同批推导的展示态（working|stalled|idle），只读。
 			"agent_activity":   snap.AgentActivity,
 			"projects":         snap.Projects,

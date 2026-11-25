@@ -102,9 +102,9 @@ func DetachWorktree(worktree string) error {
 }
 
 // CleanupMergedTask cleans up after a successful merge.
-// When keepWorktree is true (per-agent mode), the worktree directory is retained
-// (detached) so ignored deps survive; only the agent task branch is deleted.
-// When keepWorktree is false, the worktree is removed entirely.
+// When keepWorktree is true, the worktree directory is retained (detached) and
+// only the agent task branch is deleted.
+// When keepWorktree is false (default merge path), the worktree is removed entirely.
 func CleanupMergedTask(repo, worktreeRel, branch string, keepWorktree bool) {
 	wt := worktreeRel
 	if wt != "" && !filepath.IsAbs(wt) {
@@ -182,16 +182,21 @@ func SquashMerge(repo, branch, mainBranch, message string) error {
 	return nil
 }
 
-// AssertWorkingTreeClean fails if cwd has staged/unstaged changes to tracked files.
-// Untracked files are ignored. Maw meta (.gitignore 仅因 init 追加 .multiagent/.worktrees、
-// 以及 .multiagent/**) 不视为阻塞合入的脏状态。
-func AssertWorkingTreeClean(cwd string) error {
-	// 不用 home.Git：它对 CombinedOutput 做 TrimSpace，会吃掉 porcelain 首行 X 位空格。
+// MergeIgnorablePath reports whether a tracked dirty path is maw session/meta noise
+// that must not block merge/submit.
+func MergeIgnorablePath(p string) bool {
+	p = strings.TrimSpace(strings.ReplaceAll(p, "\\", "/"))
+	return p == ".gitignore" || p == "TASK.md" || strings.HasPrefix(p, ".multiagent/") ||
+		strings.HasPrefix(p, ".maw/") || p == ".maw"
+}
+
+// DirtyTrackedPaths returns porcelain lines for tracked dirty files that are not ignorable.
+func DirtyTrackedPaths(cwd string) ([]string, error) {
 	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=no")
 	cmd.Dir = cwd
 	rawOut, err := cmd.Output()
 	if err != nil {
-		return i18n.EWN("err.git_status", nil, "next.inspect_cwd", err, cwd)
+		return nil, i18n.EWN("err.git_status", nil, "next.inspect_cwd", err, cwd)
 	}
 	var dirty []string
 	for _, raw := range strings.Split(string(rawOut), "\n") {
@@ -205,12 +210,21 @@ func AssertWorkingTreeClean(cwd string) error {
 			p = p[i+4:]
 		}
 		p = strings.Trim(p, "\"")
-		// maw 会话产物与工程元数据不算阻塞合入的脏状态（即便被误跟踪）。
-		if p == ".gitignore" || p == "TASK.md" || strings.HasPrefix(p, ".multiagent/") ||
-			strings.HasPrefix(p, ".maw/") || p == ".maw" {
+		if MergeIgnorablePath(p) {
 			continue
 		}
 		dirty = append(dirty, strings.TrimSpace(ln))
+	}
+	return dirty, nil
+}
+
+// AssertWorkingTreeClean fails if cwd has staged/unstaged changes to tracked files.
+// Untracked files are ignored. Maw meta (.gitignore 仅因 init 追加 .multiagent/.worktrees、
+// 以及 .multiagent/**) 不视为阻塞合入的脏状态。
+func AssertWorkingTreeClean(cwd string) error {
+	dirty, err := DirtyTrackedPaths(cwd)
+	if err != nil {
+		return err
 	}
 	if len(dirty) == 0 {
 		return nil
@@ -264,9 +278,78 @@ func IsEnvFailure(msg string) bool {
 		"safe-delete", "cannot find module", "no such file or directory",
 		"gate timed out", "npm err!", "npx:", "permission denied",
 		"module not found", "unable to resolve", "tarball",
+		"operation not permitted", "eperm", "/bin/ps",
+		"验证运行环境", "失联", "node_stale", "manual-compat",
 	}
 	for _, n := range needles {
 		if strings.Contains(low, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsUnrelatedRepoGate 判断全仓闸门失败是否落在 write_scope 之外（疑似主干预置红灯）。
+// 启发式：输出里出现的包/路径前缀均不命中任何 write_scope glob 前缀。
+func IsUnrelatedRepoGate(msg string, writeScope []string) bool {
+	if !strings.Contains(strings.ToLower(msg), "gate failed") &&
+		!strings.Contains(msg, "门禁") && !strings.Contains(msg, "闸门") {
+		// 仍允许对 go test ./... 类输出做判定
+		if !strings.Contains(msg, "go test") && !strings.Contains(msg, "make check") {
+			return false
+		}
+	}
+	if len(writeScope) == 0 {
+		return false
+	}
+	paths := extractLikelyPaths(msg)
+	if len(paths) == 0 {
+		return false
+	}
+	for _, p := range paths {
+		if pathInWriteScope(p, writeScope) {
+			return false
+		}
+	}
+	return true
+}
+
+func extractLikelyPaths(msg string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, field := range strings.Fields(msg) {
+		field = strings.Trim(field, ":,\"'`")
+		if !strings.Contains(field, "/") {
+			continue
+		}
+		if strings.HasPrefix(field, "http") {
+			continue
+		}
+		// normalize go test package paths
+		p := strings.TrimPrefix(field, "./")
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+		if len(out) >= 32 {
+			break
+		}
+	}
+	return out
+}
+
+func pathInWriteScope(path string, writeScope []string) bool {
+	path = strings.TrimPrefix(strings.ReplaceAll(path, "\\", "/"), "./")
+	for _, scope := range writeScope {
+		s := strings.TrimSpace(strings.ReplaceAll(scope, "\\", "/"))
+		s = strings.TrimSuffix(s, "/**")
+		s = strings.TrimSuffix(s, "/*")
+		s = strings.TrimSuffix(s, "/")
+		if s == "" {
+			continue
+		}
+		if path == s || strings.HasPrefix(path, s+"/") || strings.Contains(path, "/"+s+"/") || strings.HasPrefix(s, path) {
 			return true
 		}
 	}

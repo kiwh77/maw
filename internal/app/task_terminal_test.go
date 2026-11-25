@@ -92,22 +92,21 @@ func TestTaskCancelClearsBlockedReasonAndAudits(t *testing.T) {
 
 func TestAgentWorktreeKeepReason(t *testing.T) {
 	t.Parallel()
-	now := parseAgentLastSeen("2026-11-16T12:00:00Z")
 	fresh := &db.Agent{ID: "cursor-demo-1", Status: "idle", LastSeen: "2026-11-16T11:00:00Z"}
 	stale := &db.Agent{ID: "cursor-demo-2", Status: "idle", LastSeen: "2026-11-10T11:00:00Z"}
 	working := &db.Agent{ID: "cursor-demo-3", Status: "working", LastSeen: "2026-11-10T11:00:00Z"}
 	offline := &db.Agent{ID: "cursor-demo-4", Status: "offline", LastSeen: "2026-11-16T11:00:00Z"}
 
-	if _, keep := agentWorktreeKeepReason(fresh, now); !keep {
-		t.Fatal("fresh idle should keep")
+	if _, keep := agentWorktreeKeepReason(fresh); keep {
+		t.Fatal("idle should prune")
 	}
-	if _, keep := agentWorktreeKeepReason(stale, now); keep {
-		t.Fatal("stale idle should prune")
+	if _, keep := agentWorktreeKeepReason(stale); keep {
+		t.Fatal("idle should prune")
 	}
-	if _, keep := agentWorktreeKeepReason(working, now); !keep {
+	if _, keep := agentWorktreeKeepReason(working); !keep {
 		t.Fatal("working should keep")
 	}
-	if _, keep := agentWorktreeKeepReason(offline, now); keep {
+	if _, keep := agentWorktreeKeepReason(offline); keep {
 		t.Fatal("offline should prune")
 	}
 }

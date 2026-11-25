@@ -122,8 +122,8 @@ maw board --serve   # 浏览器看全局；仍须用 CLI next -C 拉取
 [ ] 实现并跑 Verify
 [ ] git commit（仅 scope 内）
 [ ] maw submit
-[ ] maw merge --yes —— submit 后可自行合入（保留 `.worktrees/{agent}`，删题分支）
-[ ] 仍有 ready → maw next 查询、maw next --claim 领取（同树 reset 主干 tip）；无题可领再停
+[ ] maw merge --yes —— submit 后可自行合入（删除 `.worktrees/{agent}` 与题分支）
+[ ] 仍有 ready → maw next 查询、maw next --claim 领取（重建 worktree 到主干 tip）；无题可领再停
 ```
 
 ## 硬规则
@@ -157,7 +157,7 @@ maw board --serve   # 浏览器看全局；仍须用 CLI next -C 拉取
 **已拉取**
 - 模式：本工程 | 全局（工程=`…`）
 - Agent：`w1` · 任务：`T-xxx` — 标题
-- worktree：`…/.worktrees/w1`（Agent 持久树；题间复用）
+- worktree：`…/.worktrees/w1`（合入后删除；下一题重建同路径）
 - write_scope：…
 - 下一步：cd worktree → 按 Verify 实现 → `maw submit` → `maw merge --yes` → 有 ready 则继续 `maw next`
 ```

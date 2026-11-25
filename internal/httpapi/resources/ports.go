@@ -193,3 +193,89 @@ type (
 func (e ErrConflict) Error() string { return e.Code + ": " + e.Message }
 func (e ErrNotFound) Error() string { return e.Message }
 func (e ErrInvalid) Error() string  { return e.Code + ": " + e.Message }
+
+// AutoExecutionNode 是一个候选执行节点及其就绪结论。
+type AutoExecutionNode struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Ready  bool   `json:"ready"`
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	Slots  int    `json:"slots"`
+}
+
+// AutoExecutionState 是工作台「自动执行」开关的完整状态。
+//
+// 表达的是产品语义——「让中枢用这个节点自动领题并执行」——而不是内部
+// 四个配置字段。界面不该知道为了实现一句话要写几处配置。
+type AutoExecutionState struct {
+	ProjectID string              `json:"project_id"`
+	Enabled   bool                `json:"enabled"`
+	NodeID    string              `json:"node_id"`
+	Node      AutoExecutionNode   `json:"node"`
+	Nodes     []AutoExecutionNode `json:"nodes"`
+	Limit     int                 `json:"limit"`
+	Ready     bool                `json:"ready"`
+	Reasons   []string            `json:"reasons,omitempty"`
+	Detail    string              `json:"detail,omitempty"`
+	// ServeRunning 报告常驻中枢是否在跑；不在跑时写盘成功也不会立刻执行。
+	ServeRunning bool `json:"serve_running"`
+	// Applied 为真表示本次写入会立即生效。
+	Applied bool   `json:"applied"`
+	Reason  string `json:"reason,omitempty"`
+	// LastAttempt 是最近一次自动派发尝试的事实。
+	LastAttempt map[string]any `json:"last_attempt,omitempty"`
+}
+
+// AutoExecutionSetRequest 是开关写入请求。
+type AutoExecutionSetRequest struct {
+	ProjectID string
+	Enabled   bool
+	NodeID    string
+	Actor     string
+}
+
+// AutoExecution 是「自动执行」开关用例。
+//
+// Get 用于页面首次渲染与刷新；Set 是唯一的写入口，一次性写齐
+// auto_enabled／auto_select／allowed_nodes／worker_node 四项。
+type AutoExecution interface {
+	Get(ctx context.Context, projectID string) (AutoExecutionState, error)
+	Set(ctx context.Context, req AutoExecutionSetRequest) (AutoExecutionState, error)
+}
+
+// SystemAgentConfig 是系统 Agent（Router）的可写配置视图。
+type SystemAgentConfig struct {
+	ProjectID        string   `json:"project_id"`
+	Enabled          bool     `json:"enabled"`
+	LLMNode          string   `json:"llm_node"`
+	WorkerNode       string   `json:"worker_node"`
+	LLMCommand       []string `json:"llm_command"`
+	AutoKinds        []string `json:"auto_kinds"`
+	OpsAllowlist     []string `json:"ops_allowlist"`
+	EscalatePatterns []string `json:"escalate_patterns"`
+	PollIntervalSec  int      `json:"poll_interval_sec"`
+	MaxConcurrent    int      `json:"max_concurrent"`
+	CooldownSec      int      `json:"cooldown_sec"`
+	MaxAttempts      int      `json:"max_attempts"`
+	// LLMReady 为真表示 llm_command 已配置：否则 Router 只能升级人工。
+	LLMReady bool `json:"llm_ready"`
+}
+
+// SystemAgentSetRequest 是 Router 配置的增量更新（只改非 nil 字段）。
+type SystemAgentSetRequest struct {
+	ProjectID    string
+	Enabled      *bool
+	LLMNode      *string
+	WorkerNode   *string
+	LLMCommand   *[]string
+	AutoKinds    *[]string
+	OpsAllowlist *[]string
+	Actor        string
+}
+
+// SystemAgentSettings 是 Router 配置用例。
+type SystemAgentSettings interface {
+	Get(ctx context.Context, projectID string) (SystemAgentConfig, error)
+	Update(ctx context.Context, req SystemAgentSetRequest) (SystemAgentConfig, error)
+}

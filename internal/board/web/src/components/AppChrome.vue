@@ -5,6 +5,7 @@ import { statusLabel } from '../lib/status'
 import UiIcon from './UiIcon.vue'
 import ViewToggle from './ViewToggle.vue'
 import JoinPromptButton from './JoinPromptButton.vue'
+import AutoExecToggle from './AutoExecToggle.vue'
 
 const board = useBoard()
 const snap = computed(() => board.state.snapshot)
@@ -152,6 +153,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
         />
         <kbd aria-hidden="true">/</kbd>
       </label>
+      <!-- 自动执行开关排在「接入」左侧：先决定会不会自动干，再决定怎么接入。 -->
+      <AutoExecToggle v-if="showJoinPrompt" />
       <JoinPromptButton v-if="showJoinPrompt" variant="join" />
       <button id="filter-toggle" type="button" class="quiet-button filter-toggle"
         aria-controls="filters" :aria-expanded="filtersOpen" :class="{ active: filtersOpen || filterCount }"

@@ -170,7 +170,7 @@ var catalogEn = map[string]string{
 	"flag.system_job":                "System job id",
 	"flag.system_once":               "Poll once then exit",
 	"err.system_disabled":            "system agent disabled ([system_agent] enabled=true)",
-	"next.system_enable":             "Set [system_agent] enabled = true in .multiagent/config.toml",
+	"next.system_enable":             "Set [system_agent] enabled = true in ~/.maw/projects/<id>/config.toml",
 	"next.system_status":             "maw system trigger / maw system watch",
 	"next.system_trigger":            "maw system run or maw system watch --once",
 	"next.system_run":                "maw system status",
@@ -202,7 +202,7 @@ var catalogEn = map[string]string{
 	"next.managed_internal":          "do not invoke maw __runner manually; use maw managed start",
 	"next.managed_node":              "node id like codebuddy-lab (lowercase, -/_ allowed)",
 	"next.managed_agent":             "export MAW_AGENT={app}-{project-slug}-{n}, e.g. cursor-demo-1",
-	"next.plan_apply":                "maw plan apply .multiagent/blueprint.toml --yes",
+	"next.plan_apply":                "maw plan apply <blueprint.toml> --yes",
 	"out.html_file":                  "HTML file",
 	"out.live_url":                   "Live URL",
 	"out.next":                       "Next",
@@ -248,7 +248,7 @@ var catalogEn = map[string]string{
 	"agent.working":         "working",
 	"agent.offline":         "offline",
 	"err.dirty_in":          "working tree dirty in %s: %s",
-	"next.commit_scope":     "cd %s && git add <write_scope files> && git commit -m \"…\" then retry (maw submit / maw merge); do not leave staged-only changes",
+	"next.commit_scope":     "If dirty files are in this task write_scope: cd %s && git add <files> && git commit, then retry. If they are others' edits on the main checkout: do not wipe them — maw block -m \"[conflict] …\" and let a maintainer commit/stash before merge",
 
 	// errors / next
 	"err.blueprint_missing":   "blueprint not found: %s",
@@ -298,7 +298,7 @@ var catalogEn = map[string]string{
 	"err.config_no_project":   "config missing [project] section",
 	"next.restore_config":     "restore config.toml or run `maw init --upgrade`",
 	"err.write_config":        "write config.toml failed",
-	"next.check_perms":        "check permissions on .multiagent/",
+	"next.check_perms":        "check permissions on ~/.maw/projects/<id>/",
 	"err.merge_need_yes":      "merge requires confirmation",
 	"next.merge_yes":          "run `maw merge --yes`",
 	"err.merge_empty":         "merge queue empty",
@@ -359,7 +359,7 @@ var catalogEn = map[string]string{
 	"next.request_change_add": "maw request-change --add 'path/**' -m 'reason'",
 	"err.cannot_request_change": "task %s status %s cannot expand write_scope",
 	"next.after_request_change": "expanded write_scope for %s; keep coding, commit, then maw submit — also update the blueprint",
-	"note.request_change_blueprint": "only the task row was updated; plan apply may overwrite — sync .multiagent/blueprint.toml",
+	"note.request_change_blueprint": "only the task row was updated; plan apply may overwrite — sync out-of-tree blueprint.toml",
 
 	// result next hints
 	"next.open_html":          "Open the HTML, or run maw board --serve for a live URL (filter by project/Agent/status)",
@@ -371,7 +371,7 @@ var catalogEn = map[string]string{
 	"next.board_serve":        "maw board --serve for the global board",
 	"next.continue_or_submit": "Continue or maw submit",
 	"next.after_apply":        "maw register && maw next  # auto {app}-{project}-{n}, or export MAW_AGENT=cursor-<slug>-1",
-	"next.after_init":         "Split a task list, set [meta] main_branch in the blueprint, then `maw plan apply .multiagent/blueprint.toml --yes`; board: `maw board --serve`",
+	"next.after_init":         "Split a task list, set [meta] main_branch in the blueprint, then `maw plan apply <blueprint.toml> --yes`; board: `maw board --serve`",
 	"next.maw_init":           "maw init",
 	"next.status_visible":     "Updates appear in maw board --serve or the desktop client",
 	"next.task_unblock":       "maw task unblock %s",

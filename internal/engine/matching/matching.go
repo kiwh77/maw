@@ -462,13 +462,17 @@ func pickNode(req Request, t Task, now time.Time, ttl time.Duration) (*Node, []Q
 	return &node, nil
 }
 
-// nodeBlocker 返回该节点相对于任务的第一条阻塞原因；可执行时返回 nil。
-func nodeBlocker(req Request, rule *ProjectRule, t Task, n Node, now time.Time, ttl time.Duration) *QueueReason {
+// NodeGate 判定一个节点自身是否处于可接单状态，返回第一条阻塞原因。
+//
+// 与 nodeBlocker 的分工：NodeGate 只看节点（接收策略、观测时效、四维状态、
+// 槽位与共享组），不看任务；任务相关的工程策略与能力要求仍由 nodeBlocker 叠加。
+// 工作台的「自动执行」开关用它回答「这个节点现在真的能接活吗」，避免把
+// 「登记过」误当成「就绪」。
+//
+// 返回 nil 表示节点可接新任务；返回的 QueueReason 里 TaskID 为空、NodeID 已填。
+func NodeGate(n Node, now time.Time, ttl time.Duration) *QueueReason {
 	blocked := func(code ReasonCode, detail string) *QueueReason {
-		return &QueueReason{Code: code, TaskID: t.ID, NodeID: n.ID, Detail: detail}
-	}
-	if rule != nil && len(rule.AllowedNodes) > 0 && !containsNode(rule.AllowedNodes, n.ID) {
-		return blocked(ReasonProjectPolicy, "工程策略未允许该节点")
+		return &QueueReason{Code: code, NodeID: n.ID, Detail: detail}
 	}
 	if !n.Config.AcceptNew {
 		return blocked(ReasonNodeDisabled, "节点已停用接收新任务")
@@ -507,6 +511,21 @@ func nodeBlocker(req Request, rule *ProjectRule, t Task, n Node, now time.Time, 
 	if n.SharedGroup != "" && n.GroupLimit > 0 && n.GroupActive >= n.GroupLimit {
 		return blocked(ReasonNodeOccupied,
 			fmt.Sprintf("共享资源组 %s 已占满（%d/%d）", n.SharedGroup, n.GroupActive, n.GroupLimit))
+	}
+	return nil
+}
+
+// nodeBlocker 返回该节点相对于任务的第一条阻塞原因；可执行时返回 nil。
+func nodeBlocker(req Request, rule *ProjectRule, t Task, n Node, now time.Time, ttl time.Duration) *QueueReason {
+	blocked := func(code ReasonCode, detail string) *QueueReason {
+		return &QueueReason{Code: code, TaskID: t.ID, NodeID: n.ID, Detail: detail}
+	}
+	if rule != nil && len(rule.AllowedNodes) > 0 && !containsNode(rule.AllowedNodes, n.ID) {
+		return blocked(ReasonProjectPolicy, "工程策略未允许该节点")
+	}
+	if gate := NodeGate(n, now, ttl); gate != nil {
+		gate.TaskID = t.ID
+		return gate
 	}
 	if missing := missingCapabilities(n, t.RequiredCapabilities, now, ttl); len(missing) > 0 {
 		return &QueueReason{

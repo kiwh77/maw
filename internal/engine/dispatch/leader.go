@@ -21,6 +21,8 @@ const DefaultIdleBackoff = 500 * time.Millisecond
 //   - Dispatch=true 时持续推进派发队列，空转按 Idle 等待，不依赖 HTTP 请求存活。
 //   - System 回调按 SystemInterval 执行，且恒在持锁状态下进行——系统 Agent 不再自己抢锁，
 //     两套循环不会互相饿死。
+//   - Reload 每轮开头执行一次，允许宿主把配置热变更就地写回本结构，因此
+//     「工作台打开自动执行」不需要重启 serve。
 type Leader struct {
 	// Coord 必填：负责持锁与派发步进。
 	Coord *Coordinator
@@ -40,6 +42,13 @@ type Leader struct {
 	// 与 Dispatch / System 两个开关互不推导：即使两者全关，只要生产者被注入
 	// 就仍按 auto_select 自己的开关工作，且错误不会让 leader 退出。
 	Producer func(ctx context.Context) error
+	// Reload 可选：每轮循环开头调用一次，把配置热变更写回 Dispatch／System／
+	// Producer／SystemInterval 等字段。
+	//
+	// 它**只在 Run 的同一 goroutine 内执行**，因此随后的读取与这里的写入
+	// 不构成数据竞争；宿主不得从别的 goroutine 改这些字段。
+	// Reload 返回错误不致命：记一次错误、保留上一轮开关继续跑。
+	Reload func() error
 }
 
 // Run 持锁循环直到 ctx 取消；抢锁失败时返回 ErrCoordinatorActive。
@@ -59,10 +68,6 @@ func (l *Leader) Run(ctx context.Context) error {
 	if idle <= 0 {
 		idle = DefaultIdleBackoff
 	}
-	systemEvery := l.SystemInterval
-	if systemEvery <= 0 {
-		systemEvery = 5 * time.Second
-	}
 	clock := l.Clock
 	if clock == nil {
 		clock = time.Now
@@ -74,6 +79,17 @@ func (l *Leader) Run(ctx context.Context) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
+		}
+		// 热开关：本轮先问一次宿主配置有没有变。它只改动本结构上那几个
+		// 开关字段，且与本循环同 goroutine，因此不需要加锁。
+		if l.Reload != nil {
+			if err := l.Reload(); err != nil {
+				l.report(fmt.Errorf("reload: %w", err))
+			}
+		}
+		systemEvery := l.SystemInterval
+		if systemEvery <= 0 {
+			systemEvery = 5 * time.Second
 		}
 		// 先生产再消费：本轮入队并被执行的 dispatch_ready 产生的新操作，
 		// 能在同一轮的 drain 里被推进，不必等下一次轮询。

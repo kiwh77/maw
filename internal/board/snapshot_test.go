@@ -334,3 +334,27 @@ func TestStaticSnapshotLoadsWithoutWriteActions(t *testing.T) {
 		}
 	}
 }
+
+// TestBuiltBundleCarriesAutoExecToggle：工作台的「自动执行」开关必须真的在
+// 打进产物的 bundle 里，而不是只存在于源码。以前踩过的坑是源码改了、
+// dist 忘了重建，界面看起来「没这个按钮」。
+func TestBuiltBundleCarriesAutoExecToggle(t *testing.T) {
+	assets, err := BoardAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := fs.ReadFile(assets, "board-web.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := string(raw)
+	for _, want := range []string{
+		"f-auto-exec",     // 按钮 id（工具栏占位与 e2e 选择器都认它）
+		"/auto-execution", // 服务端读写路径
+		"自动执行",            // 中文标签
+	} {
+		if !strings.Contains(bundle, want) {
+			t.Fatalf("board-web.js 缺少 %q：源码改了但产物没重建？", want)
+		}
+	}
+}

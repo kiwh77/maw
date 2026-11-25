@@ -33,17 +33,25 @@ func TestLoadBoardSnapshotAssemblesProblems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snap.Problems) != 2 {
-		t.Fatalf("装配后应聚合出 2 条问题（blocked + dep-wait）：%+v", snap.Problems)
-	}
-	var kinds []string
+	// 装配后的问题是两类事实的并集：任务态问题（blocked／dep-wait）与
+	// Router 对账结果（router-idle：这条阻塞还没有人接管）。
+	kinds := map[string]int{}
+	var order []string
 	for _, p := range snap.Problems {
-		kinds = append(kinds, p.Kind)
+		kinds[p.Kind]++
+		order = append(order, p.Kind)
 	}
-	if kinds[0] != board.ProblemKindBlocked {
-		t.Fatalf("blocked 应排在前（severity 高）：%+v", snap.Problems)
+	if kinds[board.ProblemKindBlocked] != 1 {
+		t.Fatalf("应聚合出 1 条 blocked：%+v", snap.Problems)
 	}
-	if kinds[1] != board.ProblemKindDepWait {
-		t.Fatalf("ready 引用 blocked 上游应产生 dep-wait：%+v", snap.Problems)
+	if kinds[board.ProblemKindDepWait] != 1 {
+		t.Fatalf("应聚合出 1 条 dep-wait：%+v", snap.Problems)
+	}
+	if kinds[board.ProblemKindRouterIdle] != 1 {
+		t.Fatalf("阻塞任务没有 Router 作业时应聚合出 1 条 router-idle：%+v", snap.Problems)
+	}
+	present := func(kind string) bool { return kinds[kind] == 1 }
+	if !present(board.ProblemKindBlocked) || !present(board.ProblemKindDepWait) {
+		t.Fatalf("问题聚合缺项：%v", order)
 	}
 }

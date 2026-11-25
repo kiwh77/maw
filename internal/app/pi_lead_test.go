@@ -5,18 +5,22 @@ import (
 	"database/sql"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/goal"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 // setTestLeads 在工程配置里登记 lead 名单（等价于运维手改 [identity] leads）。
 func setTestLeads(t *testing.T, repo string, leads ...string) {
 	t.Helper()
-	path := filepath.Join(repo, ".multiagent", "config.toml")
+	local, err := home.MawHome(repo)
+	if err != nil {
+		t.Fatalf("maw home: %v", err)
+	}
+	path := home.ConfigPath(local)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config: %v", err)

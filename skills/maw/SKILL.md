@@ -15,7 +15,7 @@ Pick a skill by stage; **Read** that skill's `SKILL.md` for details.
 
 | Stage | Skill | When |
 |---|---|---|
-| 1. Onboard repo | **[maw-init](../maw-init/SKILL.md)** | No `.multiagent/`, doctor not init, first board hookup |
+| 1. Onboard repo | **[maw-init](../maw-init/SKILL.md)** | First board hookup / doctor not wired (out-of-tree `~/.maw/projects/<id>/`; next also auto-attaches) |
 | 2. Split tasks | **[maw-task-list](../maw-task-list/SKILL.md)** | Claimable cards, Surface/Deps/size |
 | 3. Push plan | **[maw-plan-push](../maw-plan-push/SKILL.md)** | One-shot remaining tasks into blueprint / apply |
 | 4. **Claim** | **[maw-task-pull](../maw-task-pull/SKILL.md)** | `maw next` in-repo or after board project pick |
@@ -57,10 +57,12 @@ maw project rm <id|name>        # --force clears the live work too
 
 **Hard rules**
 
-- Only edit task `write_scope`; state lives in `~/.maw/maw.db`
-- One persistent worktree per agent: `.worktrees/{agent}`
+- Only edit task `write_scope`; expand with `maw request-change --add 'path/**'` (refreshes the task card); state lives in `~/.maw/maw.db`
+- **Always `maw block -m "[category] …"` when stuck** (scope/deps/env/spec/conflict/gate/baseline/human/other); never report only in chat. Try `request-change` before blocking on scope.
+- Dirty main checkout blocking merge: do **not** wipe others' edits — block and wait for a maintainer
+- One worktree path per agent: `.worktrees/{agent}` (recreated after merge)
 - **`git commit` before `maw submit`** (scope only)
-- After submit you may `maw merge --yes`; never git merge/rebase/push trunk yourself
+- After submit you may `maw merge --yes` (deletes worktree + task branch); never git merge/rebase/push trunk yourself
 - Locale: `MAW_LANG=en|zh` (default en) for CLI / protocol inject / terminal board
 - Manual claim keeps **instance / version / source** (`manual_next`); tokens never enter prompts, the repo, or events
 - Bypass (`maw status report`) reports **own** observations only — never seize a **managed Run**

@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/systemagent"
 )
 
@@ -156,3 +158,175 @@ func diagnoseBackendStatus(cfg config.SystemAgent, b diagnoseBackend) map[string
 	}
 	return out
 }
+
+// ---- Router（系统 Agent）配置读写（来自主干既有 WIP，与诊断后端解析共存）----
+
+// Router（系统 Agent）配置的读写用例。
+//
+// 之前这些字段只能手改 config.toml：`llm_command` 没配就永远走「升级人工」，
+// 于是「任务遇阻时 Router 介入」在生产里从未发生过。这里补上唯一一条写路径，
+// 并把「配了没有」直接回显成 llm_ready，避免界面以为它在工作。
+
+// SystemAgentView 是 Router 配置的可读视图。
+type SystemAgentView struct {
+	ProjectID        string
+	Enabled          bool
+	LLMNode          string
+	WorkerNode       string
+	LLMCommand       []string
+	AutoKinds        []string
+	OpsAllowlist     []string
+	EscalatePatterns []string
+	PollIntervalSec  int
+	MaxConcurrent    int
+	CooldownSec      int
+	MaxAttempts      int
+	LLMReady         bool
+}
+
+// SystemAgentUpdateInput 是增量更新输入：只改非 nil 字段。
+type SystemAgentUpdateInput struct {
+	ProjectID    string
+	Enabled      *bool
+	LLMNode      *string
+	WorkerNode   *string
+	LLMCommand   *[]string
+	AutoKinds    *[]string
+	OpsAllowlist *[]string
+	Actor        string
+}
+
+// SystemAgentGet 读取工程的 Router 配置。
+func SystemAgentGet(projectID string) (SystemAgentView, error) {
+	pc, err := loadProjectCtx(projectID)
+	if err != nil {
+		return SystemAgentView{}, err
+	}
+	cfg := pc.Config
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	return systemAgentViewOf(pc.ID(), cfg.SystemAgent), nil
+}
+
+// SystemAgentUpdate 增量写回 Router 配置。
+//
+// 白名单类字段（auto_kinds／ops_allowlist／llm_command）做了去空与去重：
+// 空串会被当成「放行一切」的隐性入口，必须挡在写盘之前。
+func SystemAgentUpdate(in SystemAgentUpdateInput) (SystemAgentView, error) {
+	pc, err := loadProjectCtx(in.ProjectID)
+	if err != nil {
+		return SystemAgentView{}, err
+	}
+	cfgPath := home.ConfigPath(pc.LocalHome)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return SystemAgentView{}, err
+	}
+	next := *cfg
+	sa := &next.SystemAgent
+	if in.Enabled != nil {
+		sa.Enabled = *in.Enabled
+	}
+	if in.LLMNode != nil {
+		sa.LLMNode = strings.TrimSpace(*in.LLMNode)
+	}
+	if in.WorkerNode != nil {
+		sa.WorkerNode = strings.TrimSpace(*in.WorkerNode)
+	}
+	if in.LLMCommand != nil {
+		sa.LLMCommand = cleanList(*in.LLMCommand)
+	}
+	if in.AutoKinds != nil {
+		sa.AutoKinds = cleanList(*in.AutoKinds)
+	}
+	if in.OpsAllowlist != nil {
+		sa.OpsAllowlist = cleanList(*in.OpsAllowlist)
+	}
+	if err := writeSystemAgentConfig(cfgPath, cfg, sa); err != nil {
+		return SystemAgentView{}, err
+	}
+	writeSystemAgentEvent(pc, in.Actor, "system_agent_changed", map[string]any{
+		"enabled":       sa.Enabled,
+		"llm_node":      sa.LLMNode,
+		"worker_node":   sa.WorkerNode,
+		"llm_command":   sa.LLMCommand,
+		"auto_kinds":    sa.AutoKinds,
+		"ops_allowlist": sa.OpsAllowlist,
+	})
+	return systemAgentViewOf(pc.ID(), *sa), nil
+}
+
+func systemAgentViewOf(projectID string, sa config.SystemAgent) SystemAgentView {
+	view := SystemAgentView{
+		ProjectID:        projectID,
+		Enabled:          sa.Enabled,
+		LLMNode:          sa.LLMNode,
+		WorkerNode:       sa.WorkerNode,
+		LLMCommand:       append([]string{}, sa.LLMCommand...),
+		AutoKinds:        append([]string{}, sa.AutoKinds...),
+		OpsAllowlist:     append([]string{}, sa.OpsAllowlist...),
+		EscalatePatterns: append([]string{}, sa.EscalatePatterns...),
+		PollIntervalSec:  sa.PollIntervalSec,
+		MaxConcurrent:    sa.MaxConcurrent,
+		CooldownSec:      sa.CooldownoutSec,
+		MaxAttempts:      sa.MaxAttempts,
+	}
+	view.LLMReady = len(cleanList(sa.LLMCommand)) > 0
+	return view
+}
+
+// writeSystemAgentConfig 只改 system_agent 段里的可写字段，保留其余现场。
+func writeSystemAgentConfig(path string, prev *config.Config, sa *config.SystemAgent) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	text := string(raw)
+	text = setTOMLBool(text, "system_agent", "enabled", sa.Enabled)
+	text = setTOMLString(text, "system_agent", "llm_node", sa.LLMNode)
+	text = setTOMLString(text, "system_agent", "worker_node", sa.WorkerNode)
+	text = setTOMLStringArray(text, "system_agent", "llm_command", sa.LLMCommand)
+	text = setTOMLStringArray(text, "system_agent", "auto_kinds", sa.AutoKinds)
+	text = setTOMLStringArray(text, "system_agent", "ops_allowlist", sa.OpsAllowlist)
+	// 轮询与重试参数不在界面里改，但要保证写回后仍是合法值。
+	text = setTOMLInt(text, "system_agent", "poll_interval_sec", sa.PollIntervalSec)
+	text = setTOMLInt(text, "system_agent", "cooldown_sec", sa.CooldownoutSec)
+	text = setTOMLInt(text, "system_agent", "max_attempts", sa.MaxAttempts)
+	_ = prev
+	return os.WriteFile(path, []byte(text), 0o644)
+}
+
+// cleanList 去空白、去重、保序。
+func cleanList(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+// writeSystemAgentEvent 记录配置变更。
+func writeSystemAgentEvent(pc *projCtx, actor, typ string, data map[string]any) {
+	if pc == nil {
+		return
+	}
+	if strings.TrimSpace(actor) == "" {
+		actor = "user"
+	}
+	_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		return db.AppendEvent(tx, pc.ID(), actor, typ, "", data)
+	})
+}
+
+// intText 是 TOML 整数字面量。
+func intText(v int) string { return strconv.Itoa(v) }

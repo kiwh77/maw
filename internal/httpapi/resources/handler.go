@@ -20,7 +20,12 @@ type API struct {
 	Probes     Probes
 	NodeChecks NodeChecks
 	Projects   Projects
-	Auth       *localauth.Authenticator
+	// AutoExecution 是工作台「自动执行」开关用例（GET/PUT 同一路径）。
+	AutoExecution AutoExecution
+	// SystemAgentSettings 是 Router 配置用例（GET/PUT 同一路径）。
+	// 字段名与类型名分开：接口叫 SystemAgentSettings，字段沿用短名。
+	SystemAgent SystemAgentSettings
+	Auth        *localauth.Authenticator
 }
 
 // Handler 返回可挂载的 /api/v1 写树（不含根路由装配）。
@@ -37,6 +42,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/nodes/{node_id}/probes", a.handleProbeNode)
 	mux.HandleFunc("/api/v1/nodes/{node_id}/checks", a.handleCheckNode)
 	mux.HandleFunc("/api/v1/projects/{project_id}", a.handleProject)
+	// 工作台开关与 Router 配置：一条路径同时支持读与写，
+	// 因为界面需要「打开前先看清为什么不能开」，读与写必须原子同源。
+	mux.HandleFunc("/api/v1/projects/{project_id}/auto-execution", a.handleAutoExecution)
+	mux.HandleFunc("/api/v1/projects/{project_id}/system-agent", a.handleSystemAgent)
 	// 写树兜底：未知写路径回 JSON not_found，不再让 404 落到纯文本页。
 	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "未知的 /api/v1 写路径", nil)

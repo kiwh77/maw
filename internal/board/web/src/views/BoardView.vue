@@ -86,12 +86,21 @@ function allTasks(): Array<Record<string, unknown>> {
   return (board.state.snapshot?.tasks || []) as Array<Record<string, unknown>>
 }
 
-/** 卡片依赖 chips：上游 ID + 状态色，点击开上游抽屉。 */
+/** 卡片依赖 chips：上游 ID + 状态色，点击开上游抽屉；悬停展示标题。 */
 function depChips(task: Record<string, unknown>) {
-  return depRows(task, allTasks()).map((row) => ({
-    ...row,
-    tone: depTone(row.status),
-  }))
+  return depRows(task, allTasks()).map((row) => {
+    const st = row.status
+      ? statusLabel(row.status, board.state.lang)
+      : board.state.lang === 'zh'
+        ? '快照中未见该上游'
+        : 'upstream not in snapshot'
+    const tip = row.title ? `${row.title} · ${st}` : st
+    return {
+      ...row,
+      tone: depTone(row.status),
+      tip,
+    }
+  })
 }
 
 function openDep(row: { id: string; pid: string }) {
@@ -117,7 +126,15 @@ function waitingText(task: Record<string, unknown>) {
   if (!list.length) return ''
   const head = board.state.lang === 'zh' ? '等待' : 'Waiting'
   const body = list
-    .map((row) => `${row.id}(${row.status || (board.state.lang === 'zh' ? '未知' : 'unknown')})`)
+    .map((row) => {
+      const name = row.title || row.id
+      const st = row.status
+        ? statusLabel(row.status, board.state.lang)
+        : board.state.lang === 'zh'
+          ? '未知'
+          : 'unknown'
+      return `${name}(${st})`
+    })
     .join(', ')
   return `${head}: ${body}`
 }
@@ -177,7 +194,7 @@ function waitingText(task: Record<string, unknown>) {
                 class="dep-chip"
                 :data-dep-tone="chip.tone"
                 :data-dep="chip.id"
-                :title="chip.status || (board.state.lang === 'zh' ? '快照中未见该上游' : 'upstream not in snapshot')"
+                :title="chip.tip"
                 @click.stop="openDep(chip)"
                 @keydown="onChipKey($event, chip)"
               >

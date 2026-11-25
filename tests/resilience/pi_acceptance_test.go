@@ -17,6 +17,7 @@ import (
 	"github.com/kiwh77/maw/internal/analytics"
 	"github.com/kiwh77/maw/internal/app"
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/home"
 	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/engine/ports"
 	"github.com/kiwh77/maw/internal/projection"
@@ -398,7 +399,11 @@ func piHasTask(t *testing.T, h *testsupport.Harness, taskID string) bool {
 
 func piReadBlueprint(t *testing.T, repo string) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(repo, ".multiagent", "blueprint.toml"))
+	local, err := home.MawHome(repo)
+	if err != nil {
+		t.Fatalf("maw home: %v", err)
+	}
+	raw, err := os.ReadFile(home.BlueprintPath(local))
 	if err != nil {
 		t.Fatalf("读蓝图: %v", err)
 	}

@@ -72,3 +72,57 @@ maw system watch --once
 ## Runner 接线
 
 `maw __runner` 若在 `ops/<operation_id>/launch_spec.json` 发现启动规格，会接入 `session.Runner`（passthrough Decode/Interpret）。可选 `run_meta.json` 提供 `run_id` / `global_db` 等。
+
+## 自动执行开关（工作台）
+
+工具栏「接入」左侧的开关是**一个**开关：打开它 = 让中枢用所选执行节点自动领题并执行。
+
+它一次写齐四个字段，因为只写 `auto_enabled` 只会推进派发队列，而真正「领题」的那一步是
+`auto_select` 产出的 `dispatch_ready`：
+
+```toml
+[managed]
+auto_enabled = true          # 推进派发队列
+auto_select = true           # 生产 dispatch_ready（真正领题）
+limit = 1
+allowed_nodes = ["dsh-local"]
+[system_agent]
+worker_node = "dsh-local"    # 自愈重跑时复用同一节点
+```
+
+规则：
+
+- **节点接不了活时拒绝开启**，返回稳定原因码（`node_stale`／`node_not_ready`／`node_disabled`／
+  `no_candidate_node`／`platform_unsupported`／`managed_execution_limit`）。槽位占满
+  （`node_occupied`）不算拒绝理由——那是「忙」，空槽后会自然接单。
+- 打开前会**当场探活**一次刷新 `observed_at`：匹配层只认 5 分钟内的观测，
+  否则「刚登记但还没跑过 serve」的节点永远开不起来。
+- `applied=false` + `reason=serve_not_running` 表示配置已保存、但中枢没在跑：
+  先 `maw serve`。界面会如实显示「已保存，中枢启动后生效」。
+- **热生效**：`maw serve` 内的 leader 每轮对比 `config.toml` 的 mtime/size，变化即就地重算
+  三个开关与回调，不重启、不重新抢锁。变化会落一条 `lead_switches_changed` 事件。
+
+## Router 介入
+
+「Router」指系统 Agent 层。它要真的能解决问题，三件事缺一不可：
+
+1. **信号产作业**：五类队列卡死信号按 `auto_kinds` 产作业（默认只放行 `unblock_assist`；
+   放行 `task_split` 后依赖死锁优先拆题）。`stale_lock` 属「占用者不明」，永远只上报。
+2. **决策可诊断**：`llm_command` 必须配置（stdin=prompt，stdout=JSON 决策）。没配时
+   Router 只有一种结局——升级人工。用 `maw system status` 看 `llm_ready`。
+3. **动作有边界**：`ops_run` 只执行 `ops_allowlist` 前缀匹配的命令，且结果里必须留下
+   `ops_command`／`ops_allowlist_rule`／`ops_exit_code`，命令回显可见。
+
+```bash
+# 配置（也可用 PUT /api/v1/projects/{id}/system-agent）
+llm_command = ["/Users/you/.local/bin/claude", "-p", "--output-format", "text"]
+auto_kinds = ["unblock_assist", "task_split", "ops_run"]
+ops_allowlist = ["maw next", "maw merge --yes", "maw prune", "maw task unblock"]
+```
+
+看板「问题审查」里的两类条目说明 Router 有没有接管：
+
+| kind | 含义 |
+| --- | --- |
+| `router` | 已有作业：`done` 会写决策动作，`escalated` 写升级原因，`queued/running` 写第几次尝试 |
+| `router-idle` | 这条 blocked 没有任何相关作业：`system_agent` 没开，或该处置类型没在 `auto_kinds` 放行 |

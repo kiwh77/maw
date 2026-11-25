@@ -6,11 +6,25 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **仓外-only 接入（破坏性）**：运行时配置与蓝图一律在 `~/.maw/projects/<id>/`；不再读取仓内 `.multiagent/`、不再由 `maw init` 注入协议段或安装 git hooks。`register`/`next`/`board` 自动 `EnsureAttached`。旧仓内 config 需手工拷到仓外 home。
+- **合入后清 worktree（协议 v8 / CLI 0.4.1）**：`maw merge --yes` 成功后删除 `.worktrees/{agent}` 与题分支；下一题 `maw next` 重建同路径树。`maw prune` 不再保留 idle 48h 温热树，仅保留 `working` / 进行中题占用。
+
 ### Added
+
+- `maw project add`：显式登记当前 git 仓（只写本机 `~/.maw`，零工程写盘）
+
+
+- **阻塞反馈迭代**：`maw block` 写入 `block_category` + 分类 followups；看板 problems 展示类别；`request-change` 成功后刷新 `.maw/task.json`/`TASK.md`；蓝图 `write_scope` 清洗中文括号残片；领取时 `required_paths`/acceptance `required:` 基线预检；无关全仓闸门 → 可恢复 `blocked`（类别 gate）；队列卡死信号冷却 30m；`maw prune --history [--yes]` 导出并清理终态题的历史 →blocked 事件与过期 `unblock_assist`
+- **工作台「自动执行」开关**：工具栏「接入」左侧一键打开/关闭无人值守执行。打开时原子写齐 `managed.auto_enabled` + `managed.auto_select` + `allowed_nodes` + `system_agent.worker_node`，并当场探活节点；节点接不了活时**拒绝开启**并给出原因码（不再出现「打开却不动」）。`GET/PUT /api/v1/projects/{id}/auto-execution`。
+- **开关热生效**：`maw serve` 内的 leader 每轮读一次 `config.toml`（mtime+size），开关变化就地生效，无需重启；三开关快照落 `lead_switches_changed` 事件。
+- **Router 介入闭环**：五类「队列卡死」信号（`dispatch_op_stalled`／`claimed_not_started`／`dep_deadlock`／`no_capable_node`／`repeated_failure`）从「只上报」改为按 `auto_kinds` 产作业；`GET/PUT /api/v1/projects/{id}/system-agent` 可写 `llm_command`／`auto_kinds`／`ops_allowlist`，`llm_ready` 直说 Router 能不能真正诊断；`ops_run` 结果收录命令原文、命中的白名单规则与退出码。
+- **Router 可见性**：看板问题审查新增 `router`（已介入／升级／处理中）与 `router-idle`（无人接管）两类问题，与 blocked 任务逐条对账。
 
 - `maw task cancel <id> [--reason] [--superseded-by]`：可审计取消；清空 `blocked_reason`/`branch`/`worktree` 并归档到 `extra`
 - `maw request-change [--add path/**] [-m …]`：扩写当前题 write_scope（可自动探测越界改动）
-- `maw prune` 输出 `kept_reasons`；idle 超 48h / offline 的持久 worktree 可清；删除前剥离 `TASK.md`/`.maw/`
+- `maw prune` 输出 `kept_reasons`；idle / offline 的持久 worktree 可清（合入后不再温热保留）；删除前剥离 `TASK.md`/`.maw/`
 - `plan apply` 对蓝图外仍 blocked 的题返回 `stale_blocked` 提示
 - Agent 过期前若题上仍有近期 heartbeat，则续命（`agent_heartbeat_renewed`）
 - 系统 Agent 层：`[system_agent]` 配置、`maw system status|trigger|run|watch`、阻塞时 Raise 通知并入队 `unblock_assist`；同总线支持 `task_split` / `ops_run`；HTTP `GET/POST …/system-jobs`；`__runner` 可按 `launch_spec.json` 接入 `session.Runner`。说明见 `docs/operations/vnext/system-agent.zh-CN.md`。

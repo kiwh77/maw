@@ -22,6 +22,9 @@ type Watcher struct {
 	ProjectID  string
 	LeaderLock func() (release func(), err error)
 	Clock      func() time.Time
+	// ConfigFunc 可选：非空时每轮替换 Config，使 llm_command / auto_kinds /
+	// ops_allowlist 的改动不必重启常驻循环。为 nil 时行为与引入前一致。
+	ConfigFunc func() config.SystemAgent
 	// SignalFacts 可选：系统级信号的证据源。为 nil 时 PollOnce 完全跳过信号检测，
 	// 既有 task.blocked 入队路径不变；由装配卡注入读库 / 读事件的真实实现。
 	SignalFacts SignalFacts
@@ -36,6 +39,17 @@ type Watcher struct {
 	Housekeeping func(ctx context.Context) error
 }
 
+// conf 返回本轮生效的系统 Agent 配置：有热配置源时先刷新一次。
+func (w *Watcher) conf() config.SystemAgent {
+	if w == nil {
+		return config.SystemAgent{}
+	}
+	if w.ConfigFunc != nil {
+		w.Config = w.ConfigFunc()
+	}
+	return w.Config
+}
+
 func (w *Watcher) now() time.Time {
 	if w != nil && w.Clock != nil {
 		return w.Clock().UTC()
@@ -48,7 +62,7 @@ func (w *Watcher) PollOnce(ctx context.Context) (enqueued, ran int, err error) {
 	if w == nil || w.Store == nil {
 		return 0, 0, fmt.Errorf("systemagent: Watcher 未初始化")
 	}
-	if !w.Config.Enabled {
+	if !w.conf().Enabled {
 		return 0, 0, nil
 	}
 	if w.LeaderLock != nil {
@@ -93,7 +107,7 @@ func (w *Watcher) PollOnce(ctx context.Context) (enqueued, ran int, err error) {
 
 // Run 按 poll_interval 循环直到 ctx 取消。
 func (w *Watcher) Run(ctx context.Context) error {
-	interval := time.Duration(w.Config.PollIntervalSec) * time.Second
+	interval := time.Duration(w.conf().PollIntervalSec) * time.Second
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
@@ -141,11 +155,11 @@ func isLockErr(err error) bool {
 // 这里只负责「检测 + 开一次写事务」，不新增任何动作。
 func (w *Watcher) ingestSignals(ctx context.Context) (int, error) {
 	_ = ctx
-	signals := DetectSystemSignals(w.SignalFacts, w.Config, w.now())
+	signals := DetectSystemSignals(w.SignalFacts, w.conf(), w.now())
 	var jobs []*db.SystemJob
 	err := w.Store.Write(func(tx *sql.Tx) error {
 		var e error
-		jobs, e = EnqueueSignals(tx, w.Config, signals, w.now())
+		jobs, e = EnqueueSignals(tx, w.conf(), signals, w.now())
 		return e
 	})
 	if err != nil {
@@ -186,7 +200,7 @@ func (w *Watcher) ingestBlocked(ctx context.Context) (int, error) {
 
 	enqueued := 0
 	maxID := cursor
-	cooldown := time.Duration(w.Config.CooldownoutSec) * time.Second
+	cooldown := time.Duration(w.conf().CooldownoutSec) * time.Second
 	if cooldown <= 0 {
 		cooldown = 5 * time.Minute
 	}
@@ -203,7 +217,7 @@ func (w *Watcher) ingestBlocked(ctx context.Context) (int, error) {
 			if to != "blocked" {
 				continue
 			}
-			enqueue, escalate := ClassifyBlocked(reason, w.Config)
+			enqueue, escalate := ClassifyBlocked(reason, w.conf())
 			if !enqueue {
 				continue
 			}
@@ -237,7 +251,7 @@ func (w *Watcher) ingestBlocked(ctx context.Context) (int, error) {
 				TriggerEventID: ev.ID,
 				Reason:         reason,
 				Decision:       decision,
-				MaxAttempts:    w.Config.MaxAttempts,
+				MaxAttempts:    w.conf().MaxAttempts,
 			}
 			inserted, e := db.InsertSystemJob(tx, job)
 			if e != nil {
