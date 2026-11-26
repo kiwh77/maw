@@ -25,7 +25,7 @@
 | 富事件流（`/api/feed`、SSE `event` 帧） | 已交付 |
 | vNext 工作台视图（13 个视图、工程与详情双栏、静态导出只读） | 已交付 |
 | 只读观测 API（`timeline` / `activity` / `sessions` / `analytics` / `notifications`、能力探测、SSE 流） | 已交付 |
-| Tauri 桌面壳 + 托盘通知 | [进行中](clients/desktop/README.md) |
+| Tauri 桌面壳 + 托盘通知 | [已交付 — 仅 macOS](clients/desktop/README.md) |
 
 ## 支持范围
 
@@ -41,8 +41,7 @@
 「现在到底开着什么」不要靠文档猜，问运行时：
 
 ```bash
-maw managed status --json    # auto_enabled / platform_supported / limit
-curl -s http://127.0.0.1:7420/api/runtime | jq '.auto_execution.extensions'
+curl -s http://127.0.0.1:7420/api/runtime | jq .
 ```
 
 
@@ -54,8 +53,8 @@ curl -s http://127.0.0.1:7420/api/runtime | jq '.auto_execution.extensions'
 
 ```bash
 # 示例：macOS Apple Silicon
-tar -xzf maw_0.4.0_darwin_arm64.tar.gz
-install -m 755 maw_0.4.0_darwin_arm64 ~/.local/bin/maw
+tar -xzf maw_0.5.0_darwin_arm64.tar.gz
+install -m 755 maw_0.5.0_darwin_arm64 ~/.local/bin/maw
 maw --version
 ```
 
@@ -70,7 +69,7 @@ git clone https://github.com/kiwh77/maw.git
 cd maw
 ./install.sh
 # 安装到 ~/.local/bin/maw（CGO_ENABLED=0）
-maw --version   # 0.4.0+
+maw --version   # 0.5.0+
 ```
 
 或：

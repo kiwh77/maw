@@ -451,7 +451,7 @@ select.theme-select { height: var(--control-height-compact); font-size: 11px; ba
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--muted) 35%, transparent);
 }
 .auto-exec[data-mode="on"] .auto-exec__toggle { color: var(--text); border-color: var(--line-strong); }
-.auto-exec[data-mode="on"] .auto-exec__dot { background: var(--ok, #35c07a); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok, #35c07a) 45%, transparent); }
+.auto-exec[data-mode="on"] .auto-exec__dot { background: var(--ok); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok) 45%, transparent); }
 .auto-exec[data-mode="off"] .auto-exec__dot { background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 .auto-exec[data-mode="blocked"] .auto-exec__toggle { color: color-mix(in srgb, var(--muted) 80%, transparent); }
 

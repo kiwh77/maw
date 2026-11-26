@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
 ### Removed
 
 - **Lead / System / Managed scheduling layer (breaking)**: removed `maw lead`, `maw system`, `maw managed`, `maw node`, and hidden `__runner`; `board --serve` no longer starts a dispatch Leader / system Watcher; deleted `systemagent`, `engine/dispatch`, `runner`, `goal`, `httpapi/systemjobs`, and the Pi runtime. Protocol bumped to **v9** (board is observation-only). Manual claim path and `[identity] leads` / `interrupt` / `task unblock` / `manual-compat` nodes remain.
@@ -14,6 +16,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ### Changed
 
+- **Docs: desktop shell status closed out**: README / ROADMAP / `clients/desktop` mark the Tauri MVP as **shipped on macOS** (hub spawn, board WebView, tray, SSE notifications). Tray notification detail and non-macOS builds stay planned.
+- **Release pipeline**: drop Pi runtime packaging from CI / tag releases (runtime removed with the scheduling layer); ship CLI multi-platform archives only.
 - **Submitted tasks wait for merge without agent_expired→blocked**: `merging`/`in_review` only mark the agent offline (`agent_expired_waiting_merge`).
 - **submit auto-rebases onto main tip** (fixes E313); add `maw sync`. Re-submit from `merging`/`in_review` allowed; must run inside the task worktree.
 - **merge no longer requires MAW_AGENT**; `--task` / `--abort` supported. prune keeps unmerged artifacts (`--force-unmerged` to delete).

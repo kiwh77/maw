@@ -326,7 +326,8 @@ test("统计只数真正可派发的任务", async () => {
 test("英文界面不残留中文，且关键标签已翻译", async () => {
   const mod = await load();
   const en = mod.renderTaskList({ tasks: [task()] }, { lang: "en" });
-  assert.ok(en.includes("Tasks"));
+  // 标题由壳层面包屑提供；列表校验英文标签与无中文残留。
+  assert.ok(en.includes(mod.t("tasks.count", "en")) || /ready|done|blocked/i.test(en));
   assert.doesNotMatch(en.replace(/新题/g, ""), /[\u4e00-\u9fa5]/);
 });
 

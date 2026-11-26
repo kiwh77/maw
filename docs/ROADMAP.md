@@ -10,18 +10,8 @@ maw is a local multi-agent **task hub**. Shipped and planned capabilities:
 - Global state (`~/.maw`) and cross-project board (`maw board` / SSE)
 - Multi-IDE protocol injection (Cursor / Qoder / Trae / CodeBuddy, …) and hooks
 - **i18n (en/zh)**: English-primary docs with Chinese mirrors; board UI language switch; CLI / terminal board / `maw init` protocol / skills catalogs via `MAW_LANG` (default en)
-
-## In progress / partially shipped
-
-### Cross-project agent status aggregation
-
-- CLI: `maw status report` (also `POST http://127.0.0.1:7420/api/status`, loopback only)
-- Incremental: `GET /api/feed?since=`
-- SSE: `/api/events` pushes `event` frames in addition to `board-changed`
-
-### Desktop client (Tauri)
-
-Package the same board as `maw board --serve` into a desktop shell with tray notifications. See `clients/desktop/`.
+- Cross-project agent status aggregation: `maw status report` / `POST /api/status` (loopback), `GET /api/feed?since=`, SSE `/api/events` (`event` + `board-changed`)
+- **Desktop client (Tauri, macOS)**: same board as `maw board --serve` in a desktop shell with system-tray notifications (`clients/desktop/`). No native Linux / Windows claim.
 
 ## Planned
 

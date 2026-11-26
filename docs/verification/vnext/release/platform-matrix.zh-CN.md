@@ -46,8 +46,7 @@
 | `go-core` | `CGO_ENABLED=0 go test ./...` + 覆盖率下限 | 主干正确性；覆盖率下限只许上调 |
 | `go-build` | `CGO_ENABLED=0 go build ./cmd/maw` | 编译失败要单独可见，不能混在测试里 |
 | `frontend-unit` | `node --test internal/board/page.test.cjs` + 各视图／组件的 `*.test.cjs` | 页面装配与视图单测，秒级反馈 |
-| `frontend-browser` | `npm --prefix tests/browser test` | 真实浏览器行为；装 chromium 后跑 |
-| `pi-runtime` | `npm --prefix runtimes/pi ci` + `node --test` + 无密钥 `node src/main.mjs --probe` | Pi SDK 版本与协议自述；ubuntu 与 macOS 双平台矩阵，跑通才算支持 |
+| `frontend-browser` | `npm --prefix tests/browser test`（ubuntu-22.04） | 真实浏览器行为；装 chromium 后跑 |
 | `platform-matrix` | `CGO_ENABLED=0 go test ./tests/platform -count=1` | 交叉编译与平台声明 |
 | `static-export` | `go test ./internal/board -run 'Assets\|Static\|Snapshot\|PageHTML\|Runtime'` | 导出页只读、资源随包发布、`/api/runtime` 如实报 `static_export_managed=false` |
 | `desktop-prereq` | 桌面壳前置条件（Cargo／capabilities／桥接源） | 不跑完整 tauri 构建，但缺件要早失败 |
@@ -55,21 +54,7 @@
 覆盖率下限保持现状（`>= 35`），**不因为新增前端与平台用例而下调**：
 下调会把已有的失败藏起来。
 
-### 4.1 Pi 运行时的平台冒烟
-
-Pi 运行时是 Node 组件（`runtimes/pi`，SDK 精确锁在 `package-lock.json`）。
-它的「支持平台」不按交叉编译声明，只按**实际跑过的 `--probe`** 记录：
-
-| 平台 | 冒烟方式 | 结论 | 证据 |
-| --- | --- | --- | --- |
-| darwin arm64 | 本机 `install.sh` 安装 → `node src/main.mjs --probe` | 通过 | sdk=1.5.2 / node v24.22.2 / protocol=pi-stream-json/1（2026-11-18） |
-| linux x64 | CI `pi-runtime` 任务（ubuntu-latest） | 以 CI 结果为准 | 同一条 `--probe`，不跑模型 |
-| darwin arm64（CI） | CI `pi-runtime` 任务（macos-14） | 以 CI 结果为准 | 同上 |
-| windows | 未冒烟 | **不宣称支持** | 发布清单的 `unverified_platforms` 列出 |
-
-发布产物 `pi-runtime_<ver>.tar.gz` 与 `pi-runtime.json` 一起发布：清单写明
-`contract`／`protocol`／`sdk_version`／`node_engine`／`smoke_platforms`／
-`unverified_platforms`，安装后跑 `--probe` 即可复核。
+> **0.5.0**：Lead／System／Managed／Pi runtime 已拆除；CI 不再跑 `pi-runtime`，Release 只发 CLI 多平台包。
 
 ### 已知红（不掩盖）
 
@@ -83,13 +68,10 @@ CI **不加** `--grep-invert` 绕过它——绕过等于把一条真实失败�
 
 1. `npm --prefix internal/board/web run build` 重建 `assets/dist/board-web.js`，
    否则发布页面仍是旧注册表（当前基线处在这个状态，见 VN-984 报告 §4.3）。
-2. macOS 上跑一次受管闭环（`maw next` → `maw submit` → `maw merge --yes`），
-   确认进程启动、停止与 worktree 回收都正常。
+2. macOS 上跑一次人工闭环（`maw next --claim` → `maw submit` → `maw merge --yes`），
+   确认 worktree 领取与合入回收正常。
 3. 检查 `clients/desktop/src-tauri/capabilities/default.json` 的权限没有回涨
    （只留实际用到的项）。
-4. 干净环境装一次 Pi 运行时：`MAW_SKIP_WEB=1 MAW_BIN_DIR=<tmp> ./install.sh`，
-   确认输出 `Pi runtime ready: sdk=… protocol=pi-stream-json/1`；
-   去掉 node 再跑一次，确认报的是可操作错误（`MAW_SKIP_PI=1` 应有明确退路）。
 
 ## 6. 本卡验收执行记录
 

@@ -22,7 +22,7 @@ Pick a skill by stage; **Read** that skill's `SKILL.md` for details.
 | 4b. **Side attach** | **[maw-status-attach](../maw-status-attach/SKILL.md)** | Work not from next; `maw status report` to the hub |
 | 5. Executing | (this cheat sheet) | progress / submit / merge / board |
 
-Requires **maw CLI ≥ 0.4.0** (persistent worktree per agent; trunk from task list needs **≥ 0.3.9**). Install: repo `./install.sh` → `~/.local/bin/maw`.
+Requires **maw CLI ≥ 0.5.0** (persistent worktree per agent; protocol v9 board is observation-only; trunk from task list needs **≥ 0.3.9**). Install: repo `./install.sh` → `~/.local/bin/maw`.
 
 ## Recommended flow
 

@@ -22,7 +22,7 @@ description: >-
 | 4b. **旁路接入** | **[maw-status-attach](../maw-status-attach/SKILL.md)** | 不走 next 的用户指派/adhoc 工作；`maw status report` 及时告之中枢 |
 | 5. 执行中 | （本页速查） | progress / submit / merge / board；旁路用 status report |
 
-要求 **maw CLI ≥ 0.4.1**（每 Agent 一路径 worktree，合入后删除；主干由清单指定需 **≥ 0.3.9**）。安装：本仓库 `./install.sh` → `~/.local/bin/maw`。
+要求 **maw CLI ≥ 0.5.0**（每 Agent 一路径 worktree，合入后删除；协议 v9 看板仅观测；主干由清单指定需 **≥ 0.3.9**）。安装：本仓库 `./install.sh` → `~/.local/bin/maw`。
 
 ## 推荐全流程
 

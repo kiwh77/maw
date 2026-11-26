@@ -10,18 +10,8 @@ maw 定位为本机多 Agent **任务中枢**。下列为已交付与规划能�
 - 全局状态库（`~/.maw`）与跨工程看板（`maw board` / SSE）
 - 多 IDE 协议注入（Cursor / Qoder / Trae / CodeBuddy 等）与 hooks
 - **中英双语**：英文主文档 + 中文镜像；看板 UI 可切换语言；CLI / 终端看板 / `maw init` 协议 / skills 走 `MAW_LANG`（默认 en）
-
-## 进行中 / 已部分交付
-
-### 跨工程 Agent 状态汇聚
-
-- CLI：`maw status report`（也可 `POST http://127.0.0.1:7420/api/status`，仅 loopback）
-- 增量：`GET /api/feed?since=`
-- SSE：`/api/events` 除 `board-changed` 外推送 `event` 帧
-
-### 桌面客户端（Tauri）
-
-把 `maw board --serve` 同一套看板打成桌面壳，系统托盘做实时通知。见 `clients/desktop/`。
+- 跨工程 Agent 状态汇聚：`maw status report` / `POST /api/status`（仅 loopback）、`GET /api/feed?since=`、SSE `/api/events`（`event` + `board-changed`）
+- **桌面客户端（Tauri，macOS）**：与 `maw board --serve` 同一套看板打成桌面壳，系统托盘实时通知（`clients/desktop/`）。不宣称 Linux／Windows 原生构建。
 
 ## 规划中
 

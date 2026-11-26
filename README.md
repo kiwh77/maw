@@ -25,33 +25,26 @@ Design: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: [docs/ROADMAP.md](docs/ROADMA
 | Rich event feed (`/api/feed`, SSE `event` frames) | Shipped |
 | vNext workbench views (13 views, project/detail panes, read-only static export) | Shipped |
 | Read-only observability API (`timeline` / `activity` / `sessions` / `analytics` / `notifications`, capabilities, SSE stream) | Shipped |
-| Managed single run (`maw managed start`) | Shipped — **macOS only** |
-| Automatic dispatch (`[managed] auto_enabled`) | Off by default, experimental, **macOS only** |
-| Managed model invocation | Not supported (no evidence yet) |
-| Tauri desktop shell + tray notifications | [In progress](clients/desktop/README.md) |
+| Tauri desktop shell + tray notifications | [Shipped — macOS only](clients/desktop/README.md) |
 | English / Chinese docs, board UI, CLI, protocol, skills | Shipped |
 
 ## Support scope
 
-The default mode is the **manual loop**: your agent claims, commits, submits, and merges. Managed execution
-starts processes for you and is only claimed to work on macOS, where native start/stop/reclaim has actually been
-observed. Cross-compiling for Linux or Windows does **not** make managed execution supported there — those
-platforms keep the manual path.
+The default and only mode is the **manual loop**: agents claim, commit, submit, and merge themselves.
+Lead / System / Managed scheduling was removed; the board is observation-only and does not auto-dispatch.
 
 Capability tiers are evidence-based, not aspirational: **verified** (end-to-end evidence), **experimental**
 (interface + unit tests, no end-to-end evidence, needs prerequisites), **unsupported** (no evidence, never
-enabled). A CLI that runs on your machine only proves the manual loop for that source — it does not mean every
-capability for it passed acceptance.
+enabled).
 
 - Operations guide: [docs/operations/vnext/operations-guide.zh-CN.md](docs/operations/vnext/operations-guide.zh-CN.md)
 - Upgrade & migration: [docs/operations/vnext/upgrade-notes.zh-CN.md](docs/operations/vnext/upgrade-notes.zh-CN.md)
 - Platform matrix (single source of truth): [docs/verification/vnext/release/platform-matrix.zh-CN.md](docs/verification/vnext/release/platform-matrix.zh-CN.md)
 
-Ask the runtime instead of the docs what is enabled right now:
+Ask the runtime instead of the docs:
 
 ```bash
-maw managed status --json    # auto_enabled / platform_supported / limit
-curl -s http://127.0.0.1:7420/api/runtime | jq '.auto_execution.extensions'
+curl -s http://127.0.0.1:7420/api/runtime | jq .
 ```
 
 
@@ -63,8 +56,8 @@ Download a `maw_*` archive from [Releases](https://github.com/kiwh77/maw/release
 
 ```bash
 # Example: macOS Apple Silicon
-tar -xzf maw_0.4.0_darwin_arm64.tar.gz
-install -m 755 maw_0.4.0_darwin_arm64 ~/.local/bin/maw
+tar -xzf maw_0.5.0_darwin_arm64.tar.gz
+install -m 755 maw_0.5.0_darwin_arm64 ~/.local/bin/maw
 maw --version
 ```
 
@@ -79,7 +72,7 @@ git clone https://github.com/kiwh77/maw.git
 cd maw
 ./install.sh
 # Installs to ~/.local/bin/maw (CGO_ENABLED=0)
-maw --version   # 0.4.0+
+maw --version   # 0.5.0+
 ```
 
 Or:

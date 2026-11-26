@@ -56,4 +56,6 @@ cargo tauri build
 
 ## 状态
 
-图标与托盘资源已接入；`cargo tauri build` 前需本机安装 Tauri CLI。整体仍是进行中：只在 macOS 上验证过。
+**macOS MVP 已交付**（VN-902）：拉起本机中枢、复用看板页、托盘菜单、SSE／feed 补拉后的系统通知、导航白名单与令牌脱敏。图标与托盘资源已接入。
+
+仍不宣称的范围：Linux／Windows 原生构建；按事件类型细分文案／声音与多显示器窗口记忆（见 ROADMAP「托盘通知细化」）。完整 `cargo tauri build` 需本机安装 Tauri CLI；CI 只跑桌面前置检查，不跑完整打包。
