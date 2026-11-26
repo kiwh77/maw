@@ -102,7 +102,12 @@ maw managed status --json
 # }
 
 maw doctor --json      # 库路径、协议版本、issues
+maw config path --json # 生效的仓外 config.toml（leads 只改这里）
+maw reconcile --json   # 生命周期残留预览；修复见 lifecycle-reconcile
 ```
+
+生命周期变更（改定义／cancel／merge 索引／plan 片段）见
+[lifecycle-reconcile.zh-CN.md](./lifecycle-reconcile.zh-CN.md)；不要手改 `maw.db`。
 
 看板与 API 侧：
 

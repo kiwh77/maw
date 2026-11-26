@@ -239,7 +239,7 @@ func aggregate(tasks []*db.Task, agents []*db.Agent, maxParallel int) Snapshot {
 	case len(by["ready"]) > 0:
 		next = "有可领取任务：在对应工程 maw register && maw next（Worker 名：{应用}-{工程}-{序号}）"
 	case len(by["conflict"]) > 0:
-		next = "有冲突任务：在对应 worktree 修复后 maw submit"
+		next = "有冲突任务：在对应 worktree 修复后 maw submit；或 maw merge --abort --task <id>"
 	case total == 0:
 		next = "尚无任务：进入工程编辑蓝图后执行 maw plan apply --yes"
 	case done == total:

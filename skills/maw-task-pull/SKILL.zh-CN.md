@@ -73,7 +73,7 @@ maw next --agent "$MAW_AGENT" --claim --json   # 确认后再领取（自动 reg
 6. 里程碑：`maw progress -m "..."`；完成：`maw submit`
 
 **令牌**：`maw_pat_…`／`Authorization: Bearer …` 不得写入提示词、TASK.md、提交或事件；只留在本机受权文件或 HTTP 头。  
-**受管**：`maw managed start --task <ID> --node <node>` 是另一条路径（默认关闭自动派发）；人工 next 不得宣称拥有 managed Run。
+无受管／自动派发路径；只走人工 `maw next --claim`。
 
 无 ready：
 

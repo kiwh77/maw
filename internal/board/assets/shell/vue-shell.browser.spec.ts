@@ -56,8 +56,11 @@ test.describe('Vue board shell chrome & nav', () => {
     // 工坊／拓扑仍不进侧栏，改由选中工程后的 toolbar 进入。
     await expect(page.locator('#vnext-nav [data-view="factory"]')).toHaveCount(0)
     await expect(page.locator('#vnext-nav [data-view="topo"]')).toHaveCount(0)
-    await expect(page.locator('#vnext-nav [data-view="nodes"]')).toHaveCount(1)
-    await expect(page.locator('#vnext-nav [data-view="tasks"]')).toHaveCount(1)
+    // 调度层下线：节点 / 受管策略 / 归档单页不再进侧栏。
+    await expect(page.locator('#vnext-nav [data-view="nodes"]')).toHaveCount(0)
+    await expect(page.locator('#vnext-nav [data-view="settings"]')).toHaveCount(0)
+    await expect(page.locator('#vnext-nav [data-view="tasks"]')).toHaveCount(0)
+    await expect(page.locator('#vnext-nav [data-view="projects"]')).toHaveCount(1)
 
     const chrome = await page.evaluate(() => ({
       stats: document.getElementById('stats'),
@@ -83,8 +86,8 @@ test.describe('Vue board shell chrome & nav', () => {
     await page.locator('#f-project').selectOption('p1')
     await expect(page.locator('#columns')).toBeVisible()
 
-    // 切到节点视图：看板容器整个卸载，侧栏工作台不再是当前页。
-    await page.locator('#vnext-nav [data-view="nodes"]').click()
+    // 切到工程视图：看板容器整个卸载，侧栏工作台不再是当前页。
+    await page.locator('#vnext-nav [data-view="projects"]').click()
     await expect(page.locator('#columns')).toHaveCount(0)
 
     // 点工作台回来：地址回到不带 view 参数的默认形态，工程上下文不丢。
@@ -166,17 +169,10 @@ test.describe('Vue board shell chrome & nav', () => {
       percent: 0,
       counts: { ready: 1 },
     })
-    await page.route('**/api/nodes**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ nodes: [] }),
-      })
-    })
     await page.goto('/')
     await page.locator('#f-project').selectOption('p1')
     await expect(page.locator('#stats')).toBeVisible()
-    await page.locator('#vnext-nav [data-view="nodes"]').click()
+    await page.locator('#vnext-nav [data-view="projects"]').click()
     await expect(page.locator('#stats')).toHaveCount(0)
     await expect(page.locator('.toolbar')).toHaveCount(0)
     await expect(page.locator('#vnext-view')).toBeVisible()

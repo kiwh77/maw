@@ -183,6 +183,56 @@ BEGIN SELECT RAISE(ABORT, 'injected: task write failed'); END`,
 	}
 }
 
+// TestExpireKeepsMergingTask 覆盖：submit 后等合入期间 Agent 心跳过期，
+// 只下线 Agent，任务仍保持 merging，不清 Owner/branch（避免随后被 prune 删码）。
+func TestExpireKeepsMergingTask(t *testing.T) {
+	f := newFixture(t)
+	task := f.seedTask("VN-HM", "merging", "cursor-merge-wait", []string{"mod_hm/**"})
+	if err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		got, err := db.GetTask(tx, f.pc.ID(), task.ID)
+		if err != nil || got == nil {
+			return err
+		}
+		got.Branch = "agent/cursor-merge-wait/" + task.ID
+		got.Worktree = ".worktrees/cursor-merge-wait"
+		got.Owner = "cursor-merge-wait"
+		return db.UpsertTask(tx, got)
+	}); err != nil {
+		t.Fatalf("seed merging fields: %v", err)
+	}
+
+	staleAgent(t, f, "cursor-merge-wait", task.ID)
+	if err := expire(t, f); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+
+	got := f.task(task.ID)
+	if got.Status != "merging" {
+		t.Fatalf("merging 不得因心跳过期改状态，得到 %s（%s）", got.Status, got.BlockedReason)
+	}
+	if got.Owner != "cursor-merge-wait" {
+		t.Fatalf("merging 应保留 Owner，得到 %q", got.Owner)
+	}
+	if got.Branch == "" || got.Worktree == "" {
+		t.Fatalf("merging 应保留 branch/worktree，branch=%q worktree=%q", got.Branch, got.Worktree)
+	}
+	var agentStatus string
+	if err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT status FROM agents WHERE id = ?`, "cursor-merge-wait").Scan(&agentStatus)
+	}); err != nil {
+		t.Fatalf("agent status: %v", err)
+	}
+	if agentStatus != "offline" {
+		t.Fatalf("Agent 应下线，实际 %s", agentStatus)
+	}
+	if n := countEvents(t, f, task.ID, "agent_expired_waiting_merge"); n != 1 {
+		t.Fatalf("应写 agent_expired_waiting_merge，实际 %d", n)
+	}
+	if n := countEvents(t, f, task.ID, "status_changed"); n != 0 {
+		t.Fatalf("不应改任务状态，status_changed=%d", n)
+	}
+}
+
 func expire(t *testing.T, f *fixture) error {
 	t.Helper()
 	return db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {

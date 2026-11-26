@@ -83,6 +83,16 @@ func expireStaleAgentsAt(tx *sql.Tx, pc *projCtx, now time.Time) error {
 			if t == nil || t.Owner != agentID || !machine.ActiveOwner[t.Status] {
 				continue
 			}
+			// 已提交等待评审/合入：只下线 Agent，不改任务、不清 Owner/branch/worktree。
+			// 否则 merging→ready 非法会落到 blocked，随后 prune 可能删未合入分支。
+			if waitingHumanMerge(t.Status) {
+				if err := db.AppendEvent(tx, pc.ID(), "system", "agent_expired_waiting_merge", t.ID, map[string]any{
+					"agent": agentID, "status": t.Status, "reason": "awaiting_human_merge_or_review",
+				}); err != nil {
+					return err
+				}
+				continue
+			}
 			run, err := occupyingRun(tx, pc.ID(), t.InstanceID)
 			if err != nil {
 				return err
@@ -158,6 +168,11 @@ func expireStaleAgentsAt(tx *sql.Tx, pc *projCtx, now time.Time) error {
 		}
 	}
 	return nil
+}
+
+// waitingHumanMerge 报告任务是否在等人评审/合入：心跳过期不得打成 blocked。
+func waitingHumanMerge(status string) bool {
+	return status == "merging" || status == "in_review"
 }
 
 // renewAgentFromTaskHeartbeat 若该 Agent 仍持有 ActiveOwner 题，且题 heartbeat

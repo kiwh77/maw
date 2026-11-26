@@ -40,10 +40,10 @@ func segmentZh() string {
 6. 换人或中断前运行 ` + "`maw handoff`" + `；本会话无更多可领任务时再 ` + "`maw unregister`" + `。
 7. 完成 submit 后可自行执行 ` + "`maw merge --yes`" + ` 合入；合入成功删除 Agent worktree 与题分支；禁止直接用 git merge/rebase/push 主干。
 8. 合入完成后若仍有 ready 任务，继续 ` + "`maw next`" + ` 查询、` + "`maw next --claim`" + ` 领取（重建 ` + "`.worktrees/{agent}`" + ` 到主干 tip 后换新题分支）循环直至无题可领或用户叫停。
-9. 全局看板：` + "`maw board --serve`" + `，可按工程/Agent/状态筛选；历史残留可用 ` + "`maw prune`" + ` 清理（仅保留 working / 进行中题占用）。受管执行走 ` + "`maw managed start --task … --node …`" + `（默认关闭自动派发）；与人工 next 分离。
+9. 全局看板：` + "`maw board --serve`" + `，可按工程/Agent/状态筛选；历史残留可用 ` + "`maw prune`" + ` 清理（仅保留 working / 进行中题占用）。看板为观测面，不自动派发。
 10. 出错时先读 maw 输出里的「下一步」提示，不要绕过。
 11. 本机 CLI／会话令牌只允许出现在 Authorization 头或受权文件（权限 0600）；禁止写入提示词、仓库文件、蓝图、URL、日志或看板事件。
-12. 旁路（` + "`maw status report`" + `／观测客户端）只能上报自己的观察与心跳，不得夺取 managed Run 的所有权，也不得把题状态改成 claimed／in_progress；真正领题仍须 ` + "`maw next --claim`" + ` 或受管 start。
+12. 旁路（` + "`maw status report`" + `／观测客户端）只能上报自己的观察与心跳，不得把题状态改成 claimed／in_progress；真正领题仍须 ` + "`maw next --claim`" + `。
 13. 协议段由 ` + "`maw init`" + `／` + "`maw init --upgrade`" + ` 维护；版本落后时先升级，勿手改 ` + "`maw:begin`" + ` 块。
 `
 }
@@ -58,10 +58,10 @@ func segmentEn() string {
 6. Before handoff or interrupt run ` + "`maw handoff`" + `; when this session has no more claimable tasks run ` + "`maw unregister`" + `.
 7. After submit you may ` + "`maw merge --yes`" + `; a successful merge deletes the agent worktree and the task branch. Do not git merge/rebase/push trunk yourself.
 8. After merge, if ready tasks remain, keep querying with ` + "`maw next`" + ` and claiming with ` + "`maw next --claim`" + ` (recreate ` + "`.worktrees/{agent}`" + ` at trunk tip, new task branch) until none left or the user stops you.
-9. Global board: ` + "`maw board --serve`" + ` with project/Agent/status filters; prune leftovers with ` + "`maw prune`" + ` (keeps only working / in-progress task holds). Managed runs use ` + "`maw managed start --task … --node …`" + ` (auto-dispatch off by default); separate from manual next.
+9. Global board: ` + "`maw board --serve`" + ` with project/Agent/status filters; prune leftovers with ` + "`maw prune`" + ` (keeps only working / in-progress task holds). The board is observation-only; it does not auto-dispatch.
 10. On errors, read maw's Next hint first; do not bypass it.
 11. Local CLI/session tokens may appear only in the Authorization header or a 0600 auth file — never in prompts, repo files, blueprints, URLs, logs, or board events.
-12. Bypass clients (` + "`maw status report`" + ` / observers) may publish their own observations and heartbeats only; they must not seize managed Run ownership or flip a task to claimed/in_progress. Real claims still require ` + "`maw next --claim`" + ` or managed start.
+12. Bypass clients (` + "`maw status report`" + ` / observers) may publish their own observations and heartbeats only; they must not flip a task to claimed/in_progress. Real claims still require ` + "`maw next --claim`" + `.
 13. Protocol blocks are maintained by ` + "`maw init`" + ` / ` + "`maw init --upgrade`" + `; if the file version lags, upgrade first — do not hand-edit the ` + "`maw:begin`" + ` block.
 `
 }

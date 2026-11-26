@@ -7,7 +7,7 @@
 /** 分组顺序：先看严重度，同档内再看 kind；未知值落 other，绝不丢题。 */
 export const SEVERITY_ORDER = Object.freeze(['high', 'medium', 'low', 'other'])
 export const KIND_ORDER = Object.freeze([
-  'router-idle', 'blocked', 'conflict', 'retry', 'question', 'stalled', 'dep-wait', 'blocker', 'router',
+  'blocked', 'conflict', 'retry', 'question', 'stalled', 'dep-wait', 'blocker',
 ])
 
 const SEVERITY_LABELS = Object.freeze({
@@ -19,12 +19,10 @@ const KIND_LABELS = Object.freeze({
   zh: {
     blocked: '阻塞', conflict: '冲突', retry: '重试', question: '提问',
     stalled: '停滞', 'dep-wait': '依赖等待', blocker: '阻塞事件',
-    'router-idle': '无人接管', router: 'Router 介入',
   },
   en: {
     blocked: 'Blocked', conflict: 'Conflict', retry: 'Retry', question: 'Question',
     stalled: 'Stalled', 'dep-wait': 'Dependency wait', blocker: 'Blocker',
-    'router-idle': 'Unattended', router: 'Router tasked',
   },
 })
 

@@ -34,6 +34,6 @@ Keep reporting on milestones so the board/desktop tray stay current.
 ## Ownership boundary (hard)
 
 - Bypass / observer reports **only your own** observations and heartbeats.
-- They **must not** seize a **managed Run** (created by `maw managed start` / ClaimExecution): no flipping ownership, no pretending to be the run supervisor.
+- They **must not** flip a task to claimed/in_progress or pretend to own a claim; real claims require `maw next --claim`.
 - Optional `--task T-xxx` associates a heartbeat only; it does **not** claim the task or change status to `claimed` / `in_progress`. Real claim → [maw-task-pull](../maw-task-pull/SKILL.md).
 - **Never** put CLI tokens (`maw_pat_…`, Bearer) into `-m` text, curl bodies that get logged as events, prompts, or the repo. Use `Authorization` header or the local 0600 token file only.

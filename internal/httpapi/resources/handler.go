@@ -42,10 +42,6 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/nodes/{node_id}/probes", a.handleProbeNode)
 	mux.HandleFunc("/api/v1/nodes/{node_id}/checks", a.handleCheckNode)
 	mux.HandleFunc("/api/v1/projects/{project_id}", a.handleProject)
-	// 工作台开关与 Router 配置：一条路径同时支持读与写，
-	// 因为界面需要「打开前先看清为什么不能开」，读与写必须原子同源。
-	mux.HandleFunc("/api/v1/projects/{project_id}/auto-execution", a.handleAutoExecution)
-	mux.HandleFunc("/api/v1/projects/{project_id}/system-agent", a.handleSystemAgent)
 	// 写树兜底：未知写路径回 JSON not_found，不再让 404 落到纯文本页。
 	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "未知的 /api/v1 写路径", nil)

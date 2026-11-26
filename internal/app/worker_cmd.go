@@ -29,7 +29,6 @@ import (
 	"github.com/kiwh77/maw/internal/notifications"
 	"github.com/kiwh77/maw/internal/schedule"
 	"github.com/kiwh77/maw/internal/scope"
-	"github.com/kiwh77/maw/internal/systemagent"
 	"github.com/kiwh77/maw/internal/verification"
 	"github.com/kiwh77/maw/internal/workspace"
 )
@@ -49,6 +48,7 @@ type NextOptions struct {
 	Claim       bool
 	Lane        string
 	ReleaseLane bool
+	TaskID      string // 精确领取指定 ready 题（忽略 lane 队首顺序）
 }
 
 // Next 保留旧的程序化入口：调用方明确要求领取。
@@ -434,6 +434,7 @@ func claimOnce(pc *projCtx, who, wtRel string, opts NextOptions, attempt int) (*
 }
 
 // pickClaimTarget 只读选题：先定 lane（粘性 / --lane / 自动选队），再队内序位选题。
+// 若 opts.TaskID 非空则精确领取该题（仍须 ready 且可激活）。
 // 返回值 boundLane 是选题所用的子队列（领取成功后应粘住）。
 func pickClaimTarget(pc *projCtx, who string, opts NextOptions) (*db.Task, string, error) {
 	var out *db.Task
@@ -446,6 +447,27 @@ func pickClaimTarget(pc *projCtx, who string, opts NextOptions) (*db.Task, strin
 		shared, err := db.ListSharedFiles(tx, pc.ID())
 		if err != nil {
 			return err
+		}
+		if tid := strings.TrimSpace(opts.TaskID); tid != "" {
+			var target *db.Task
+			for _, t := range tasks {
+				if t != nil && t.ID == tid {
+					target = t
+					break
+				}
+			}
+			if target == nil {
+				return i18n.E("err.unknown_task", "next.task_list", tid)
+			}
+			if target.Status != "ready" {
+				return i18n.E("err.next_task_not_ready", "next.board_deps", tid, target.Status)
+			}
+			if !schedule.CanActivateShared(target, tasks, shared) {
+				return i18n.E("err.next_task_blocked", "next.board_deps", tid)
+			}
+			out = target
+			boundLane = schedule.LaneOf(target)
+			return nil
 		}
 		current, err := db.AgentBoundLane(tx, pc.ID(), who)
 		if err != nil {
@@ -770,7 +792,13 @@ func Unregister(cwd, agentFlag string) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	var leasesReleased int
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		n, err := releaseAgentLeasesOnUnregister(tx, pc.ID(), who)
+		if err != nil {
+			return err
+		}
+		leasesReleased = n
 		if err := db.ClearAgentTask(tx, pc.ID(), who); err != nil {
 			return err
 		}
@@ -780,17 +808,22 @@ func Unregister(cwd, agentFlag string) (Result, error) {
 				return err
 			}
 		}
-		_, err := tx.Exec(`UPDATE agents SET status = 'offline', last_seen = ? WHERE project_id = ? AND id = ?`, db.UTCNow(), pc.ID(), who)
+		_, err = tx.Exec(`UPDATE agents SET status = 'offline', last_seen = ? WHERE project_id = ? AND id = ?`, db.UTCNow(), pc.ID(), who)
 		if err != nil {
 			return err
 		}
-		return db.AppendEvent(tx, pc.ID(), who, "agent_unregistered", "", nil)
+		return db.AppendEvent(tx, pc.ID(), who, "agent_unregistered", "", map[string]any{
+			"leases_released": leasesReleased,
+		})
 	})
 	if err != nil {
 		return nil, err
 	}
 	_, _ = refreshBoard(pc)
-	return Result{"ok": true, "agent": who, "status": "offline", "project_id": pc.ID(), "next": i18n.T("next.reregister")}, nil
+	return Result{
+		"ok": true, "agent": who, "status": "offline", "project_id": pc.ID(),
+		"leases_released": leasesReleased, "next": i18n.T("next.reregister"),
+	}, nil
 }
 
 func AgentsList(cwd string) (Result, error) {
@@ -854,6 +887,15 @@ func Progress(cwd, message, taskID string) (Result, error) {
 	return Result{"ok": true, "task_id": taskID, "agent": who, "heartbeat": hb, "project_id": pc.ID(), "next": i18n.T("next.continue_or_submit")}, nil
 }
 
+func canSubmitStatus(status string) bool {
+	switch status {
+	case "in_progress", "self_check", "conflict", "merging", "in_review":
+		return true
+	default:
+		return false
+	}
+}
+
 func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	pc, err := resolveProject(cwd)
 	if err != nil {
@@ -869,9 +911,21 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 			return nil, err
 		}
 	}
-	wt, err := home.WorktreeRoot(cwd)
+	var taskWT string
+	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+		t, e := db.GetTask(tx, pc.ID(), taskID)
+		if e != nil || t == nil {
+			return i18n.E("err.unknown_task", "next.task_list", taskID)
+		}
+		taskWT = t.Worktree
+		return nil
+	})
 	if err != nil {
-		wt = pc.Repo
+		return nil, err
+	}
+	wt, err := requireSubmitWorktree(cwd, pc, taskWT)
+	if err != nil {
+		return nil, err
 	}
 	files, err := gitops.ChangedFiles(wt, pc.Config.Project.MainBranch)
 	if err != nil {
@@ -889,7 +943,7 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 		if err := identity.RequireOwner(who, t); err != nil {
 			return err
 		}
-		if t.Status != "in_progress" && t.Status != "self_check" && t.Status != "conflict" {
+		if !canSubmitStatus(t.Status) {
 			return i18n.E("err.cannot_submit", "next.only_in_progress", taskID, t.Status)
 		}
 		fromStatus = t.Status
@@ -912,6 +966,16 @@ func Submit(cwd, taskID string, dryRun bool) (Result, error) {
 	if err := gitops.AssertWorkingTreeClean(wt); err != nil {
 		return nil, err
 	}
+	// 对齐主干 tip，避免 baseline（当前主干）不是候选祖先（E313）
+	if err := gitops.RebaseOntoMain(wt, pc.Config.Project.MainBranch); err != nil {
+		return nil, err
+	}
+	// rebase 后重算改动集
+	files, err = gitops.ChangedFiles(wt, pc.Config.Project.MainBranch)
+	if err != nil {
+		return nil, err
+	}
+	files = filterScopeFiles(files)
 	// 空 squash 早拒：相对主干无树差异（已合入／空提交／基线错）
 	hasDiff, err := gitops.BranchHasUniqueChanges(wt, pc.Config.Project.MainBranch)
 	if err != nil {
@@ -1266,10 +1330,21 @@ func deliverySubmit(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, erro
 			}
 		}
 		from := t.Status
-		if err := machine.AssertTransition(t.Status, "in_review"); err != nil {
-			return err
+		if t.Status != "in_review" {
+			if err := machine.AssertTransition(t.Status, "in_review"); err != nil {
+				return err
+			}
+			t.Status = "in_review"
+			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "status_changed", in.TaskID, map[string]any{
+				"from": from, "to": "in_review", "files": in.Files,
+				"delivery_id": string(frozen.Delivery.DeliveryID), "strategy": manualCompatStrategy,
+			})
+		} else {
+			_ = db.AppendEvent(tx, pc.ID(), in.Actor, "delivery_resubmitted", in.TaskID, map[string]any{
+				"from": from, "files": in.Files,
+				"delivery_id": string(frozen.Delivery.DeliveryID), "strategy": manualCompatStrategy,
+			})
 		}
-		t.Status = "in_review"
 		t.Heartbeat = db.UTCNow()
 		t.Revision++
 		if t.Extra == nil {
@@ -1278,10 +1353,6 @@ func deliverySubmit(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, erro
 		t.Extra[extraDeliveryID] = string(frozen.Delivery.DeliveryID)
 		t.Extra[extraDeliveryStrat] = manualCompatStrategy
 		t.Extra[extraRunID] = string(frozen.Delivery.RunID)
-		_ = db.AppendEvent(tx, pc.ID(), in.Actor, "status_changed", in.TaskID, map[string]any{
-			"from": from, "to": "in_review", "files": in.Files,
-			"delivery_id": string(frozen.Delivery.DeliveryID), "strategy": manualCompatStrategy,
-		})
 		if in.Auto {
 			if err := machine.AssertTransition(t.Status, "merging"); err != nil {
 				return err
@@ -1748,18 +1819,6 @@ func deliveryBlock(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult, error
 			_ = db.AppendEvent(tx, pc.ID(), "system", "notification_raise_failed", in.TaskID, map[string]any{
 				"error": err.Error(),
 			})
-		}
-		// system_agent 启用时同事务入队（outbox）；游标 watcher 仍会扫 events，靠 UNIQUE 幂等。
-		if pc.Config != nil && pc.Config.SystemAgent.Enabled {
-			enqueue, escalate := systemagent.ClassifyBlocked(in.Message, pc.Config.SystemAgent)
-			if enqueue && systemagent.KindAllowed(systemagent.SystemKindUnblock, pc.Config.SystemAgent, false) {
-				decision := map[string]any{}
-				if escalate {
-					decision["action"] = string(systemagent.ActionEscalateHuman)
-				}
-				_, _ = systemagent.Enqueue(tx, pc.Config.SystemAgent, pc.ID(), systemagent.SystemKindUnblock,
-					t.ID, t.InstanceID, in.Message, decision, false)
-			}
 		}
 		return nil
 	})

@@ -48,7 +48,7 @@ var taskTransitions = map[model.TaskStatus]map[model.TaskStatus]bool{
 	model.TaskInReview: {model.TaskMerging: true, model.TaskInProgress: true, model.TaskBlocked: true,
 		model.TaskCancelled: true},
 	model.TaskMerging: {model.TaskDone: true, model.TaskInProgress: true, model.TaskConflict: true,
-		model.TaskBlocked: true, model.TaskCancelled: true},
+		model.TaskBlocked: true, model.TaskCancelled: true, model.TaskInReview: true}, // in_review：amend 后再交
 	model.TaskConflict: {model.TaskInProgress: true, model.TaskInReview: true, model.TaskReady: true,
 		model.TaskCancelled: true, model.TaskBlocked: true},
 }

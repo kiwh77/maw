@@ -146,6 +146,11 @@ func RequestChange(cwd string, opts RequestChangeOptions) (Result, error) {
 		"ok": true, "task_id": taskID, "added": adds,
 		"write_scope": after, "auto_detected": autoDetected,
 		"project_id": pc.ID(), "task_card_refreshed": refreshed != nil,
+		"blueprint_stale": true,
+		"suggested_followups": []string{
+			i18n.T("note.request_change_blueprint"),
+			"同步仓外 ~/.maw/projects/<id>/blueprint.toml 或 docs 决策文档",
+		},
 		"next": i18n.T("next.after_request_change", taskID),
 		"note": i18n.T("note.request_change_blueprint"),
 	}, nil

@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"github.com/kiwh77/maw/internal/board"
-	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
 	"github.com/kiwh77/maw/internal/engine/claim"
 	"github.com/kiwh77/maw/internal/engine/model"
@@ -26,7 +24,6 @@ import (
 	httpobservability "github.com/kiwh77/maw/internal/httpapi/observability"
 	httpread "github.com/kiwh77/maw/internal/httpapi/read"
 	httpresources "github.com/kiwh77/maw/internal/httpapi/resources"
-	httpsystemjobs "github.com/kiwh77/maw/internal/httpapi/systemjobs"
 	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/localauth"
 	"github.com/kiwh77/maw/internal/projection"
@@ -35,9 +32,10 @@ import (
 
 // BoardFilters 看板筛选条件（空字符串表示不限）
 type BoardFilters struct {
-	Project string
-	Agent   string
-	Status  string
+	Project   string
+	Agent     string
+	Status    string
+	Iteration string // 非空时按 iteration_id 过滤；与 HTTP ?iteration= 对齐
 }
 
 func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, error) {
@@ -59,6 +57,9 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 	if err != nil {
 		return nil, err
 	}
+	if filters.Iteration != "" {
+		snap = snap.WithIteration(filters.Iteration)
+	}
 
 	gdir, err := home.GlobalDir()
 	if err != nil {
@@ -76,9 +77,11 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 	term := board.RenderTerminal(snap)
 	res := Result{
 		"ok": true, "terminal": term, "html": htmlPath, "counts": snap.Counts,
-		"agents": snap.Agents, "projects": snap.Projects,
+		"tasks": snap.Tasks, "agents": snap.Agents, "projects": snap.Projects,
+		"iterations": snap.Iterations,
 		"filters": map[string]string{
 			"project": filters.Project, "agent": filters.Agent, "status": filters.Status,
+			"iteration": filters.Iteration,
 		},
 		"global_db": gdb,
 		"snapshot":  filepath.Join(gdir, "board", "snapshot.json"),
@@ -108,9 +111,6 @@ func Board(cwd string, serve bool, addr string, filters BoardFilters) (Result, e
 		fmt.Println(i18n.T("board.hub_started"), url)
 		fmt.Println(i18n.T("board.data_source"), gdb)
 		fmt.Println(i18n.T("board.ctrl_c"))
-		// 与 system watch 共用同一把 coordinator.lock：auto 派发与系统 Agent
-		// 只由一个 serve 进程推进；第二个 serve 抢不到锁就安分退出。
-		startServeLoops(cwd)
 		select {}
 	}
 	return res, nil
@@ -149,66 +149,27 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 	obsH := obsAPI.Handler()
 
 	// 工程登记写资源：看板「工程」页的移除走这一条，与 CLI 同一套用例。
-	// 节点写口接到本机 nodes 表（通用 local_cli），结束 501。
+	// 节点写口接到本机 nodes 表（人工 claim 的 manual-compat 仍依赖 nodes）。
 	resAPI := &httpresources.API{
-		Projects:      projectRemovalPort{cwd: cwd},
-		Nodes:         hubDBNodes{gdb: gdb},
-		NodeChecks:    hubNodeChecks{gdb: gdb},
-		AutoExecution: autoExecutionPort{},
-		SystemAgent:   systemAgentPort{},
-		Auth:          auth,
+		Projects:   projectRemovalPort{cwd: cwd},
+		Nodes:      hubDBNodes{gdb: gdb},
+		NodeChecks: hubNodeChecks{gdb: gdb},
+		Auth:       auth,
 	}
 	resH := resAPI.Handler()
 
-	// 命令写入口（派发／领取／取消／交付／评审／合入）：派发接到统一领取用例，
-	// 其余端口未接线时回 501，让「路径已挂载」与「用例已接线」分得清。
+	// 命令写入口（领取／取消／交付／评审／合入）：未接线端口回 501。
 	cmdAPI := &httpcommands.API{
 		Dispatcher: hubCommandPorts{cwd: cwd, gdb: gdb, store: store},
 		Auth:       auth,
 	}
 	cmdH := cmdAPI.Handler()
 
-	sysAPI := &httpsystemjobs.API{
-		Store: store,
-		Auth:  auth,
-		Config: func(projectID string) (config.SystemAgent, error) {
-			_ = projectID
-			if pc, err := resolveProject(cwd); err == nil && pc.Config != nil {
-				return pc.Config.SystemAgent, nil
-			}
-			return config.SystemAgent{}, nil
-		},
-	}
-	sysH := sysAPI.Handler()
-
-	// 模型目录只读端点：只列「已登记实测枚举」，不写状态、不探测本机 CLI。
-	// flavor 是发行包维度（cn / intl），不是节点的 cli_flavor（claude / codex）。
-	modelsH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
-			http.Error(w, "method_not_allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		out, err := ListNodeModels(r.URL.Query().Get("flavor"))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(out)
-	})
-
 	v1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/nodes/models" {
-			modelsH.ServeHTTP(w, r)
-			return
-		}
 		kind := v1Route(r.URL.Path)
 		// 写方法落在没有专属写处理者的路径上时分给写树：
 		// 命令资源（dispatches／claims／cancellations…）归 commands，
-		// 其余（任务定义、节点登记、工程移除）归 resources。这样
-		// /api/v1/projects/{id}/dispatches 才有 202 + Location，而不是只读树的纯文本 405。
-		// 事件上报、系统作业、观测确认这些自带写处理者的路径仍按路径先分流。
+		// 其余（任务定义、节点登记、工程移除）归 resources。
 		if kind == v1Read && isV1WriteMethod(r.Method) {
 			if v1CommandPath(r.URL.Path) {
 				cmdH.ServeHTTP(w, r)
@@ -224,32 +185,20 @@ func buildBoardHub(cwd, gdb, gdir string, filters BoardFilters) (board.ServeOpts
 			obsH.ServeHTTP(w, r)
 		case v1Resources:
 			resH.ServeHTTP(w, r)
-		case v1System:
-			sysH.ServeHTTP(w, r)
 		default:
 			readH.ServeHTTP(w, r)
 		}
 	})
 
 	runtimeView := func() map[string]any {
-		view := map[string]any{
-			"scope":   "system",
-			"enabled": false, "managed_execution_limit": 1, "config_version": 1,
+		return map[string]any{
+			"scope":                     "system",
+			"enabled":                   false,
+			"managed_execution_limit":   1,
+			"config_version":            1,
+			"platform_supported":        false,
+			"scheduling_layer_removed":  true,
 		}
-		if pc, err := resolveProject(cwd); err == nil {
-			if rt, err := NewRuntime(pc, ""); err == nil {
-				mv := rt.ManagedView()
-				view["enabled"] = mv["auto_enabled"]
-				view["managed_execution_limit"] = mv["managed_execution_limit"]
-				view["config_version"] = mv["config_version"]
-				view["platform_supported"] = mv["platform_supported"]
-				// 扩展来源与能力的有效开关（按证据分级，配置只能往下压）。
-				ext := rt.ExtensionsView()
-				view["extensions"] = ext["extensions"]
-				view["extended_enabled"] = ext["extended_enabled"]
-			}
-		}
-		return view
 	}
 
 	return board.ServeOpts{
@@ -450,12 +399,12 @@ func ensureHubDispatchNode(store *db.Store, projectID string) error {
 
 // hubDispatchWorkspace 按幂等键派生稳定的独占目录：重放命中同一目录，避免双开。
 func hubDispatchWorkspace(pc *projCtx, idempotencyKey string) (string, error) {
-	rt, err := NewRuntime(pc, "")
+	gdir, err := home.GlobalDir()
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256([]byte(idempotencyKey))
-	dir := filepath.Join(rt.StateDir(), "workspaces", "api-"+hex.EncodeToString(sum[:8]))
+	dir := filepath.Join(gdir, "projects", pc.ID(), "workspaces", "api-"+hex.EncodeToString(sum[:8]))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -685,8 +634,6 @@ const (
 	// v1Resources 是写资源（工程登记移除、任务定义、节点登记等）；
 	// 只读路径上的写方法也归这里（见 v1 装配处的 isV1WriteMethod 分流）。
 	v1Resources
-	// v1System 是系统 Agent 作业队列。
-	v1System
 )
 
 // isV1WriteMethod 判断是否是需要落到写树的方法。
@@ -717,8 +664,6 @@ func v1Route(path string) v1HandlerKind {
 	switch path {
 	case "/api/v1/events", "/api/v1/events/stream", "/api/v1/status-reports":
 		return v1Events
-	case "/api/v1/system-jobs":
-		return v1System
 	case "/api/v1/timeline", "/api/v1/activity", "/api/v1/sessions", "/api/v1/analytics":
 		// 「全部工程」的全局统计路由：没有工程段，不能落到只读任务树。
 		return v1Observability
@@ -728,14 +673,6 @@ func v1Route(path string) v1HandlerKind {
 		// 「工程本身」只有一段：{project_id}。子资源（tasks／nodes／timeline…）
 		// 都带第二段，继续按原规则分流。
 		if rest != "" && !strings.Contains(rest, "/") {
-			return v1Resources
-		}
-		if strings.Contains(path, "/system-jobs") {
-			return v1System
-		}
-		// 工作台开关与 Router 配置是「读写同源」的资源：读也要走同一棵树，
-		// 否则 GET 会落到只读任务树并 404，界面拿不到就绪结论就只能靠猜。
-		if strings.HasSuffix(path, "/auto-execution") || strings.HasSuffix(path, "/system-agent") {
 			return v1Resources
 		}
 		for _, suffix := range observabilitySuffixes {

@@ -38,7 +38,7 @@ After `maw next --claim --json`, preserve in your working notes / TASK context:
 
 **Never** paste CLI tokens (`maw_pat_…`, `Authorization: Bearer …`) into prompts, TASK.md, commits, or status events. Tokens stay in the local auth file / HTTP header only.
 
-Managed runs are a separate path: `maw managed start --task <ID> --node <node>` (auto-dispatch off by default). Do not pretend a manual next owns a managed Run.
+There is no managed/auto-dispatch path; only manual `maw next --claim`.
 
 ## Global board
 

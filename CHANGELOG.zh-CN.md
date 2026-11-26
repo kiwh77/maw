@@ -6,8 +6,16 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **Lead / System / Managed 调度层（破坏性）**：移除 `maw lead`、`maw system`、`maw managed`、`maw node`、隐藏 `__runner`；`board --serve` 不再启动 dispatch Leader / system Watcher；删除 `systemagent`、`engine/dispatch`、`runner`、`goal`、`httpapi/systemjobs` 与 Pi runtime。协议升至 **v9**（看板仅观测；旁路不得改 claimed）。人工主路径与 `[identity] leads` / `interrupt` / `task unblock` / `manual-compat` nodes 保留。
+- **看板调度相关 UI**：侧栏隐藏「节点」「受管策略」；统计页去掉自愈页签；工程编辑去掉自动派发／节点策略字段；移除节点编辑模态与 Router 问题类型词。
+
 ### Changed
 
+- **提交后等待合入不再因心跳过期变 blocked**：`merging`/`in_review` 过期只下线 Agent（`agent_expired_waiting_merge`），保留 Owner/branch。
+- **submit 自动 rebase 到主干 tip**：消灭并行合入后的 E313；并提供 `maw sync`。允许 `merging`/`in_review` 再交；必须在任务 worktree 内执行。
+- **merge 不强制 MAW_AGENT**；支持 `--task` / `--abort`。prune 保护未合入产物（需 `--force-unmerged` 才删）。
 - **隔离合入（脏主干不再拦）**：`maw merge` 在临时 detached worktree 上 squash，再 `update-ref` 推进主干；主检出可有无关未提交改动。`merging` 上 `[conflict]/`[env]`/`[gate]` 的 `maw block` 不再把交付打成 `changes_requested`；`unblock` 回 merging 前校验交付，失效则落到 `in_review`。
 - **空 squash 早拒**：`maw submit` 发现相对主干无树差异时直接失败，避免拖到 merge 才爆。
 - **统计归属**：仅上报轮次、无 `usage_records` 时，来源维度仍按 `source_turns` 出表（`usage_unknown`）。
@@ -16,6 +24,8 @@
 
 ### Added
 
+- `maw lease list` / `maw lease release`；`unblock`/`unregister`/`reconcile` 释放可安全释放的 workspace lease
+- `maw next --task`；`maw board`/`task list --iteration`；board JSON 返回 `tasks`；`maw block --agent`；`maw sync`
 - `maw project add`：显式登记当前 git 仓（只写本机 `~/.maw`，零工程写盘）
 
 

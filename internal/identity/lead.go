@@ -38,7 +38,7 @@ func RequireLead(agent string, cfg *config.Config) error {
 	if IsLead(agent, cfg) {
 		return nil
 	}
-	return fmt.Errorf("agent %q 不是 lead：需在 [identity] leads 中显式登记（lead 是本机能力标记，integrator/reviewer 不会自动成为 lead）", agent)
+	return fmt.Errorf("agent %q 不是 lead：需在仓外 ~/.maw/projects/<id>/config.toml 的 [identity] leads 中显式登记（勿改仓内 .multiagent/config.toml；见 maw config path；lead 是本机能力标记，integrator/reviewer 不会自动成为 lead）", agent)
 }
 
 // 系统 actor：中枢/编排侧。它们不是「人」，不需要在 leads 名单里登记。

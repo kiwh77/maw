@@ -98,7 +98,7 @@ curl -sX POST http://127.0.0.1:7420/api/status \
 
 - **不要**对旁路工作假跑 `maw next` / `maw submit` / `maw merge`（除非用户改口走正式领题）。  
 - **不要**改他人 `.worktrees/*` 或抢已 claimed 题的 write_scope。  
-- **不得夺取 managed Run 所有权**：旁路／观测只能上报自己的观察与心跳；受管执行由 `maw managed start`／ClaimExecution 持有，status report 不能把题改成 claimed／in_progress，也不能冒充 Runner。  
+- **不得把题改成 claimed／in_progress**：旁路／观测只能上报自己的观察与心跳；真正领题须 `maw next --claim`。  
 - 旁路改代码：在用户指定目录改；若工程有协议段，仍尊重主干保护与 hooks。  
 - 若工作后来变成看板正式题：停旁路 → [maw-task-pull](../maw-task-pull/SKILL.md) 领题 → 之后用 `maw progress` / `submit`。  
 - 可选 `--task T-xxx`：仅关联心跳/owner 提示，**不会**把题状态改成 in_progress；真正领题仍须 `maw next --claim`。  

@@ -148,11 +148,15 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			yes, _ := cmd.Flags().GetBool("yes")
 			reset, _ := cmd.Flags().GetBool("reset")
-			printRes(app.PlanApply(args[0], cwd, yes, dryRun, reset))
+			allowRetire, _ := cmd.Flags().GetBool("allow-retire")
+			printRes(app.PlanApplyWith(args[0], cwd, app.PlanApplyOptions{
+				Yes: yes, DryRun: dryRun, Reset: reset, AllowRetire: allowRetire,
+			}))
 		},
 	})
 	planCmd.Commands()[0].Flags().Bool("yes", false, i18n.T("flag.yes"))
 	planCmd.Commands()[0].Flags().Bool("reset", false, i18n.T("flag.reset"))
+	planCmd.Commands()[0].Flags().Bool("allow-retire", false, i18n.T("flag.allow_retire"))
 	planCmd.AddCommand(&cobra.Command{
 		Use:  "check [blueprint]",
 		Args: cobra.ExactArgs(1),
@@ -201,9 +205,10 @@ func main() {
 			claim, _ := cmd.Flags().GetBool("claim")
 			lane, _ := cmd.Flags().GetString("lane")
 			releaseLane, _ := cmd.Flags().GetBool("release-lane")
+			task, _ := cmd.Flags().GetString("task")
 			printRes(app.NextWith(cwd, agent, app.NextOptions{
 				DryRun: dryRun, LogPath: logPath, Claim: claim,
-				Lane: lane, ReleaseLane: releaseLane,
+				Lane: lane, ReleaseLane: releaseLane, TaskID: task,
 			}))
 		},
 	}
@@ -212,6 +217,7 @@ func main() {
 	nextCmd.Flags().Bool("claim", false, i18n.T("flag.claim"))
 	nextCmd.Flags().String("lane", "", i18n.T("flag.lane"))
 	nextCmd.Flags().Bool("release-lane", false, i18n.T("flag.release_lane"))
+	nextCmd.Flags().String("task", "", "精确领取指定 ready 任务")
 	root.AddCommand(nextCmd)
 
 	progCmd := &cobra.Command{
@@ -236,6 +242,17 @@ func main() {
 	}
 	subCmd.Flags().String("task", "", i18n.T("flag.task"))
 	root.AddCommand(subCmd)
+
+	syncCmd := &cobra.Command{
+		Use:   "sync",
+		Short: i18n.T("cmd.sync.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			task, _ := cmd.Flags().GetString("task")
+			printRes(app.Sync(cwd, task))
+		},
+	}
+	syncCmd.Flags().String("task", "", i18n.T("flag.task"))
+	root.AddCommand(syncCmd)
 
 	reqChangeCmd := &cobra.Command{
 		Use:   "request-change",
@@ -277,10 +294,16 @@ func main() {
 		Use: "merge",
 		Run: func(cmd *cobra.Command, args []string) {
 			yes, _ := cmd.Flags().GetBool("yes")
-			printRes(app.Merge(cwd, yes, dryRun))
+			abort, _ := cmd.Flags().GetBool("abort")
+			tasks, _ := cmd.Flags().GetStringSlice("task")
+			printRes(app.MergeWith(cwd, app.MergeOptions{
+				Yes: yes, DryRun: dryRun, TaskIDs: tasks, Abort: abort,
+			}))
 		},
 	}
 	mergeCmd.Flags().Bool("yes", false, i18n.T("flag.yes"))
+	mergeCmd.Flags().Bool("abort", false, "中止 conflict/merge-blocked，退回 in_progress（需 --task）")
+	mergeCmd.Flags().StringSlice("task", nil, "只合入指定任务（可重复）")
 	root.AddCommand(mergeCmd)
 
 	pruneCmd := &cobra.Command{
@@ -290,25 +313,77 @@ func main() {
 			yes, _ := cmd.Flags().GetBool("yes")
 			history, _ := cmd.Flags().GetBool("history")
 			older, _ := cmd.Flags().GetInt("older-than-hours")
+			forceUnmerged, _ := cmd.Flags().GetBool("force-unmerged")
 			if history {
 				printRes(app.CleanupHistory(cwd, app.CleanupHistoryOptions{
 					Yes: yes, DryRun: dryRun, OlderThanHours: older,
 				}))
 				return
 			}
-			printRes(app.Prune(cwd, yes, dryRun))
+			printRes(app.PruneWith(cwd, app.PruneOptions{
+				Yes: yes, DryRun: dryRun, ForceUnmerged: forceUnmerged,
+			}))
 		},
 	}
 	pruneCmd.Flags().Bool("yes", false, i18n.T("flag.yes_delete"))
+	pruneCmd.Flags().Bool("force-unmerged", false, "允许删除 tip 尚未合入主干的 agent 分支")
 	pruneCmd.Flags().Bool("history", false, "清理已消化的历史 block 事件与过期 unblock_assist（先导出 JSON）")
 	pruneCmd.Flags().Int("older-than-hours", 24, "history 模式下终态 unblock_assist 保留龄（小时）")
 	root.AddCommand(pruneCmd)
 
+	reconcileCmd := &cobra.Command{
+		Use:   "reconcile",
+		Short: i18n.T("cmd.reconcile.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			apply, _ := cmd.Flags().GetBool("apply")
+			syncCheckout, _ := cmd.Flags().GetBool("sync-checkout")
+			printRes(app.Reconcile(cwd, app.ReconcileOptions{
+				Apply: apply, SyncCheckout: syncCheckout, DryRun: dryRun,
+			}))
+		},
+	}
+	reconcileCmd.Flags().Bool("apply", false, i18n.T("flag.reconcile_apply"))
+	reconcileCmd.Flags().Bool("sync-checkout", false, i18n.T("flag.sync_checkout"))
+	root.AddCommand(reconcileCmd)
+
+	leaseCmd := &cobra.Command{Use: "lease", Short: i18n.T("cmd.lease.short")}
+	leaseCmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: i18n.T("cmd.lease.list.short"),
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.LeaseList(cwd)) },
+	})
+	leaseReleaseCmd := &cobra.Command{
+		Use:   "release",
+		Short: i18n.T("cmd.lease.release.short"),
+		Run: func(cmd *cobra.Command, args []string) {
+			yes, _ := cmd.Flags().GetBool("yes")
+			leaseID, _ := cmd.Flags().GetString("lease")
+			task, _ := cmd.Flags().GetString("task")
+			printRes(app.LeaseRelease(cwd, app.LeaseReleaseOptions{
+				LeaseID: leaseID, TaskID: task, Yes: yes, DryRun: dryRun,
+			}))
+		},
+	}
+	leaseReleaseCmd.Flags().Bool("yes", false, i18n.T("flag.yes"))
+	leaseReleaseCmd.Flags().String("lease", "", "lease id")
+	leaseReleaseCmd.Flags().String("task", "", i18n.T("flag.task"))
+	leaseCmd.AddCommand(leaseReleaseCmd)
+	root.AddCommand(leaseCmd)
+
+	configCmd := &cobra.Command{Use: "config", Short: i18n.T("cmd.config.short")}
+	configCmd.AddCommand(&cobra.Command{
+		Use:   "path",
+		Short: i18n.T("cmd.config.path.short"),
+		Run:   func(cmd *cobra.Command, args []string) { printRes(app.ConfigPath(cwd)) },
+	})
+	root.AddCommand(configCmd)
+
 	boardFilters := func(cmd *cobra.Command) app.BoardFilters {
 		return app.BoardFilters{
-			Project: mustFlag(cmd, "project"),
-			Agent:   mustFlag(cmd, "agent"),
-			Status:  mustFlag(cmd, "status"),
+			Project:   mustFlag(cmd, "project"),
+			Agent:     mustFlag(cmd, "agent"),
+			Status:    mustFlag(cmd, "status"),
+			Iteration: mustFlag(cmd, "iteration"),
 		}
 	}
 	boardCmd := &cobra.Command{
@@ -325,6 +400,7 @@ func main() {
 	boardCmd.Flags().String("project", "", i18n.T("flag.project"))
 	boardCmd.Flags().String("agent", "", i18n.T("flag.agent_filter"))
 	boardCmd.Flags().String("status", "", i18n.T("flag.status_filter"))
+	boardCmd.Flags().String("iteration", "", "按 iteration_id 过滤")
 	root.AddCommand(boardCmd)
 
 	serveCmd := &cobra.Command{
@@ -339,6 +415,7 @@ func main() {
 	serveCmd.Flags().String("project", "", i18n.T("flag.project"))
 	serveCmd.Flags().String("agent", "", i18n.T("flag.agent_filter"))
 	serveCmd.Flags().String("status", "", i18n.T("flag.status_filter"))
+	serveCmd.Flags().String("iteration", "", "按 iteration_id 过滤")
 	root.AddCommand(serveCmd)
 
 	statusCmd := &cobra.Command{Use: "status", Short: i18n.T("cmd.status.short")}
@@ -511,12 +588,14 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			msg, _ := cmd.Flags().GetString("message")
 			task, _ := cmd.Flags().GetString("task")
-			printRes(app.Block(cwd, msg, task))
+			agent, _ := cmd.Flags().GetString("agent")
+			printRes(app.BlockWith(cwd, msg, task, agent))
 		},
 	}
 	blockCmd.Flags().StringP("message", "m", "", i18n.T("flag.message"))
 	_ = blockCmd.MarkFlagRequired("message")
 	blockCmd.Flags().String("task", "", i18n.T("flag.task"))
+	blockCmd.Flags().String("agent", "", "按 Agent 当前持有题推断 task（主工作区可用）")
 	root.AddCommand(blockCmd)
 
 	// 工程登记管理：看板「工程」页与 CLI 共用同一套移除语义。
@@ -573,26 +652,6 @@ func main() {
 				v, _ := cmd.Flags().GetInt("max-parallel")
 				in.MaxParallel = &v
 			}
-			if cmd.Flags().Changed("auto-enabled") {
-				v, _ := cmd.Flags().GetBool("auto-enabled")
-				in.AutoEnabled = &v
-			}
-			if cmd.Flags().Changed("limit") {
-				v, _ := cmd.Flags().GetInt("limit")
-				in.Limit = &v
-			}
-			if cmd.Flags().Changed("allowed-nodes") {
-				v, _ := cmd.Flags().GetStringSlice("allowed-nodes")
-				in.AllowedNodes = &v
-			}
-			if cmd.Flags().Changed("worker-node") {
-				v, _ := cmd.Flags().GetString("worker-node")
-				in.WorkerNode = &v
-			}
-			if cmd.Flags().Changed("llm-node") {
-				v, _ := cmd.Flags().GetString("llm-node")
-				in.LLMNode = &v
-			}
 			printRes(app.ProjectUpdate(cwd, in))
 		},
 	}
@@ -600,81 +659,23 @@ func main() {
 	projectSetCmd.Flags().String("path", "", "工程存放路径")
 	projectSetCmd.Flags().String("main-branch", "", "主分支")
 	projectSetCmd.Flags().Int("max-parallel", 0, "max_parallel 参考值")
-	projectSetCmd.Flags().Bool("auto-enabled", false, "打开自动派发")
-	projectSetCmd.Flags().Int("limit", 1, "受管执行硬上限")
-	projectSetCmd.Flags().StringSlice("allowed-nodes", nil, "允许自动派发的节点 id")
-	projectSetCmd.Flags().String("worker-node", "", "系统 Agent worker 节点")
-	projectSetCmd.Flags().String("llm-node", "", "系统 Agent llm 节点")
 	projectCmd.AddCommand(projectSetCmd)
 	root.AddCommand(projectCmd)
 
-	nodeCmd := &cobra.Command{Use: "node", Short: "管理本机执行节点（通用 local_cli）"}
-	nodeCmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "列出已登记节点",
-		Run:   func(cmd *cobra.Command, args []string) { printRes(app.NodeList(cwd)) },
-	})
-	nodeRegCmd := &cobra.Command{
-		Use:   "register",
-		Short: "登记通用本地 CLI 节点",
+	taskCmd := &cobra.Command{Use: "task", Short: i18n.T("cmd.task.short")}
+	taskListCmd := &cobra.Command{
+		Use: "list",
 		Run: func(cmd *cobra.Command, args []string) {
-			id, _ := cmd.Flags().GetString("id")
-			label, _ := cmd.Flags().GetString("label")
-			project, _ := cmd.Flags().GetString("project")
-			slots, _ := cmd.Flags().GetInt("slots")
-			cmdJSON, _ := cmd.Flags().GetString("cmd")
-			cliName, _ := cmd.Flags().GetString("cli")
-			modelName, _ := cmd.Flags().GetString("model")
-			permission, _ := cmd.Flags().GetString("permission")
-			system, _ := cmd.Flags().GetBool("system")
-			printRes(app.NodeRegister(cwd, app.NodeRegisterInput{
-				ID: id, Label: label, ProjectID: project, Slots: slots,
-				ArgvJSON: cmdJSON, CLI: cliName, Model: modelName, Permission: permission,
-				System: system, DryRun: dryRun,
+			status, _ := cmd.Flags().GetString("status")
+			iteration, _ := cmd.Flags().GetString("iteration")
+			printRes(app.TaskListWith(cwd, app.TaskListOptions{
+				Status: status, Iteration: iteration,
 			}))
 		},
 	}
-	nodeRegCmd.Flags().String("id", "", "节点 id")
-	nodeRegCmd.Flags().String("label", "", "展示名")
-	nodeRegCmd.Flags().String("project", "", "归属工程 id（默认当前仓）")
-	nodeRegCmd.Flags().Int("slots", 1, "槽位上限")
-	nodeRegCmd.Flags().String("cmd", "", `启动 argv JSON，如 ["/bin/echo","ok"]`)
-	nodeRegCmd.Flags().String("cli", "", "内置 CLI 预设：claude / codex / cursor / traecli / codebuddy / dsh")
-	nodeRegCmd.Flags().String("model", "", "节点默认模型（启动时可用 managed start --model 覆盖）")
-	nodeRegCmd.Flags().String("permission", "safe", "权限档：safe（默认）或 unattended")
-	nodeRegCmd.Flags().Bool("system", false, "标记为系统节点候选")
-	_ = nodeRegCmd.MarkFlagRequired("id")
-	nodeCmd.AddCommand(nodeRegCmd)
-	nodeCmd.AddCommand(&cobra.Command{
-		Use:   "rm [id]",
-		Short: "删除节点登记",
-		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			printRes(app.NodeRemove(cwd, args[0], dryRun))
-		},
-	})
-	nodeModelsCmd := &cobra.Command{
-		Use:   "models",
-		Short: "列出已登记实测的模型枚举（只读）",
-		Run: func(cmd *cobra.Command, args []string) {
-			flavor, _ := cmd.Flags().GetString("flavor")
-			out, err := app.ListNodeModels(flavor)
-			if err != nil {
-				printRes(nil, err)
-				return
-			}
-			printRes(app.Result{
-				"ok": true, "models": out.Models,
-				"flavor": out.Flavor, "has_evidence": out.HasEvidence,
-			}, nil)
-		},
-	}
-	nodeModelsCmd.Flags().String("flavor", "", "发行包维度 cn / intl；留空列全部（不是 claude/codex）")
-	nodeCmd.AddCommand(nodeModelsCmd)
-	root.AddCommand(nodeCmd)
-
-	taskCmd := &cobra.Command{Use: "task", Short: i18n.T("cmd.task.short")}
-	taskCmd.AddCommand(&cobra.Command{Use: "list", Run: func(cmd *cobra.Command, args []string) { printRes(app.TaskList(cwd)) }})
+	taskListCmd.Flags().String("status", "", i18n.T("flag.status_filter"))
+	taskListCmd.Flags().String("iteration", "", "按 iteration_id 过滤")
+	taskCmd.AddCommand(taskListCmd)
 	taskCmd.AddCommand(&cobra.Command{
 		Use:  "show [id]",
 		Args: cobra.ExactArgs(1),
@@ -765,162 +766,6 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) { printRes(app.HookPrePush(cwd, os.Stdin)) },
 	})
 	root.AddCommand(hookCmd)
-
-	managedCmd := &cobra.Command{Use: "managed", Short: i18n.T("cmd.managed.short")}
-	managedStartCmd := &cobra.Command{
-		Use:   "start",
-		Short: i18n.T("cmd.managed.start.short"),
-		Run: func(cmd *cobra.Command, args []string) {
-			task, _ := cmd.Flags().GetString("task")
-			node, _ := cmd.Flags().GetString("node")
-			agent, _ := cmd.Flags().GetString("agent")
-			modelName, _ := cmd.Flags().GetString("model")
-			printRes(app.ManagedStartWithModel(cwd, task, node, agent, modelName, dryRun))
-		},
-	}
-	managedStartCmd.Flags().String("task", "", i18n.T("flag.task"))
-	managedStartCmd.Flags().String("node", "", i18n.T("flag.node"))
-	managedStartCmd.Flags().String("agent", "", i18n.T("flag.agent"))
-	managedStartCmd.Flags().String("model", "", "覆盖节点默认模型（仅本次执行）")
-	managedCmd.AddCommand(managedStartCmd)
-	managedCmd.AddCommand(&cobra.Command{
-		Use:   "status",
-		Short: i18n.T("cmd.managed.status.short"),
-		Run:   func(cmd *cobra.Command, args []string) { printRes(app.ManagedStatus(cwd)) },
-	})
-	root.AddCommand(managedCmd)
-
-	systemCmd := &cobra.Command{Use: "system", Short: i18n.T("cmd.system.short")}
-	systemCmd.AddCommand(&cobra.Command{
-		Use:   "status",
-		Short: i18n.T("cmd.system.status.short"),
-		Run:   func(cmd *cobra.Command, args []string) { printRes(app.SystemStatus(cwd)) },
-	})
-	// system health：与 HTTP /api/v1/system/health 共用 analytics，输出同一份报表。
-	systemHealthCmd := &cobra.Command{
-		Use:   "health",
-		Short: i18n.T("cmd.system.health.short"),
-		Run: func(cmd *cobra.Command, args []string) {
-			start, _ := cmd.Flags().GetString("start")
-			end, _ := cmd.Flags().GetString("end")
-			project, _ := cmd.Flags().GetString("project")
-			printRes(app.SystemHealthReport(cwd, app.SystemHealthInput{
-				ProjectID: project, Start: start, End: end,
-			}))
-		},
-	}
-	systemHealthCmd.Flags().String("project", "", i18n.T("flag.project"))
-	systemHealthCmd.Flags().String("start", "", i18n.T("flag.start"))
-	systemHealthCmd.Flags().String("end", "", i18n.T("flag.end"))
-	systemCmd.AddCommand(systemHealthCmd)
-	systemTriggerCmd := &cobra.Command{
-		Use:   "trigger",
-		Short: i18n.T("cmd.system.trigger.short"),
-		Run: func(cmd *cobra.Command, args []string) {
-			kind, _ := cmd.Flags().GetString("kind")
-			task, _ := cmd.Flags().GetString("task")
-			msg, _ := cmd.Flags().GetString("message")
-			printRes(app.SystemTrigger(cwd, kind, task, msg))
-		},
-	}
-	systemTriggerCmd.Flags().String("kind", "unblock_assist", i18n.T("flag.system_kind"))
-	systemTriggerCmd.Flags().String("task", "", i18n.T("flag.task"))
-	systemTriggerCmd.Flags().StringP("message", "m", "", i18n.T("flag.message"))
-	systemCmd.AddCommand(systemTriggerCmd)
-	systemRunCmd := &cobra.Command{
-		Use:   "run",
-		Short: i18n.T("cmd.system.run.short"),
-		Run: func(cmd *cobra.Command, args []string) {
-			job, _ := cmd.Flags().GetString("job")
-			printRes(app.SystemRun(cwd, job))
-		},
-	}
-	systemRunCmd.Flags().String("job", "", i18n.T("flag.system_job"))
-	systemCmd.AddCommand(systemRunCmd)
-	systemWatchCmd := &cobra.Command{
-		Use:   "watch",
-		Short: i18n.T("cmd.system.watch.short"),
-		Run: func(cmd *cobra.Command, args []string) {
-			once, _ := cmd.Flags().GetBool("once")
-			printRes(app.SystemWatch(cwd, once))
-		},
-	}
-	systemWatchCmd.Flags().Bool("once", false, i18n.T("flag.system_once"))
-	systemCmd.AddCommand(systemWatchCmd)
-	root.AddCommand(systemCmd)
-
-	// lead：显式发起的动作，不打开常驻循环、不改任何默认开关。
-	leadCmd := &cobra.Command{Use: "lead", Short: "lead 显式发起拆解与调度"}
-	leadCmd.AddCommand(&cobra.Command{
-		Use:   "status",
-		Short: "查看系统 Agent 开关与作业队列（只读）",
-		Run:   func(cmd *cobra.Command, args []string) { printRes(app.LeadStatus(cwd)) },
-	})
-	leadDispatchCmd := &cobra.Command{
-		Use:   "dispatch",
-		Short: "显式入队并消费一次 dispatch_ready",
-		Run: func(cmd *cobra.Command, args []string) {
-			msg, _ := cmd.Flags().GetString("message")
-			printRes(app.LeadDispatch(cwd, msg))
-		},
-	}
-	leadDispatchCmd.Flags().StringP("message", "m", "", "调度说明（写入审计）")
-	leadCmd.AddCommand(leadDispatchCmd)
-
-	leadSplitCmd := &cobra.Command{
-		Use:   "split",
-		Short: "把需求拆成任务卡草稿并追加到蓝图（默认只预览 diff）",
-		Run: func(cmd *cobra.Command, args []string) {
-			from, _ := cmd.Flags().GetString("from")
-			brief, _ := cmd.Flags().GetString("brief")
-			lane, _ := cmd.Flags().GetString("lane")
-			ids, _ := cmd.Flags().GetStringSlice("ids")
-			write, _ := cmd.Flags().GetBool("write")
-			printRes(app.LeadSplit(cwd, brief, from, lane, ids, write))
-		},
-	}
-	leadSplitCmd.Flags().String("from", "", "需求文档路径")
-	leadSplitCmd.Flags().String("brief", "", "需求文本（优先于 --from）")
-	leadSplitCmd.Flags().String("lane", "LD", "生成 id 的前缀")
-	leadSplitCmd.Flags().StringSlice("ids", nil, "显式指定前若干张卡的 id")
-	leadSplitCmd.Flags().Bool("write", false, "真正追加写入蓝图（默认只返回 diff，不写盘）")
-	leadCmd.AddCommand(leadSplitCmd)
-
-	leadSignalsCmd := &cobra.Command{
-		Use:   "signals",
-		Short: "检测系统级阻塞信号（默认纯只读）",
-		Run: func(cmd *cobra.Command, args []string) {
-			enq, _ := cmd.Flags().GetBool("enqueue")
-			printRes(app.LeadSignals(cwd, enq))
-		},
-	}
-	leadSignalsCmd.Flags().Bool("enqueue", false, "入队观察作业（需 lead 身份，受 auto_kinds 与升级人工约束）")
-	leadCmd.AddCommand(leadSignalsCmd)
-	addLeadGoalCommands(leadCmd, &cwd, printRes)
-	root.AddCommand(leadCmd)
-
-	// 同一二进制的内部 Runner：参数白名单，隐藏于帮助。
-	runnerCmd := &cobra.Command{
-		Use:    "__runner",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			op, _ := cmd.Flags().GetString("operation")
-			nonce, _ := cmd.Flags().GetString("nonce")
-			stateDir, _ := cmd.Flags().GetString("state-dir")
-			token, _ := cmd.Flags().GetString("token")
-			once, _ := cmd.Flags().GetBool("once")
-			printRes(app.InternalRunner(app.RunnerOpts{
-				OperationID: op, Nonce: nonce, StateDir: stateDir, Token: token, Once: once,
-			}))
-		},
-	}
-	runnerCmd.Flags().String("operation", "", i18n.T("flag.runner_operation"))
-	runnerCmd.Flags().String("nonce", "", i18n.T("flag.runner_nonce"))
-	runnerCmd.Flags().String("state-dir", "", i18n.T("flag.runner_state_dir"))
-	runnerCmd.Flags().String("token", "", i18n.T("flag.runner_token"))
-	runnerCmd.Flags().Bool("once", false, "exit after bootstrap (test)")
-	root.AddCommand(runnerCmd)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

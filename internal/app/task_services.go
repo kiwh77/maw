@@ -12,6 +12,7 @@ import (
 	"github.com/kiwh77/maw/internal/engine/model"
 	"github.com/kiwh77/maw/internal/engine/tasks"
 	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/machine"
 )
 
@@ -369,6 +370,8 @@ func refuseResetIfOccupied(tx *sql.Tx, projectID string) error {
 
 // freezeIfDefinitionChanged 在标题／依赖相对活跃版本有变时追加冻结版本。
 // 普通状态字段更新不冻结；已退役实例跳过。
+// 若该实例仍有 Occupies() 的 Run，拒绝升版——占用中的 Run 钉着旧 version_no，
+// 升 active_version 会导致 submit 时 E330；应 interrupt/交付后开新题号。
 func freezeIfDefinitionChanged(tx *sql.Tx, t *db.Task) error {
 	if t == nil || t.InstanceID == "" {
 		return nil
@@ -384,6 +387,11 @@ func freezeIfDefinitionChanged(tx *sql.Tx, t *db.Task) error {
 	draft := instanceDraftFromTask(t)
 	if definitionUnchanged(cur, draft) {
 		return nil
+	}
+	if occupied, err := db.ActiveRunForInstance(tx, t.InstanceID); err != nil {
+		return err
+	} else if occupied != nil {
+		return i18n.E("err.definition_frozen_while_occupied", "next.definition_frozen_while_occupied", t.ID)
 	}
 	_, err = db.FreezeVersion(tx, t.InstanceID, draft)
 	return err

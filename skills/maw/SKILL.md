@@ -65,6 +65,5 @@ maw project rm <id|name>        # --force clears the live work too
 - After submit you may `maw merge --yes` (deletes worktree + task branch); never git merge/rebase/push trunk yourself
 - Locale: `MAW_LANG=en|zh` (default en) for CLI / protocol inject / terminal board
 - Manual claim keeps **instance / version / source** (`manual_next`); tokens never enter prompts, the repo, or events
-- Bypass (`maw status report`) reports **own** observations only — never seize a **managed Run**
-- Managed path: `maw managed start --task … --node …` (auto off by default); stale protocol → `maw init --upgrade`
-- System agent (off by default): `[system_agent] enabled=true`, then `maw system watch|trigger|run|status`; `task_split` / `ops_run` on the same bus
+- Bypass (`maw status report`) reports **own** observations only — never flip a task to claimed/in_progress
+- Scheduling layer removed: no `maw managed` / `maw system` / `maw lead`; board is observation-only. Stale protocol → `maw init --upgrade`

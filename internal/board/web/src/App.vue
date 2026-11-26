@@ -8,14 +8,11 @@ import AppChrome from './components/AppChrome.vue'
 import ProjectSelect from './components/ProjectSelect.vue'
 import VnextHost from './components/VnextHost.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
-import NodeEditorModal from './components/NodeEditorModal.vue'
 import ProjectEditorModal from './components/ProjectEditorModal.vue'
 import BoardView from './views/BoardView.vue'
 import FactoryView from './views/FactoryView.vue'
 import TopoView from './views/TopoView.vue'
 import ProblemsView from './views/ProblemsView.vue'
-// 统计页承载两个页签：原有「用量统计」+ SH-503「自愈统计」。
-// 注册表不在本卡写域内，因此沿用已注册的 analytics 路由，避免改侧栏/深链。
 import AnalyticsView from './views/AnalyticsView.vue'
 
 const board = useBoard()
@@ -180,7 +177,6 @@ const themeValue = ref(readTheme())
       </div>
     </main>
     <TaskDrawer />
-    <NodeEditorModal />
     <ProjectEditorModal />
   </div>
 </template>

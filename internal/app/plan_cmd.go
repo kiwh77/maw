@@ -37,6 +37,14 @@ func PlanCheck(path, cwd string) (Result, error) {
 	}, nil
 }
 
+// PlanApplyOptions 控制 plan apply 的确认与退役闸。
+type PlanApplyOptions struct {
+	Yes         bool
+	DryRun      bool
+	Reset       bool
+	AllowRetire bool // 允许退役 ≥2 道蓝图外 idle（防片段蓝图误伤）
+}
+
 // PlanApply 把蓝图增量合入工程任务表，并接通稳定任务实例身份。
 //
 // 默认（reset=false）：
@@ -45,9 +53,16 @@ func PlanCheck(path, cwd string) (Result, error) {
 //   - 蓝图内已有 idle（backlog/ready）题：按蓝图字段覆盖并置回 backlog，再 promoteReady
 //   - 蓝图内已有保留态题：只刷新计划字段；定义（标题／依赖）变化时追加冻结版本
 //   - 蓝图外的 idle 题：退役实例并释放别名（不是 soft-cancel）；蓝图外的保留态题：不动
+//   - 将退役 ≥2 道 idle 且未 AllowRetire 时拒绝（疑似片段蓝图）
 //
 // reset=true（--reset）：显式退役全部活跃实例后重建；若仍有占用 Run／进行中任务则拒绝。
 func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
+	return PlanApplyWith(path, cwd, PlanApplyOptions{Yes: yes, DryRun: dryRun, Reset: reset})
+}
+
+// PlanApplyWith 与 PlanApply 相同，额外支持 AllowRetire。
+func PlanApplyWith(path, cwd string, opts PlanApplyOptions) (Result, error) {
+	yes, dryRun, reset, allowRetire := opts.Yes, opts.DryRun, opts.Reset, opts.AllowRetire
 	pc, err := resolveProject(cwd)
 	if err != nil {
 		return nil, err
@@ -223,6 +238,7 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 					_ = db.AppendEvent(tx, pc.ID(), agent, "task_updated", nt.ID, payload)
 				}
 			}
+			var toRetire []*db.Task
 			for _, old := range existing {
 				if inPlan[old.ID] {
 					continue
@@ -236,6 +252,17 @@ func PlanApply(path, cwd string, yes, dryRun, reset bool) (Result, error) {
 					}
 					continue
 				}
+				toRetire = append(toRetire, old)
+			}
+			// 防片段蓝图：一次退役 ≥2 道 idle 必须显式 --allow-retire（--reset 除外）。
+			if !reset && !allowRetire && len(toRetire) >= 2 {
+				ids := make([]string, len(toRetire))
+				for i, t := range toRetire {
+					ids[i] = t.ID
+				}
+				return i18n.E("err.plan_retire_guard", "next.plan_retire_guard", len(toRetire), strings.Join(ids, ", "))
+			}
+			for _, old := range toRetire {
 				if err := retireIdleRemoved(tx, pc.ID(), old, agent); err != nil {
 					return err
 				}

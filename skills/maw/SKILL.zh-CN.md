@@ -83,9 +83,8 @@ maw project rm <id|名称>        # --force 连现场一起清
 - `plan apply` 默认增量合并；`--reset` 才会清空该工程任务表后重灌
 - 题已 `done`/`cancelled` 仍见 dirty 文案：旧版残留；新版 merge/cancel 会清空并归档到 `extra.block_history`。蓝图外 blocked：`maw task cancel <id> --superseded-by <新题>`
 - 人工领取保留 **实例／版本／来源**（`manual_next`）；令牌不得进入提示词、仓库或事件
-- 旁路（`maw status report`）只上报**自己的**观察，**不得夺取 managed Run**
-- 受管路径：`maw managed start --task … --node …`（默认关闭自动派发）；协议落后 → `maw init --upgrade`
-- 系统 Agent（默认关）：`[system_agent] enabled=true` 后，`maw block` 会入队自愈作业；`maw system watch|trigger|run|status`；拆题 `trigger --kind task_split`；运维白名单 `ops_run`
+- 旁路（`maw status report`）只上报**自己的**观察，不得把题改成 claimed／in_progress
+- 调度层已移除：无 `maw managed`／`maw system`／`maw lead`；看板仅观测。协议落后 → `maw init --upgrade`
 
 ## 相关文件
 

@@ -10,11 +10,6 @@ const form = reactive({
   path: '',
   mainBranch: '',
   maxParallel: '',
-  autoEnabled: '' as '' | 'true' | 'false',
-  limit: '',
-  allowedNodes: '',
-  workerNode: '',
-  llmNode: '',
 })
 
 const localError = ref('')
@@ -37,11 +32,6 @@ watch(
     form.path = modal.draft.path
     form.mainBranch = modal.draft.mainBranch
     form.maxParallel = modal.draft.maxParallel
-    form.autoEnabled = modal.draft.autoEnabled
-    form.limit = modal.draft.limit
-    form.allowedNodes = modal.draft.allowedNodes
-    form.workerNode = modal.draft.workerNode
-    form.llmNode = modal.draft.llmNode
     localError.value = ''
   },
   { immediate: true },
@@ -64,21 +54,11 @@ async function submit() {
       : 'max_parallel reference must be a non-negative integer'
     return
   }
-  const limitRaw = String(form.limit || '').trim()
-  if (limitRaw && (!Number.isInteger(Number(limitRaw)) || Number(limitRaw) < 1)) {
-    localError.value = zh.value ? '受管上限必须是正整数' : 'Managed limit must be a positive integer'
-    return
-  }
   await board.saveProjectEdit({
     name: form.name,
     path: form.path,
     mainBranch: form.mainBranch,
     maxParallel: form.maxParallel,
-    autoEnabled: form.autoEnabled,
-    limit: form.limit,
-    allowedNodes: form.allowedNodes,
-    workerNode: form.workerNode,
-    llmNode: form.llmNode,
   })
 }
 </script>
@@ -109,8 +89,8 @@ async function submit() {
         <p class="field-hint">
           {{
             zh
-              ? '基础信息写入中枢登记；执行策略写入工程目录的 config.toml。策略字段留空表示保持当前值。'
-              : 'Basic fields update the hub registration; policy fields write to the project config.toml. Blank policy fields keep current values.'
+              ? '基础信息写入本机中枢登记。'
+              : 'Basic fields update the local hub registration.'
           }}
         </p>
         <p class="field-hint projects-modal__id">ID · {{ projectId }}</p>
@@ -140,52 +120,6 @@ async function submit() {
               type="number"
               min="0"
               :placeholder="zh ? '0 表示未设置' : '0 means unset'"
-            >
-          </label>
-        </div>
-
-        <h3 class="projects-modal__section">{{ zh ? '执行策略（可选）' : 'Execution policy (optional)' }}</h3>
-        <div class="projects-modal__grid">
-          <label class="field">
-            <span class="field-label">{{ zh ? '自动派发' : 'Auto dispatch' }}</span>
-            <select v-model="form.autoEnabled" class="input">
-              <option value="">{{ zh ? '保持不变' : 'Keep unchanged' }}</option>
-              <option value="true">{{ zh ? '开启' : 'On' }}</option>
-              <option value="false">{{ zh ? '关闭' : 'Off' }}</option>
-            </select>
-          </label>
-          <label class="field">
-            <span class="field-label">{{ zh ? '受管执行上限 limit' : 'Managed limit' }}</span>
-            <input
-              v-model="form.limit"
-              class="input"
-              type="number"
-              min="1"
-              :placeholder="zh ? '留空保持不变' : 'Blank keeps current'"
-            >
-          </label>
-          <label class="field projects-modal__full">
-            <span class="field-label">allowed_nodes</span>
-            <input
-              v-model="form.allowedNodes"
-              class="input"
-              :placeholder="zh ? 'node-a, node-b（留空保持不变）' : 'node-a, node-b (blank keeps current)'"
-            >
-          </label>
-          <label class="field">
-            <span class="field-label">{{ zh ? '系统节点 worker_node' : 'System worker_node' }}</span>
-            <input
-              v-model="form.workerNode"
-              class="input"
-              :placeholder="zh ? '留空保持不变' : 'Blank keeps current'"
-            >
-          </label>
-          <label class="field">
-            <span class="field-label">{{ zh ? '系统节点 llm_node' : 'System llm_node' }}</span>
-            <input
-              v-model="form.llmNode"
-              class="input"
-              :placeholder="zh ? '留空保持不变' : 'Blank keeps current'"
             >
           </label>
         </div>

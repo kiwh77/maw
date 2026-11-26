@@ -8,7 +8,9 @@ import (
 	"strings"
 )
 
-// Worker 命名：{应用}-{工程slug}-{序号}，例如 cursor-demo-1
+// Worker 命名：{应用}-{工程slug}-{序号}，例如 cursor-demo-1。
+// 规范序号从 1 起（正则 [1-9][0-9]*）；lead 可用非规范名如 deepseek-niumabuddy-0
+//（register 会提示 agent_name_canonical=false，仍允许注册）。
 var canonicalRE = regexp.MustCompile(`^([a-z][a-z0-9]*)-([a-z][a-z0-9]*)-([1-9][0-9]*)$`)
 
 var nonSlugRE = regexp.MustCompile(`[^a-z0-9]+`)

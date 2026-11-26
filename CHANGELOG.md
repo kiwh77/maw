@@ -6,8 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Removed
+
+- **Lead / System / Managed scheduling layer (breaking)**: removed `maw lead`, `maw system`, `maw managed`, `maw node`, and hidden `__runner`; `board --serve` no longer starts a dispatch Leader / system Watcher; deleted `systemagent`, `engine/dispatch`, `runner`, `goal`, `httpapi/systemjobs`, and the Pi runtime. Protocol bumped to **v9** (board is observation-only). Manual claim path and `[identity] leads` / `interrupt` / `task unblock` / `manual-compat` nodes remain.
+- **Board scheduling UI**: hide Nodes / Managed-settings from the sidebar; drop the Self-heal analytics tab; strip auto-dispatch fields from the project editor; remove the node editor modal and Router problem kinds.
+
 ### Changed
 
+- **Submitted tasks wait for merge without agent_expired→blocked**: `merging`/`in_review` only mark the agent offline (`agent_expired_waiting_merge`).
+- **submit auto-rebases onto main tip** (fixes E313); add `maw sync`. Re-submit from `merging`/`in_review` allowed; must run inside the task worktree.
+- **merge no longer requires MAW_AGENT**; `--task` / `--abort` supported. prune keeps unmerged artifacts (`--force-unmerged` to delete).
 - **Isolated merge (dirty main OK)**: `maw merge` squash-merges in a detached temp worktree and `update-ref`s the trunk; unrelated dirty files on the primary checkout no longer block. `maw block` from `merging` with `[conflict]`/`[env]`/`[gate]` keeps an approved delivery; `unblock` checks readiness and falls back to `in_review` when stale.
 - **Empty-squash reject at submit**: `maw submit` fails early when the task branch has no tree diff vs trunk.
 - **Attribution with turns-only stats**: source-dimension rollups include `source_turns` even when `usage_records` is empty (`usage_unknown`).
@@ -16,6 +24,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ### Added
 
+- `maw lease list` / `maw lease release`; unblock/unregister/reconcile release safe workspace leases
+- `maw next --task`; board/task list `--iteration`; board JSON includes `tasks`; `maw block --agent`; `maw sync`
 - `maw project add`: register the current git repo (writes only under `~/.maw`, zero repo tree writes)
 - **Block-feedback iteration**: `maw block` records `block_category` + followups; board problems show category; `request-change` refreshes `.maw/task.json`/`TASK.md`; blueprint `write_scope` strips Chinese parenthetical fragments; claim-time `required_paths` / acceptance `required:` baseline check; unrelated repo gates become recoverable `blocked` (category gate); queue-stall signal cooldown 30m; `maw prune --history [--yes]` exports then deletes terminal-task →blocked events and stale `unblock_assist` jobs
 - **Workbench "auto run" toggle**: one switch left of "Join" in the toolbar. Enabling writes `managed.auto_enabled` + `managed.auto_select` + `allowed_nodes` + `system_agent.worker_node` atomically and probes the node on the spot; a node that cannot accept work is **rejected with a reason code** instead of producing a switch that silently does nothing. `GET/PUT /api/v1/projects/{id}/auto-execution`.

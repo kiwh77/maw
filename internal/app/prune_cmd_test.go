@@ -90,3 +90,45 @@ func TestPruneKeepsWorkingWorktree(t *testing.T) {
 		t.Fatalf("working worktree should remain: %v", err)
 	}
 }
+
+// TestPruneKeepsBlockedUnmergedTask 覆盖：blocked 题仍挂 branch/worktree 时不得 prune 删掉。
+func TestPruneKeepsBlockedUnmergedTask(t *testing.T) {
+	f := newFixture(t)
+	agentID := "cursor-demo-11"
+	task := f.seedTask("RD-PRUNE", "blocked", "", []string{"mod_prune/**"})
+	wt := filepath.Join(f.repo, ".worktrees", agentID)
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	branch := "agent/" + agentID + "/RD-PRUNE"
+	if err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		got, err := db.GetTask(tx, f.pc.ID(), task.ID)
+		if err != nil || got == nil {
+			return err
+		}
+		got.Branch = branch
+		got.Worktree = ".worktrees/" + agentID
+		got.BlockedReason = "agent_expired:" + agentID
+		got.PrevStatus = "merging"
+		return db.UpsertTask(tx, got)
+	}); err != nil {
+		t.Fatalf("seed blocked: %v", err)
+	}
+
+	res, err := Prune(f.repo, true, false)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	removed, _ := res["removed_worktrees"].([]string)
+	for _, p := range removed {
+		if filepath.Base(p) == agentID {
+			t.Fatalf("blocked unmerged worktree must be kept, removed=%v kept=%v", removed, res["kept_reasons"])
+		}
+	}
+	brRemoved, _ := res["removed_branches"].([]string)
+	for _, b := range brRemoved {
+		if b == branch {
+			t.Fatalf("blocked unmerged branch must be kept, removed=%v", brRemoved)
+		}
+	}
+}

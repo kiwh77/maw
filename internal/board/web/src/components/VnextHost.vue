@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useBoard } from '../stores/board'
 import { findDetail, needsProject, NO_PROJECT_STATE, stateForKind } from '../lib/sources'
-import { renderNodeList, renderNodeDetail } from '../../../assets/views/nodes/nodes-view.mjs'
 import { renderTaskList } from '../../../assets/views/tasks/tasks-view.mjs'
 import { renderRunList, renderRunDetail } from '../../../assets/views/runs/runs-view.mjs'
 import { renderDeliveryList, renderDeliveryDetail } from '../../../assets/views/deliveries/deliveries-view.mjs'
@@ -18,8 +17,18 @@ import { renderAnalytics } from '../../../assets/views/analytics/analytics-view.
 import { renderProblems } from '../../../assets/views/problems/problems-view.mjs'
 import { renderLogs } from '../../../assets/views/logs/logs-view.mjs'
 import { renderProjectList } from '../../../assets/views/projects/projects-view.mjs'
-import { renderSettings, normalizePolicy } from '../../../assets/views/settings/settings-view.mjs'
 import { renderExecution } from '../../../assets/views/execution/execution-view.mjs'
+
+const RETIRED_VIEWS = new Set(['nodes', 'settings'])
+
+function retiredHtml(lang: string) {
+  const zh = lang === 'zh'
+  return `<section class="vnext-status" data-retired="1">
+    <p>${zh
+      ? '该页面随 Lead／System／Managed 调度层一并下线。请用人工 <code>maw next --claim</code> 领题。'
+      : 'This page was retired with the Lead/System/Managed scheduling layer. Use manual <code>maw next --claim</code>.'}</p>
+  </section>`
+}
 
 const props = defineProps<{ viewId: string }>()
 const board = useBoard()
@@ -36,7 +45,6 @@ const timelineSelectedId = ref<string | null>(null)
 const localStates = ref<Record<string, unknown>>({})
 
 const LIST: Record<string, (s: unknown, ctx: unknown) => string> = {
-  nodes: renderNodeList as never,
   tasks: renderTaskList as never,
   runs: renderRunList as never,
   deliveries: renderDeliveryList as never,
@@ -47,35 +55,21 @@ const LIST: Record<string, (s: unknown, ctx: unknown) => string> = {
   problems: renderProblems as never,
   logs: renderLogs as never,
   projects: renderProjectList as never,
-  settings: renderSettings as never,
   execution: renderExecution as never,
 }
 
 const DETAIL: Record<string, (item: unknown, ctx: unknown) => string> = {
-  nodes: renderNodeDetail as never,
   runs: renderRunDetail as never,
   deliveries: renderDeliveryDetail as never,
 }
 
-/**
- * 策略状态归一化（只在渲染前做一次）。
- * 缺失字段保持 null：视图据此写「—」，不替服务端宣布默认值。
- */
-function normalizeSettingsState(viewState: unknown) {
-  const state = viewState as { status?: string; policy?: Record<string, unknown> } | null | undefined
-  if (!state || state.status !== 'ready' || !state.policy) return viewState
-  return { ...state, policy: normalizePolicy(state.policy) }
-}
-
 const listHtml = computed(() => {
   const kind = props.viewId
+  if (RETIRED_VIEWS.has(kind)) return retiredHtml(board.state.lang)
   const render = LIST[kind]
   if (!render) return ''
   let viewState = localStates.value[kind] ?? board.state.viewStates[kind]
   if (needsProject(kind) && !board.state.route.project) viewState = NO_PROJECT_STATE
-  // 策略页的策略字段是 /api/runtime 的原始形状（managed_execution_limit、retention.days）；
-  // 归一化只做一次：概念表与四个输入框读同一份值，回填的才是服务端当前值。
-  if (kind === 'settings') viewState = normalizeSettingsState(viewState)
   const ctx = {
     lang: board.state.lang,
     t: board.t,
@@ -91,10 +85,6 @@ const listHtml = computed(() => {
     // 视图不猜自己有没有写通道：由宿主显式声明，静态导出页自然拿不到按钮。
     canRemove: !board.state.readOnly,
     pendingRemove: board.state.removePending,
-    pendingNodeRemove: board.state.pendingNodeRemove,
-    nodeCheckPending: board.state.nodeCheckPending,
-    nodeFormPreset: board.state.nodeFormPreset,
-    nodeNotice: board.state.removeNotice,
     removeNotice: board.state.removeNotice,
     filters: {
       project: board.state.route.project,
@@ -199,41 +189,7 @@ function onListClick(event: MouseEvent) {
     }
   }
 
-  if (props.viewId === 'nodes') {
-    if (target?.closest?.('[data-node-open-create]')) {
-      board.openCreateNodeModal('custom')
-      return
-    }
-    const editNode = target?.closest?.('[data-node-edit]') as HTMLElement | null
-    if (editNode?.dataset.nodeEdit) {
-      const viewState = board.state.viewStates.nodes as { nodes?: Array<Record<string, unknown>> } | undefined
-      const payload = board.state.payloads.nodes as { nodes?: Array<Record<string, unknown>> } | undefined
-      const list = viewState?.nodes || payload?.nodes || []
-      const row = list.find((n) => String(n.id || n.node_id || '') === editNode.dataset.nodeEdit)
-      if (row) board.openEditNodeModal(row)
-      return
-    }
-    const checkNode = target?.closest?.('[data-node-check]') as HTMLElement | null
-    if (checkNode?.dataset.nodeCheck) {
-      void board.checkNode(checkNode.dataset.nodeCheck)
-      return
-    }
-    const askNode = target?.closest?.('[data-node-remove]') as HTMLElement | null
-    if (askNode?.dataset.nodeRemove) {
-      board.requestRemoveNode(askNode.dataset.nodeRemove)
-      return
-    }
-    const confirmNode = target?.closest?.('[data-node-remove-confirm]') as HTMLElement | null
-    if (confirmNode?.dataset.nodeRemoveConfirm) {
-      void board.removeNode(confirmNode.dataset.nodeRemoveConfirm)
-      return
-    }
-    const cancelNode = target?.closest?.('[data-node-remove-cancel]') as HTMLElement | null
-    if (cancelNode) {
-      board.cancelRemoveNode()
-      return
-    }
-  }
+  if (RETIRED_VIEWS.has(props.viewId)) return
 
   const edit = target?.closest?.('[data-project-edit]') as HTMLElement | null
   if (edit?.dataset.projectEdit) {

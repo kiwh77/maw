@@ -75,10 +75,10 @@ func TestSegmentMentionsTokenAndBypassRules(t *testing.T) {
 			t.Fatalf("segment missing token rule:\n%s", seg[:200])
 		}
 	}
-	if !strings.Contains(en, "managed Run") && !strings.Contains(en, "seize managed") {
+	if !strings.Contains(en, "claimed/in_progress") && !strings.Contains(en, "flip a task") {
 		t.Fatalf("en missing bypass ownership rule:\n%s", en)
 	}
-	if !strings.Contains(zh, "managed Run") && !strings.Contains(zh, "夺取") {
+	if !strings.Contains(zh, "claimed／in_progress") && !strings.Contains(zh, "claimed/in_progress") {
 		t.Fatalf("zh missing bypass ownership rule:\n%s", zh)
 	}
 	if !strings.Contains(en, "manual_next") || !strings.Contains(zh, "manual_next") {
@@ -95,12 +95,12 @@ func TestSegmentEnZhKeyIdeasSynced(t *testing.T) {
 	if enN != 1 || zhN != 1 {
 		t.Fatalf("expected rule 13 in both locales; en=%d zh=%d", enN, zhN)
 	}
-	for _, needle := range []string{"maw managed start", "status report", "write_scope"} {
+	for _, needle := range []string{"observation-only", "status report", "write_scope", "maw next --claim"} {
 		if !strings.Contains(en, needle) {
 			t.Fatalf("en missing %q", needle)
 		}
 	}
-	for _, needle := range []string{"maw managed start", "status report", "write_scope"} {
+	for _, needle := range []string{"观测面", "status report", "write_scope", "maw next --claim"} {
 		if !strings.Contains(zh, needle) {
 			t.Fatalf("zh missing %q", needle)
 		}

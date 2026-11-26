@@ -6,7 +6,7 @@ package version
 var Version = "0.4.1"
 
 const (
-	ProtocolVersion = 8
+	ProtocolVersion = 9
 	// SchemaVersion 跟随迁移台账末端（见 internal/db.LatestVersion）。
 	SchemaVersion = 7
 )

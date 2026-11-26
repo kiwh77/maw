@@ -51,7 +51,11 @@ export const SIDEBAR_HIDDEN_GROUPS = Object.freeze(["flow", "archive"]);
  * 侧栏不展示的视图 id（深链 `?view=` 仍可渲染）。
  * tasks/runs/deliveries 已并入执行视图；不再占控制组菜单。
  */
-export const SIDEBAR_HIDDEN_IDS = Object.freeze(["tasks", "runs", "deliveries"]);
+export const SIDEBAR_HIDDEN_IDS = Object.freeze([
+  "tasks", "runs", "deliveries",
+  // 调度层已移除：节点登记与受管策略页不再进侧栏（深链仍可打开，宿主会提示已下线）。
+  "nodes", "settings",
+]);
 
 /**
  * 侧栏置顶项：不归属任何分组，直接排在导航最前，不带分组标题。

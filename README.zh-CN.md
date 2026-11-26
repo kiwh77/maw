@@ -25,20 +25,14 @@
 | 富事件流（`/api/feed`、SSE `event` 帧） | 已交付 |
 | vNext 工作台视图（13 个视图、工程与详情双栏、静态导出只读） | 已交付 |
 | 只读观测 API（`timeline` / `activity` / `sessions` / `analytics` / `notifications`、能力探测、SSE 流） | 已交付 |
-| 受管单次执行（`maw managed start`） | 已交付 —— **仅 macOS** |
-| 自动派发（`[managed] auto_enabled`） | 默认关闭，实验级，**仅 macOS** |
-| 受管模型调用 | 不支持（暂无实测证据） |
 | Tauri 桌面壳 + 托盘通知 | [进行中](clients/desktop/README.md) |
 
 ## 支持范围
 
-默认模式是**人工闭环**：Agent 自己领题、自己提交、自己合入。受管执行由 maw 替你起进程，
-只在 macOS 上被声称支持——因为原生起停与回收只在那台平台上被实际观测过。
-为 Linux / Windows 交叉编译出二进制**不**代表那里的受管执行可用，那两个平台只保留人工接入。
+默认且唯一模式是**人工闭环**：Agent 自己领题、自己提交、自己合入。Lead / System / Managed 调度层已移除；看板仅作观测，不自动派发。
 
 能力分级看证据，不看愿望：**已验证**（有端到端证据）、**实验**（有接口与单测、缺端到端证据，需满足前置条件）、
-**不支持**（无证据，永不启用）。某个 CLI 能在你这台机器上跑起来，只证明它的人工闭环可用，
-不等于它的全部能力都通过了验收。
+**不支持**（无证据，永不启用）。
 
 - 操作指南：[docs/operations/vnext/operations-guide.zh-CN.md](docs/operations/vnext/operations-guide.zh-CN.md)
 - 升级与迁移：[docs/operations/vnext/upgrade-notes.zh-CN.md](docs/operations/vnext/upgrade-notes.zh-CN.md)
@@ -124,7 +118,7 @@ maw init
 # 编辑 .multiagent/blueprint.toml 后：
 maw plan apply .multiagent/blueprint.toml --yes
 
-maw register          # 如 cursor-demo-1
+maw register          # 规范名 {app}-{project}-{n}，序号从 1 起（如 cursor-demo-1）；lead 可用 -0（非规范，仅警告）
 # 或：export MAW_AGENT=cursor-demo-1
 maw next
 # 进入输出的 worktree，改 write_scope 内文件并 commit

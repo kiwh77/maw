@@ -15,15 +15,11 @@ import activityCSS from '../../assets/views/activity/activity.css?inline'
 import sessionsCSS from '../../assets/views/sessions/sessions.css?inline'
 import analyticsCSS from '../../assets/views/analytics/analytics.css?inline'
 import projectsCSS from '../../assets/views/projects/projects.css?inline'
-import settingsCSS from '../../assets/views/settings/settings.css?inline'
 import executionCSS from '../../assets/views/execution/execution.css?inline'
-import nodesCSS from '../../assets/views/nodes/nodes.css?inline'
 // 依赖可读性样式（BUX-FE-001）：必须走 ?inline 进产物，页面只加载 board-web.js。
 import boardDepsCSS from './board-deps.css?inline'
 // 问题审查视图样式（BUX-FE-002）：同样内联，避免静态导出多一个绝对 CSS 引用。
 import problemsCSS from './problems.css?inline'
-// 自愈统计视图样式（SH-503）：同一内联方式，产物仍只有 board-web.js。
-import systemHealthCSS from './system-health.css?inline'
 import App from './App.vue'
 
 export { Graph } from '@antv/x6'
@@ -48,12 +44,9 @@ export const VNEXT_STYLES = [
   sessionsCSS,
   analyticsCSS,
   projectsCSS,
-  settingsCSS,
   executionCSS,
-  nodesCSS,
   boardDepsCSS,
   problemsCSS,
-  systemHealthCSS,
 ].join('\n')
 
 function injectStyles() {

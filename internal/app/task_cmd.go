@@ -10,7 +10,17 @@ import (
 	"github.com/kiwh77/maw/internal/machine"
 )
 
+// TaskListOptions 过滤任务列表。
+type TaskListOptions struct {
+	Status    string
+	Iteration string
+}
+
 func TaskList(cwd string) (Result, error) {
+	return TaskListWith(cwd, TaskListOptions{})
+}
+
+func TaskListWith(cwd string, opts TaskListOptions) (Result, error) {
 	pc, err := resolveProject(cwd)
 	if err != nil {
 		return nil, err
@@ -21,7 +31,26 @@ func TaskList(cwd string) (Result, error) {
 		tasks, e = db.ListTasks(tx, pc.ID())
 		return e
 	})
-	return Result{"ok": true, "tasks": tasks, "project_id": pc.ID()}, err
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*db.Task, 0, len(tasks))
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		if opts.Status != "" && t.Status != opts.Status {
+			continue
+		}
+		if opts.Iteration != "" && t.IterationID != opts.Iteration {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	return Result{
+		"ok": true, "tasks": filtered, "count": len(filtered), "project_id": pc.ID(),
+		"filters": map[string]string{"status": opts.Status, "iteration": opts.Iteration},
+	}, nil
 }
 
 func TaskShow(cwd, id string) (Result, error) {
@@ -45,13 +74,36 @@ func TaskShow(cwd, id string) (Result, error) {
 }
 
 func Block(cwd, message, taskID string) (Result, error) {
+	return BlockWith(cwd, message, taskID, "")
+}
+
+// BlockWith 支持 --agent：在主工作区按 Agent 持有题推断 task。
+func BlockWith(cwd, message, taskID, agentFlag string) (Result, error) {
 	pc, err := resolveProject(cwd)
 	if err != nil {
 		return nil, err
 	}
-	who, err := identity.Resolve(cwd, "")
+	who, err := identity.Resolve(cwd, agentFlag)
 	if err != nil {
 		return nil, err
+	}
+	if taskID == "" && strings.TrimSpace(agentFlag) != "" {
+		err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
+			tasks, e := db.ListTasks(tx, pc.ID())
+			if e != nil {
+				return e
+			}
+			for _, t := range tasks {
+				if t != nil && t.Owner == who && machine.ActiveOwner[t.Status] {
+					taskID = t.ID
+					return nil
+				}
+			}
+			return i18n.E("err.block_agent_no_task", "next.task_list", who)
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if taskID == "" {
 		taskID, err = inferTaskID(cwd)
@@ -103,8 +155,9 @@ func Unblock(cwd, taskID string) (Result, error) {
 		return nil, err
 	}
 	var (
-		restored string
-		note     string
+		restored       string
+		note           string
+		leasesReleased int
 	)
 	err = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		t, err := db.GetTask(tx, pc.ID(), taskID)
@@ -114,9 +167,17 @@ func Unblock(cwd, taskID string) (Result, error) {
 		if t.Status != "blocked" {
 			return i18n.E("err.cannot_unblock", "next.task_list", taskID, t.Status)
 		}
+		blockedReason := t.BlockedReason
 		prev := t.PrevStatus
+		agentExpired := strings.HasPrefix(strings.ToLower(blockedReason), "agent_expired:")
+		// agent_expired 且无 PrevStatus：禁止静默变 ready 丢 branch/delivery。
 		if prev == "" {
-			prev = "ready"
+			if agentExpired && (t.Branch != "" || t.Worktree != "") {
+				prev = "in_progress"
+				note = "agent_expired_default_in_progress"
+			} else {
+				prev = "ready"
+			}
 		}
 		cat := ""
 		if t.Extra != nil {
@@ -143,10 +204,31 @@ func Unblock(cwd, taskID string) (Result, error) {
 				note = "delivery_not_merge_ready"
 			}
 		}
+		// agent_expired 从 merging/in_review：校验交付后恢复，失效则 in_review。
+		if agentExpired && (prev == "merging" || prev == "in_review") {
+			ready := false
+			if rec, e := latestDelivery(tx, pc.ID(), t); e == nil && rec != nil {
+				if r, e2 := db.DeliveryReadiness(tx, string(rec.Delivery.DeliveryID)); e2 == nil {
+					ready = r.PassingVerification && r.ApprovedReview &&
+						r.StaleVerifications == 0 && !r.ReviewStale
+				}
+			}
+			if prev == "merging" && !ready {
+				target = "in_review"
+				note = "delivery_not_merge_ready"
+			} else {
+				target = prev
+			}
+		}
 		if err := machine.AssertTransition(t.Status, target); err != nil {
 			return err
 		}
 		from := t.Status
+		n, err := releaseTaskLeasesOnUnblock(tx, pc.ID(), t, target, blockedReason)
+		if err != nil {
+			return err
+		}
+		leasesReleased = n
 		t.Status = target
 		t.BlockedReason = ""
 		t.PrevStatus = ""
@@ -155,7 +237,7 @@ func Unblock(cwd, taskID string) (Result, error) {
 			delete(t.Extra, "suggested_followups")
 		}
 		t.Revision++
-		payload := map[string]any{"from": from, "to": target}
+		payload := map[string]any{"from": from, "to": target, "leases_released": n}
 		if note != "" {
 			payload["note"] = note
 		}
@@ -167,12 +249,18 @@ func Unblock(cwd, taskID string) (Result, error) {
 		return nil, err
 	}
 	_, _ = refreshBoard(pc)
-	res := Result{"ok": true, "task_id": taskID, "status": restored, "project_id": pc.ID()}
+	res := Result{
+		"ok": true, "task_id": taskID, "status": restored, "project_id": pc.ID(),
+		"leases_released": leasesReleased,
+	}
 	if note == "delivery_not_merge_ready" {
 		res["next"] = "交付证据已失效；请重新 maw submit 后再 maw merge --yes"
 		res["note"] = note
 	} else if restored == "merging" {
 		res["next"] = "maw merge --yes"
+	} else if note == "agent_expired_default_in_progress" {
+		res["next"] = "已恢复为 in_progress（保留 branch）；继续实现或 maw submit"
+		res["note"] = note
 	}
 	return res, nil
 }

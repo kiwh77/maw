@@ -99,24 +99,7 @@ const state = reactive({
   drawer: null as TaskDrawerSel | null,
   /** 正在等第二次确认的工程 id（两段式移除，避免一次误点就删）。 */
   removePending: '',
-  /** 正在等第二次确认的节点 id。 */
-  pendingNodeRemove: '',
-  /** 节点表单预设：claude / codex / custom。 */
-  nodeFormPreset: 'custom' as 'claude' | 'codex' | 'custom',
-  /** 节点新增／编辑模态；关闭时为 null。 */
-  nodeModal: null as null | {
-    mode: 'create' | 'edit'
-    draft: {
-      id: string
-      name: string
-      entry: string
-      slots: number
-      auto_probe: boolean
-      heartbeat_interval_sec: number
-      default_model: string
-    }
-  },
-  /** 工程编辑模态；关闭时为 null。策略字段快照不回显，留空即「保持不变」。 */
+  /** 工程编辑模态；关闭时为 null。 */
   projectModal: null as null | {
     projectId: string
     draft: {
@@ -124,11 +107,6 @@ const state = reactive({
       path: string
       mainBranch: string
       maxParallel: string
-      autoEnabled: '' | 'true' | 'false'
-      limit: string
-      allowedNodes: string
-      workerNode: string
-      llmNode: string
     }
     baseline: {
       name: string
@@ -139,8 +117,6 @@ const state = reactive({
   },
   /** 移除结果提示；kind=error 时界面必须显式红着说，不能静默。 */
   removeNotice: null as { kind: 'ok' | 'error'; text: string } | null,
-  /** 正在自检的节点 id；非空时该节点按钮进「检测中」并禁用重复点击。 */
-  nodeCheckPending: '',
 })
 
 const sources = createDefaultSources(typeof window !== 'undefined' ? window : null)
@@ -273,161 +249,10 @@ export const boardStore = {
     await boardStore.loadView('projects')
   },
 
-  applyNodePreset(preset: 'claude' | 'codex' | 'custom') {
-    state.nodeFormPreset = preset
-    state.removeNotice = null
-  },
-
-  openCreateNodeModal(preset: 'claude' | 'codex' | 'custom' = 'custom') {
-    const base = {
-      slots: 1,
-      auto_probe: true,
-      heartbeat_interval_sec: 60,
-      default_model: '',
-    }
-    const p =
-      preset === 'claude'
-        ? { ...base, id: 'claude', name: 'Claude Code', entry: 'claude', default_model: 'sonnet' }
-        : preset === 'codex'
-          ? { ...base, id: 'codex', name: 'Codex CLI', entry: 'codex', default_model: 'gpt-5' }
-          : { ...base, id: '', name: '', entry: '' }
-    state.nodeFormPreset = preset
-    state.removeNotice = null
-    state.nodeModal = { mode: 'create', draft: p }
-  },
-
-  openEditNodeModal(node: Record<string, unknown>) {
-    const meta = (node.meta && typeof node.meta === 'object' ? node.meta : {}) as Record<string, unknown>
-    const argv = Array.isArray(meta.argv) ? (meta.argv as unknown[]) : []
-    const entry = String(meta.entry_path || argv[0] || node.entry_path || '').trim()
-    const slotsRaw = (node.slots as { total?: number } | undefined)?.total ?? node.slot_limit ?? 1
-    const interval = Number(meta.heartbeat_interval_sec)
-    state.nodeFormPreset = 'custom'
-    state.removeNotice = null
-    state.nodeModal = {
-      mode: 'edit',
-      draft: {
-        id: String(node.id || node.node_id || '').trim(),
-        name: String(node.name || node.label || '').trim(),
-        entry,
-        slots: Number(slotsRaw) > 0 ? Number(slotsRaw) : 1,
-        auto_probe: meta.auto_probe !== false,
-        heartbeat_interval_sec: interval >= 5 ? interval : 60,
-        default_model: String(meta.default_model || '').trim(),
-      },
-    }
-  },
-
-  closeNodeModal() {
-    state.nodeModal = null
-  },
-
-  requestRemoveNode(nodeId: string) {
-    state.pendingNodeRemove = String(nodeId || '').trim()
-    state.removeNotice = null
-  },
-
-  cancelRemoveNode() {
-    state.pendingNodeRemove = ''
-  },
-
-  /** 节点页登记：写入当前工程（或快照首个工程）。 */
-  async registerNode(input: {
-    id: string
-    name?: string
-    entry: string
-    slots?: number
-    auto_probe?: boolean
-    heartbeat_interval_sec?: number
-    default_model?: string
-  }) {
-    const zh = state.lang === 'zh'
-    let projectId = String(state.route.project || '').trim()
-    if (!projectId) {
-      const first = (state.snapshot?.projects || [])[0]
-      projectId = String(first?.id || '').trim()
-    }
-    if (!projectId) {
-      state.removeNotice = {
-        kind: 'error',
-        text: zh ? '请先在顶栏选择工程，再登记节点' : 'Select a project before registering a node',
-      }
-      return
-    }
-    const outcome = await sources.registerNode(projectId, input)
-    if (!outcome.ok) {
-      state.removeNotice = { kind: 'error', text: removalErrorText(outcome, state.lang) }
-      return
-    }
-    state.removeNotice = {
-      kind: 'ok',
-      text: zh ? `已登记节点 ${input.id}` : `Registered node ${input.id}`,
-    }
-    state.nodeFormPreset = 'custom'
-    state.nodeModal = null
-    await boardStore.loadView('nodes')
-  },
-
-  async removeNode(nodeId: string) {
-    const target = String(nodeId || '').trim()
-    if (!target) return
-    const outcome = await sources.removeNode(target)
-    state.pendingNodeRemove = ''
-    if (!outcome.ok) {
-      state.removeNotice = { kind: 'error', text: removalErrorText(outcome, state.lang) }
-      return
-    }
-    state.removeNotice = {
-      kind: 'ok',
-      text: state.lang === 'zh' ? `已删除节点 ${target}` : `Removed node ${target}`,
-    }
-    await boardStore.loadView('nodes')
-  },
-
-  /**
-   * 「测试环境」：同步跑一次节点 CLI 自检。
-   *
-   * 自检可能持续十几秒，所以先置 pending 让按钮进「检测中」；完成后把
-   * 版本／失败原因写进 removeNotice，并重载节点页以刷新 meta 与四维状态。
-   */
-  async checkNode(nodeId: string) {
-    const target = String(nodeId || '').trim()
-    if (!target || state.nodeCheckPending) return
-    const zh = state.lang === 'zh'
-    state.nodeCheckPending = target
-    state.removeNotice = null
-    const outcome = await sources.checkNode(target)
-    state.nodeCheckPending = ''
-    if (!outcome.ok) {
-      state.removeNotice = { kind: 'error', text: removalErrorText(outcome, state.lang) }
-      return
-    }
-    const report = outcome.report
-    if (report?.ok) {
-      const version = String(report.version || '').trim()
-      state.removeNotice = {
-        kind: 'ok',
-        text: zh
-          ? `${target} 环境正常${version ? ' · ' + version : ''}（${report.latency_ms} ms）`
-          : `${target} environment OK${version ? ' · ' + version : ''} (${report.latency_ms} ms)`,
-      }
-    } else {
-      const reason = String(report?.error || '').trim()
-      state.removeNotice = {
-        kind: 'error',
-        text: zh
-          ? `${target} 环境异常${reason ? '：' + reason : ''}`
-          : `${target} environment failed${reason ? ': ' + reason : ''}`,
-      }
-    }
-    await boardStore.loadView('nodes')
-  },
-
   /**
    * 打开工程编辑模态。
    *
-   * 快照能读到的字段（名称／路径／主分支／max_parallel）直接回填；执行策略
-   * 写在工程 config.toml，快照不回显，所以留空交给用户按需填写。
+   * 快照能读到的字段（名称／路径／主分支／max_parallel）直接回填。
    */
   openEditProjectModal(projectId: string) {
     const target = String(projectId || '').trim()
@@ -453,11 +278,6 @@ export const boardStore = {
         path,
         mainBranch,
         maxParallel: ref > 0 ? String(ref) : '',
-        autoEnabled: '',
-        limit: '',
-        allowedNodes: '',
-        workerNode: '',
-        llmNode: '',
       },
       baseline: { name, path, mainBranch, maxParallel: ref },
     }
@@ -467,22 +287,12 @@ export const boardStore = {
     state.projectModal = null
   },
 
-  /**
-   * 保存工程编辑：只 PATCH 真正改动的字段。
-   *
-   * 未填写的策略字段不进入请求，因此不会被误判成「清空」；主分支／并行数
-   * 未改动时也不会触发 config.toml 回写（工程没初始化时就不会因此报错）。
-   */
+  /** 保存工程编辑：只 PATCH 真正改动的字段。 */
   async saveProjectEdit(draft: {
     name: string
     path: string
     mainBranch: string
     maxParallel: string
-    autoEnabled: string
-    limit: string
-    allowedNodes: string
-    workerNode: string
-    llmNode: string
   }) {
     const modal = state.projectModal
     if (!modal) return
@@ -511,30 +321,6 @@ export const boardStore = {
     if (Number.isFinite(ref) && Math.trunc(ref) !== base.maxParallel) {
       patch.max_parallel = Math.max(0, Math.trunc(ref))
     }
-
-    if (draft.autoEnabled === 'true' || draft.autoEnabled === 'false') {
-      patch.auto_enabled = draft.autoEnabled === 'true'
-    }
-
-    const limitRaw = String(draft.limit || '').trim()
-    if (limitRaw) {
-      const limit = Number(limitRaw)
-      if (Number.isFinite(limit) && limit >= 1) patch.limit = Math.trunc(limit)
-    }
-
-    const nodesRaw = String(draft.allowedNodes || '').trim()
-    if (nodesRaw) {
-      patch.allowed_nodes = nodesRaw
-        .split(/[,，\s]+/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-    }
-
-    const worker = String(draft.workerNode || '').trim()
-    if (worker) patch.worker_node = worker
-
-    const llm = String(draft.llmNode || '').trim()
-    if (llm) patch.llm_node = llm
 
     if (!Object.keys(patch).length) {
       state.projectModal = null
@@ -620,16 +406,6 @@ export const boardStore = {
     state.syncOk = false
     state.subtitle = state.lang === 'zh' ? '离线 / 无法连接' : 'Offline'
     return null
-  },
-
-  /**
-   * 自愈统计（SH-503）单独取数：它不是一个注册视图，挂在上方 analytics 页签里，
-   * 因此不走 loadView 的 viewStates 状态机（那个状态机按 DATA_KINDS 判类型）。
-   */
-  async fetchSystemHealth() {
-    const payload = await sources.systemHealth({ project: state.route.project })
-    state.payloads.system_health = payload
-    return payload
   },
 
   async loadView(kind: string) {

@@ -34,6 +34,7 @@ func TestLegalTransitions(t *testing.T) {
 		{"in_review", "merging"},
 		{"merging", "done"},
 		{"merging", "conflict"},
+		{"merging", "in_review"}, // amend 后再交
 		{"conflict", "ready"},
 	}
 	for _, pair := range legal {
