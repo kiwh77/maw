@@ -275,13 +275,25 @@ func MergeWith(cwd string, opts MergeOptions) (Result, error) {
 			t.Status = "done"
 			finalizeTerminalFields(t) // 清空 blocked_reason/branch/worktree，归档历史
 			t.Revision++
-			_ = db.UpsertTask(tx, t)
-			_ = db.AppendEvent(tx, pc.ID(), who, "merged", tid, map[string]any{
+			if err := db.UpsertTask(tx, t); err != nil {
+				return err
+			}
+			// 终态同事务释放租约：避免 done 后仍占 node_slot/workspace（K-02）。
+			if t.InstanceID != "" {
+				if _, err := releaseInstanceLeasesCounted(tx, pc.ID(), t.InstanceID, "merged"); err != nil {
+					return err
+				}
+			}
+			if err := db.AppendEvent(tx, pc.ID(), who, "merged", tid, map[string]any{
 				"branch": task.Branch, "worktree_kept": false, "worktree_removed": true, "branch_deleted": true,
-			})
-			_ = db.AppendEvent(tx, pc.ID(), who, "status_changed", tid, map[string]any{
+			}); err != nil {
+				return err
+			}
+			if err := db.AppendEvent(tx, pc.ID(), who, "status_changed", tid, map[string]any{
 				"from": from, "to": "done",
-			})
+			}); err != nil {
+				return err
+			}
 			if owner != "" {
 				_ = db.ClearAgentTask(tx, pc.ID(), owner)
 			}

@@ -72,7 +72,9 @@ func NextWith(cwd, agentFlag string, opts NextOptions) (Result, error) {
 		}
 		logPath = abs
 	}
-	who, allocated, nameWarn, err := prepareWorker(pc, cwd, agentFlag)
+	// 预览 / dry-run 只解析身份，不做过期回收与 promote（避免「看一眼」改库，K-12）。
+	maintain := opts.Claim && !opts.DryRun
+	who, allocated, nameWarn, err := prepareWorker(pc, cwd, agentFlag, maintain)
 	if err != nil {
 		return nil, err
 	}
@@ -290,11 +292,12 @@ func (e *claimLostError) Error() string {
 // Is 让 errors.Is(err, errClaimLost) 成立，调用方不必关心持有者细节。
 func (e *claimLostError) Is(target error) bool { return target == errClaimLost }
 
-// prepareWorker 解析身份并做领取前的编排维护：过期心跳下线、backlog→ready 提升。
+// prepareWorker 解析身份；maintain=true 时再做领取前编排维护：过期心跳下线、backlog→ready 提升。
 //
-// 这两步刻意放在领取事务之外：它们是全局维护动作，把一个「可能扫全表」的动作塞进
-// 领取事务会拉长写锁持有时间，让别的 Agent 撞 SQLITE_BUSY。
-func prepareWorker(pc *projCtx, cwd, agentFlag string) (string, bool, string, error) {
+// 维护动作刻意放在领取事务之外：它们是全局维护，把「可能扫全表」塞进领取事务
+// 会拉长写锁，让别的 Agent 撞 SQLITE_BUSY。预览路径必须 maintain=false，否则
+// dry-run／裸 next 会回收 agent、改任务状态（K-12）。
+func prepareWorker(pc *projCtx, cwd, agentFlag string, maintain bool) (string, bool, string, error) {
 	var who string
 	var allocated bool
 	var nameWarn string
@@ -308,7 +311,12 @@ func prepareWorker(pc *projCtx, cwd, agentFlag string) (string, bool, string, er
 			return err
 		}
 		nameWarn = workerNameWarn(who, pc)
-		_ = expireStaleAgents(tx, pc)
+		if !maintain {
+			return nil
+		}
+		if err := expireStaleAgents(tx, pc); err != nil {
+			return err
+		}
 		return promoteReady(tx, pc.ID())
 	})
 	if err != nil {
@@ -1855,22 +1863,11 @@ func deliveryMergeRecord(pc *projCtx, in deliveryCaseInput) (deliveryCaseResult,
 		if _, err := db.UpdateDeliveryManifest(tx, d); err != nil {
 			return err
 		}
-		// 释放占用：产物已冻结且进程已停。
-		if runID := extraString(t, extraRunID); runID != "" {
-			if run, _ := db.GetRun(tx, runID); run != nil {
-				for _, l := range run.Leases {
-					if l.Released {
-						continue
-					}
-					cond := db.ReleaseCondition{}
-					switch l.Kind {
-					case model.LeaseWorkspace:
-						cond.DeliveryFrozen = true
-					case model.LeaseNodeSlot:
-						cond.ProcessStopConfirmed = true
-					}
-					_ = db.ReleaseLease(tx, string(l.LeaseID), run.Generation, "merged", cond)
-				}
+		// 按实例释放 resource_leases（勿只扫 run.Leases 快照：快照与表可能脱节，
+		// 且旧路径常吞掉 ReleaseLease 错误，留下 completed 仍占槽的 terminal_leak）。
+		if t.InstanceID != "" {
+			if _, err := releaseInstanceLeasesCounted(tx, pc.ID(), t.InstanceID, "merged"); err != nil {
+				return err
 			}
 		}
 		return nil

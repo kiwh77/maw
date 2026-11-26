@@ -261,6 +261,64 @@ func asInt(v any) (int, bool) {
 	}
 }
 
+// TestMergeDoneReleasesActiveLeases 合入 done 后 resource_leases 必须清空（K-02）。
+func TestMergeDoneReleasesActiveLeases(t *testing.T) {
+	f := newFixture(t)
+	const id = "LF-LEASE"
+	task := f.seedTask(id, "ready", "", []string{"mod_lease/**"})
+	_ = os.MkdirAll(filepath.Join(f.repo, "mod_lease"), 0o755)
+	t.Setenv("MAW_AGENT", "cursor-lf-lease")
+	if _, err := Next(f.repo, "cursor-lf-lease", false, ""); err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	task = f.task(id)
+	if n := activeLeaseCount(t, f, task.InstanceID); n < 1 {
+		t.Fatalf("领取后应有租约，得到 %d", n)
+	}
+	wt := filepath.Join(f.repo, ".worktrees", "cursor-lf-lease")
+	writeAndCommit(t, wt, "mod_lease/a.txt", "a\n", "lease")
+	if _, err := Submit(wt, id, false); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, err := Merge(f.repo, true, false); err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if f.task(id).Status != "done" {
+		t.Fatalf("want done, got %s", f.task(id).Status)
+	}
+	if n := activeLeaseCount(t, f, task.InstanceID); n != 0 {
+		t.Fatalf("合入后仍有 %d 条未释放租约", n)
+	}
+}
+
+// TestNextPreviewDoesNotExpireStaleAgents 裸 next／dry-run 不得回收过期 agent（K-12）。
+func TestNextPreviewDoesNotExpireStaleAgents(t *testing.T) {
+	f := newFixture(t)
+	held := f.seedTask("LF-PREV-HELD", "in_progress", "cursor-stale-prev", []string{"mod_prev_held/**"})
+	f.seedTask("LF-PREV-READY", "ready", "", []string{"mod_prev_ready/**"})
+	staleAgent(t, f, "cursor-stale-prev", held.ID)
+
+	t.Setenv("MAW_AGENT", "cursor-viewer")
+	if _, err := NextWith(f.repo, "cursor-viewer", NextOptions{Claim: false}); err != nil {
+		t.Fatalf("preview next: %v", err)
+	}
+	var status string
+	if err := db.WithTx(f.pc.GlobalDB, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT status FROM agents WHERE id = ?`, "cursor-stale-prev").Scan(&status)
+	}); err != nil {
+		t.Fatalf("agent status: %v", err)
+	}
+	if status != "working" {
+		t.Fatalf("预览不得过期其它 agent，实际 status=%s", status)
+	}
+	if got := f.task(held.ID); got.Status != "in_progress" || got.Owner != "cursor-stale-prev" {
+		t.Fatalf("预览不得改占用中任务，status=%s owner=%s", got.Status, got.Owner)
+	}
+	if n := countEventsByType(t, f, "agent_expired"); n != 0 {
+		t.Fatalf("预览不得写 agent_expired，实际 %d", n)
+	}
+}
+
 // TestPlanApplyRetireGuard 片段蓝图一次退役 ≥2 道 idle 必须显式 AllowRetire。
 func TestPlanApplyRetireGuard(t *testing.T) {
 	f := newFixture(t)

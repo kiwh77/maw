@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 - **Lead / System / Managed scheduling layer (breaking)**: removed `maw lead`, `maw system`, `maw managed`, `maw node`, and hidden `__runner`; `board --serve` no longer starts a dispatch Leader / system Watcher; deleted `systemagent`, `engine/dispatch`, `runner`, `goal`, `httpapi/systemjobs`, and the Pi runtime. Protocol bumped to **v9** (board is observation-only). Manual claim path and `[identity] leads` / `interrupt` / `task unblock` / `manual-compat` nodes remain.
 - **Board scheduling UI**: hide Nodes / Managed-settings from the sidebar; drop the Self-heal analytics tab; strip auto-dispatch fields from the project editor; remove the node editor modal and Router problem kinds.
+- **Git hook subsystem**: delete unused `internal/hooks`, hidden `maw hook pre-commit|pre-push`, and related i18n (init already stopped installing hooks under out-of-tree attach).
 
 ### Changed
 
