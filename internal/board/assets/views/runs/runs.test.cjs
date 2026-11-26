@@ -244,8 +244,10 @@ test("列表把三层状态并列显示，任一列都不替其他列下结论",
 
 test("英文界面不残留中文", async () => {
   const mod = await load();
-  const en = mod.renderRunList({ runs: [run()] }, { lang: "en" });
-  assert.ok(en.includes("Runs"));
+  const sample = run();
+  const en = mod.renderRunList({ runs: [sample] }, { lang: "en" });
+  // 标题由壳层面包屑提供；列表至少保留 run id，且无中文残留。
+  assert.ok(en.includes(sample.run_id || sample.id || "run_"));
   assert.doesNotMatch(en, /[\u4e00-\u9fa5]/);
 });
 
