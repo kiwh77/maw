@@ -89,7 +89,8 @@ jobs:
 
   frontend-browser:
     name: 浏览器验收
-    runs-on: ubuntu-latest
+    # Playwright Chromium 尚不支持部分新 ubuntu-latest 镜像（如 26.04）；钉在 22.04。
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

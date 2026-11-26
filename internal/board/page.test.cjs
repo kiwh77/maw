@@ -344,11 +344,13 @@ test('VN-704 注册表同时登记 legacy 与 vnext 视图且分组稳定', asyn
   assert.equal(sidebarIds.includes('board'), false, '置顶项不再重复出现在分组里');
   assert.equal(sidebarIds.includes('factory'), false);
   assert.equal(sidebarIds.includes('tasks'), false, 'archive 深链不进侧栏');
-  assert.equal(sidebarIds.includes('nodes'), true, '节点在设置组');
+  assert.equal(sidebarIds.includes('nodes'), false, '节点已从侧栏隐藏（调度层下线）');
+  assert.equal(sidebarIds.includes('settings'), false, '受管策略已从侧栏隐藏');
+  assert.equal(sidebarIds.includes('projects'), true);
   assert.equal(sidebarIds.includes('problems'), true);
   assert.equal(sidebarIds.includes('logs'), true);
-  // 统计 6 + 设置 3（projects/nodes/settings）
-  assert.equal(sidebarIds.length, 9);
+  // 统计 6 + 设置 1（projects）
+  assert.equal(sidebarIds.length, 7);
 });
 
 test('VN-704 路由保留旧工程锚点并让 vnext 视图可往返', async () => {
