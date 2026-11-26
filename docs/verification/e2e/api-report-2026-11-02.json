@@ -1,0 +1,605 @@
+{
+  "base": "http://127.0.0.1:7421",
+  "live_base": "http://127.0.0.1:7420",
+  "live_db": "/Users/wuhao/.maw/maw.db",
+  "total": 64,
+  "passed": 63,
+  "failed": 1,
+  "p0_failed": 0,
+  "elapsed_sec": 22.5,
+  "live_before": {
+    "api": {
+      "total": 421,
+      "updated_at": "2026-11-02 16:16:06",
+      "status": 200
+    },
+    "db_counts": {
+      "task_instances": 451,
+      "events": 7364,
+      "agents": 96,
+      "projects": 9
+    },
+    "db_file": {
+      "size": 10584064,
+      "mtime": 1793607198
+    }
+  },
+  "results": [
+    {
+      "id": "A-01",
+      "level": "P0",
+      "name": "GET / 返回可用的应用外壳",
+      "ok": true,
+      "detail": "html 29786 bytes",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-02",
+      "level": "P0",
+      "name": "前端 bundle 可加载且不缓存",
+      "ok": true,
+      "detail": "1415784 bytes",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-03",
+      "level": "P1",
+      "name": "静态目录不可列举、缺失资源 404",
+      "ok": true,
+      "detail": "{'/assets/': 404, '/assets/nope.js': 404, '/assets/../page.html': 404}",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-04",
+      "level": "P2",
+      "name": "未知路径 404",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-05",
+      "level": "P1",
+      "name": "snapshot.json 兼容跳转",
+      "ok": true,
+      "detail": "307 -> /api/board?",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-06",
+      "level": "P0",
+      "name": "/api/board 字段与统计不变量",
+      "ok": true,
+      "detail": "total=420 done=376 active=3",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-07",
+      "level": "P0",
+      "name": "project 过滤与回显",
+      "ok": true,
+      "detail": "project total=41",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-08",
+      "level": "P1",
+      "name": "agent 过滤",
+      "ok": true,
+      "detail": "agent=classpal-h5-in-app-1 total=3",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-09",
+      "level": "P1",
+      "name": "status 过滤",
+      "ok": true,
+      "detail": "status=done total=376",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-10",
+      "level": "P1",
+      "name": "project+status 组合过滤",
+      "ok": true,
+      "detail": "total=41",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-11",
+      "level": "P1",
+      "name": "未知工程返回空集而非全量",
+      "ok": true,
+      "detail": "tasks_type=NoneType",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-12",
+      "level": "P2",
+      "name": "只读端点拒绝非 GET",
+      "ok": true,
+      "detail": "POST /api/board 返回 200，未限制方法也未声明（契约未规定，属宽松行为）",
+      "skipped": false,
+      "warn": true
+    },
+    {
+      "id": "A-13",
+      "level": "P1",
+      "name": "/api/task 缺 id 返回 400",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-14",
+      "level": "P1",
+      "name": "/api/task 未知 id 返回 404",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-15",
+      "level": "P0",
+      "name": "/api/task 返回任务、工程与事件",
+      "ok": true,
+      "detail": "events=37",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-16",
+      "level": "P1",
+      "name": "/api/feed 升序与水位",
+      "ok": true,
+      "detail": "events=200 next=200",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-17",
+      "level": "P1",
+      "name": "/api/feed 续拉为空且回显水位",
+      "ok": true,
+      "detail": "pages=34 events=6639 last=6889",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-18",
+      "level": "P0",
+      "name": "SSE 首帧 ready 且变更推送 board-changed",
+      "ok": true,
+      "detail": "events=['ready', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'catchup', 'board-changed']",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-19",
+      "level": "P1",
+      "name": "/api/runtime 字段与只读声明",
+      "ok": true,
+      "detail": "extensions=absent",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-20",
+      "level": "P1",
+      "name": "/api/log 参数校验与缺日志降级",
+      "ok": true,
+      "detail": "missing=True",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-21",
+      "level": "P0",
+      "name": "匿名写状态被拒",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-22",
+      "level": "P0",
+      "name": "会话下发 Cookie 与 CSRF",
+      "ok": true,
+      "detail": "cookies=['maw_csrf', 'maw_session']",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-23",
+      "level": "P0",
+      "name": "会话可读 /api/v1",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-24",
+      "level": "P0",
+      "name": "写请求必须同源 + CSRF",
+      "ok": true,
+      "detail": "csrf/origin 均被拒",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-25",
+      "level": "P1",
+      "name": "会话写入落库并进入 feed",
+      "ok": true,
+      "detail": "event_id=6890",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-26",
+      "level": "P0",
+      "name": "v1 游标分页无重无漏",
+      "ok": true,
+      "detail": "pages=9 items=420",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-27",
+      "level": "P1",
+      "name": "禁止 offset/page 分页",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-28",
+      "level": "P1",
+      "name": "limit 非整数返回 422",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-29",
+      "level": "P0",
+      "name": "v1 工程清单",
+      "ok": true,
+      "detail": "projects=9",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-30",
+      "level": "P1",
+      "name": "v1 六类工程子资源",
+      "ok": true,
+      "detail": "{'tasks': 200, 'nodes': 200, 'runs': 200, 'operations': 200, 'deliveries': 200, 'instances': 200}",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-31",
+      "level": "P1",
+      "name": "v1 未知任务 404",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-32",
+      "level": "P1",
+      "name": "v1 未知工程返回空集",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-33",
+      "level": "P1",
+      "name": "观测四接口可用",
+      "ok": true,
+      "detail": "{'timeline': 200, 'activity': 200, 'sessions': 200, 'analytics': 200}",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-34",
+      "level": "P2",
+      "name": "能力与提醒接口",
+      "ok": true,
+      "detail": "capabilities=6",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-35",
+      "level": "P2",
+      "name": "非法时间窗被拒",
+      "ok": true,
+      "detail": "[('start 非日期', 422), ('end 早于 start', 422), ('非法时区', 422), ('hours 超限', 422)]",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-36",
+      "level": "P1",
+      "name": "v1 建任务写路由在 hub 上可达",
+      "ok": true,
+      "detail": "POST /api/v1/projects/{id}/tasks → 405（Method Not Allowed）；hub 只挂 read/events/observability，而 /api/runtime 声明 managed_via=cli_or_api_v1",
+      "skipped": false,
+      "warn": true
+    },
+    {
+      "id": "A-37",
+      "level": "P1",
+      "name": "上报缺幂等键被拒",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-38",
+      "level": "P1",
+      "name": "上报幂等重放不产生重复事件",
+      "ok": true,
+      "detail": "accepted=1 replay=idempotent",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-39",
+      "level": "P0",
+      "name": "令牌 actor 绑定不可绕过",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "A-40",
+      "level": "P2",
+      "name": "会话身份上报的响应语义",
+      "ok": true,
+      "detail": "HTTP 200 且 ok=true，但 accepted=0 rejected=1：会话身份（session:pw1X8VNBfSJkGzbOwXI9XeCr7KZiJagtrtYd1dz_WJM）不满足 {应用}-{工程}-{序号} 命名，调用方只看 ok 会误判成功",
+      "skipped": false,
+      "warn": true
+    },
+    {
+      "id": "D-01",
+      "level": "P0",
+      "name": "自动化默认关闭且上限合法",
+      "ok": true,
+      "detail": "enabled=false limit=1 version=1",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "D-02",
+      "level": "P0",
+      "name": "运行时视图不含秘密字段",
+      "ok": true,
+      "detail": "无秘密字段",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "D-03",
+      "level": "P1",
+      "name": "受管入口声明与读取无副作用",
+      "ok": true,
+      "detail": "声明一致且读取无副作用",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "D-04",
+      "level": "P1",
+      "name": "平台支持必须显式声明",
+      "ok": true,
+      "detail": "runtime 未声明平台支持；前端会把它当成「支持」并显示「关闭」而不是「未就绪」（settings 页注释要求「没说不猜成支持」）",
+      "skipped": false,
+      "warn": true
+    },
+    {
+      "id": "D-05",
+      "level": "P1",
+      "name": "策略写入口存在",
+      "ok": true,
+      "detail": "策略保存候选端点全部不可用 [('POST', 404), ('PATCH', 404), ('POST', 404)]；页面却渲染可编辑表单 + 「保存设置」按钮",
+      "skipped": false,
+      "warn": true
+    },
+    {
+      "id": "E-01",
+      "level": "P0",
+      "name": "时间轴无投影时如实报未知",
+      "ok": true,
+      "detail": "status=unknown missing=['projection_not_built']",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "E-02",
+      "level": "P1",
+      "name": "热图缺测小时不冒充 0",
+      "ok": true,
+      "detail": "missing=['projection_not_built', 'no_observed_buckets']",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "E-03",
+      "level": "P1",
+      "name": "会话空态可区分「查过没有」",
+      "ok": true,
+      "detail": "items=0 status=ready completeness=complete",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "E-04",
+      "level": "P1",
+      "name": "统计交付数与库一致",
+      "ok": true,
+      "detail": "deliveries=43 status=unknown",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "E-05",
+      "level": "P0",
+      "name": "四接口状态与缺测说明自洽",
+      "ok": true,
+      "detail": "四接口状态自洽",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "E-06",
+      "level": "P1",
+      "name": "投影检查点在位时改为报水位",
+      "ok": true,
+      "detail": "检查点→not_rebuilt，删除→not_built",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "F-01",
+      "level": "P1",
+      "name": "空库看板返回空数组而不是 null",
+      "ok": false,
+      "detail": "空库任务应是空数组而不是 null: 期望 []，实际 None",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "F-02",
+      "level": "P1",
+      "name": "空库首页与静态资源可用",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "F-03",
+      "level": "P1",
+      "name": "空库 v1 鉴权与空集",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "F-04",
+      "level": "P1",
+      "name": "空库运行时默认值",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "F-05",
+      "level": "P2",
+      "name": "空库任务详情 404",
+      "ok": true,
+      "detail": "",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "G-01",
+      "level": "P1",
+      "name": "事件积压按 200 条分页不丢不重",
+      "ok": true,
+      "detail": "pages=35 events=250",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "G-02",
+      "level": "P1",
+      "name": "SSE 心跳注释帧按时到达",
+      "ok": true,
+      "detail": "heartbeat=1 frames=2",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "G-03",
+      "level": "P1",
+      "name": "写入触发 board-changed",
+      "ok": true,
+      "detail": "['ready', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'catchup', 'board-changed']",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "C-01",
+      "level": "P0",
+      "name": "真实库表计数不变",
+      "ok": true,
+      "detail": "{'task_instances': 451, 'events': 7364, 'agents': 96, 'projects': 9}",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "C-02",
+      "level": "P0",
+      "name": "真实库文件大小与 mtime 不变",
+      "ok": true,
+      "detail": "size=10584064",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "C-03",
+      "level": "P0",
+      "name": "真实实例看板不变",
+      "ok": true,
+      "detail": "两次读取 updated_at 不同（2026-11-02 16:16:06 → 2026-11-02 16:16:28）：该字段是响应生成时间，不是数据变更时间",
+      "skipped": false,
+      "warn": true
+    },
+    {
+      "id": "C-04",
+      "level": "P0",
+      "name": "写操作确实落在隔离副本",
+      "ok": true,
+      "detail": "actors=['e2e-live-1', 'e2e-live-1793604186695', 'e2e-live-1793604429839', 'e2e-live-1793604588342', 'e2e-live-1793604767130', 'e2e-live-sse', 'e2e-probe', 'e2e-writer']",
+      "skipped": false,
+      "warn": false
+    },
+    {
+      "id": "C-05",
+      "level": "P0",
+      "name": "真实库没有本套件的写入痕迹",
+      "ok": true,
+      "detail": "{'events': 0, 'agents': 0}",
+      "skipped": false,
+      "warn": false
+    }
+  ]
+}

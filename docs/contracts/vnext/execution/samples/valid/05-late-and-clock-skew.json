@@ -1,0 +1,41 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "note": "迟到与时钟不可信：游标按接收顺序递增，发生时间可以晚到或倒置；时钟不可信的那条降级为 estimated，不静默修正。",
+  "auto_execution": { "enabled": false, "managed_execution_limit": 0 },
+  "runs": [
+    {
+      "run_id": "run_e001",
+      "task_instance": "ti_vn005e",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "running",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": false,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T05:50:01Z",
+      "finished_at": null,
+      "evidence": [],
+      "phase_history": [
+        { "phase": "reserved", "at": "2026-10-23T05:50:00Z" },
+        { "phase": "preparing", "at": "2026-10-23T05:50:00.500000Z" },
+        { "phase": "launching", "at": "2026-10-23T05:50:01Z" },
+        { "phase": "running", "at": "2026-10-23T05:50:02Z" }
+      ]
+    }
+  ],
+  "operations": [
+    { "operation_id": "op_e001", "kind": "dispatch", "target_run": "run_e001", "state": "done", "idempotency_key": "dispatch:ti_vn005e:1:1", "request_digest": "sha256:eeee" }
+  ],
+  "leases": [
+    { "lease_id": "ls_e001", "kind": "node_slot", "resource_id": "local-slot-1", "holder_run": "run_e001", "generation": 1, "released_at": null },
+    { "lease_id": "ls_e002", "kind": "workspace", "resource_id": ".worktrees/codebuddy-goalagents-1", "holder_run": "run_e001", "generation": 1, "released_at": null }
+  ],
+  "events": [
+    { "event_id": "evt_0041", "cursor": 41, "schema_version": 1, "type": "run.phase", "run_id": "run_e001", "to_phase": "reserved", "occurred_at": "2026-10-23T05:50:00Z", "received_at": "2026-10-23T05:50:00.100000Z", "quality": "observed" },
+    { "event_id": "evt_0042", "cursor": 42, "schema_version": 1, "type": "run.phase", "run_id": "run_e001", "to_phase": "preparing", "occurred_at": "2026-10-23T05:50:00.500000Z", "received_at": "2026-10-23T05:50:01Z", "quality": "observed" },
+    { "event_id": "evt_0043", "cursor": 43, "schema_version": 1, "type": "run.phase", "run_id": "run_e001", "to_phase": "launching", "occurred_at": "2026-10-23T05:50:01Z", "received_at": "2026-10-23T05:50:01.200000Z", "quality": "observed" },
+    { "event_id": "evt_0044", "cursor": 44, "schema_version": 1, "type": "run.phase", "run_id": "run_e001", "to_phase": "running", "occurred_at": "2026-10-23T05:50:02Z", "received_at": "2026-10-23T05:50:02Z", "quality": "observed" },
+    { "event_id": "evt_0045", "cursor": 45, "schema_version": 1, "type": "turn.started", "run_id": "run_e001", "occurred_at": "2026-10-23T05:50:09Z", "received_at": "2026-10-23T05:50:04Z", "quality": "estimated" }
+  ]
+}

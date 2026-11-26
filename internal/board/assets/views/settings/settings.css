@@ -1,0 +1,92 @@
+/* 设置页（系统执行策略）的局部样式。
+ *
+ * 页面只保留三块：顶部状态、策略表、相关入口。颜色一律取 tokens，
+ * 深浅主题靠 token 切换，不在这里写死色值。
+ */
+
+/* 顶部：作用域、自动模式、只读标记与一句话说明并排，窄屏换行不挤压。 */
+.settings-save-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-tight, 8px);
+  margin: var(--space-tight, 4px) 0 var(--space-block, 16px);
+}
+
+.settings-save-status .field-hint {
+  margin: 0;
+}
+
+.settings-section {
+  margin: 0 0 var(--space-block, 24px);
+  padding: 0;
+  max-width: 960px;
+}
+
+.settings-section__title {
+  margin: 0 0 var(--space-tight, 4px);
+  font-size: var(--font-label, 14px);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-section__desc {
+  margin: 0 0 var(--space-tight, 12px);
+}
+
+/* 策略表是唯一一份当前值：表格撑满内容区，说明列允许长句换行。 */
+.settings-current {
+  width: 100%;
+}
+
+.settings-current caption {
+  text-align: left;
+  margin-bottom: var(--space-tight, 8px);
+}
+
+.settings-current .note {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 相关入口只声明位置，不放控件；一行一条，扫读即可。 */
+.settings-entries {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-tight, 4px);
+  font-size: var(--font-small, 12px);
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.settings-entries li {
+  margin: 0;
+}
+
+.settings-agents {
+  width: 100%;
+}
+
+.settings-errors {
+  margin: var(--space-tight, 8px) 0;
+  padding-left: 18px;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-tight, 8px);
+  margin-top: var(--space-block, 16px);
+}
+
+@media (max-width: 720px) {
+  .settings-section {
+    max-width: none;
+  }
+
+  .settings-actions .button {
+    flex: 1 1 auto;
+  }
+}

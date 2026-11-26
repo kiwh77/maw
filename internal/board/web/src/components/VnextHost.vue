@@ -1,0 +1,265 @@
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue'
+import { useBoard } from '../stores/board'
+import { findDetail, needsProject, NO_PROJECT_STATE, stateForKind } from '../lib/sources'
+import { renderTaskList } from '../../../assets/views/tasks/tasks-view.mjs'
+import { renderRunList, renderRunDetail } from '../../../assets/views/runs/runs-view.mjs'
+import { renderDeliveryList, renderDeliveryDetail } from '../../../assets/views/deliveries/deliveries-view.mjs'
+import { renderTimeline } from '../../../assets/views/timeline/timeline-view.mjs'
+import {
+  createDateContext,
+  shiftWindow,
+  zoomWindow,
+} from '../../../assets/views/timeline/timeline-view.mjs'
+import { renderActivity } from '../../../assets/views/activity/activity-view.mjs'
+import { renderSessions } from '../../../assets/views/sessions/sessions-view.mjs'
+import { renderAnalytics } from '../../../assets/views/analytics/analytics-view.mjs'
+import { renderProblems } from '../../../assets/views/problems/problems-view.mjs'
+import { renderLogs } from '../../../assets/views/logs/logs-view.mjs'
+import { renderProjectList } from '../../../assets/views/projects/projects-view.mjs'
+import { renderExecution } from '../../../assets/views/execution/execution-view.mjs'
+
+const RETIRED_VIEWS = new Set(['nodes', 'settings'])
+
+function retiredHtml(lang: string) {
+  const zh = lang === 'zh'
+  return `<section class="vnext-status" data-retired="1">
+    <p>${zh
+      ? '该页面随 Lead／System／Managed 调度层一并下线。请用人工 <code>maw next --claim</code> 领题。'
+      : 'This page was retired with the Lead/System/Managed scheduling layer. Use manual <code>maw next --claim</code>.'}</p>
+  </section>`
+}
+
+const props = defineProps<{ viewId: string }>()
+const board = useBoard()
+const root = ref<HTMLElement | null>(null)
+
+/**
+ * 时间轴窗口状态的宿主层。
+ *
+ * 视图本身是纯渲染：工具栏按钮只标 `data-action`，真正换窗口要有人持有状态并
+ * 重新取数。以前没人接这段，四个按钮点了什么也不会发生。
+ */
+const timelineCtx = ref<ReturnType<typeof createDateContext> | null>(null)
+const timelineSelectedId = ref<string | null>(null)
+const localStates = ref<Record<string, unknown>>({})
+
+const LIST: Record<string, (s: unknown, ctx: unknown) => string> = {
+  tasks: renderTaskList as never,
+  runs: renderRunList as never,
+  deliveries: renderDeliveryList as never,
+  timeline: renderTimeline as never,
+  activity: renderActivity as never,
+  sessions: renderSessions as never,
+  analytics: renderAnalytics as never,
+  problems: renderProblems as never,
+  logs: renderLogs as never,
+  projects: renderProjectList as never,
+  execution: renderExecution as never,
+}
+
+const DETAIL: Record<string, (item: unknown, ctx: unknown) => string> = {
+  runs: renderRunDetail as never,
+  deliveries: renderDeliveryDetail as never,
+}
+
+const listHtml = computed(() => {
+  const kind = props.viewId
+  if (RETIRED_VIEWS.has(kind)) return retiredHtml(board.state.lang)
+  const render = LIST[kind]
+  if (!render) return ''
+  let viewState = localStates.value[kind] ?? board.state.viewStates[kind]
+  if (needsProject(kind) && !board.state.route.project) viewState = NO_PROJECT_STATE
+  const ctx = {
+    lang: board.state.lang,
+    t: board.t,
+    route: board.state.route,
+    navigate: board.navigate.bind(board),
+    openDetail: board.openDetail.bind(board),
+    closeDetail: board.closeDetail.bind(board),
+    readOnly: board.state.readOnly,
+    // 时间轴换窗口后由宿主给出显式日期上下文；其它视图忽略该字段。
+    dateContext: kind === 'timeline' ? timelineCtx.value ?? undefined : undefined,
+    // 时间轴选中区间：点击泳道后重新渲染，详情随选中项下钻。
+    selectedId: kind === 'timeline' ? timelineSelectedId.value ?? undefined : undefined,
+    // 视图不猜自己有没有写通道：由宿主显式声明，静态导出页自然拿不到按钮。
+    canRemove: !board.state.readOnly,
+    pendingRemove: board.state.removePending,
+    removeNotice: board.state.removeNotice,
+    filters: {
+      project: board.state.route.project,
+      agent: board.state.route.agent,
+      status: board.state.route.status,
+      search: board.state.route.search,
+    },
+  }
+  return render(viewState || { status: 'loading' }, ctx)
+})
+
+const detailHtml = computed(() => {
+  const kind = props.viewId
+  const id = board.state.route.detail
+  if (!id || !DETAIL[kind]) return ''
+  const item = findDetail(kind, board.state.payloads[kind], id)
+  const ctx = {
+    lang: board.state.lang,
+    t: board.t,
+    route: board.state.route,
+    closeDetail: board.closeDetail.bind(board),
+    readOnly: board.state.readOnly,
+  }
+  if (!item) return `<p class="vnext-status">${board.t('detail.missing')}</p>`
+  return DETAIL[kind](item, ctx)
+})
+
+const showDetail = computed(() => Boolean(board.state.route.detail && DETAIL[props.viewId]))
+
+async function reload() {
+  localStates.value = {}
+  timelineCtx.value = null
+  timelineSelectedId.value = null
+  await board.loadView(props.viewId)
+}
+
+/**
+ * 换时间轴窗口：先立刻按新窗口重画（区间按新窗口裁），再按新窗口取数。
+ * 取数走 /api/v1 的 start/end，视图渲染仍只认 payload 与 dateContext。
+ */
+async function applyTimelineCtx(next: ReturnType<typeof createDateContext>) {
+  timelineCtx.value = next
+  const pid = String(board.state.route.project || '').trim()
+  if (!pid) return
+  const url = `/api/v1/projects/${encodeURIComponent(pid)}/timeline` +
+    `?start=${encodeURIComponent(next.start)}&end=${encodeURIComponent(next.end)}`
+  const call = () => fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+  let res = await call()
+  if (res.status === 401) {
+    await fetch('/api/session', { method: 'POST', credentials: 'same-origin' })
+    res = await call()
+  }
+  if (!res.ok) return
+  const payload = await res.json()
+  localStates.value = { ...localStates.value, timeline: stateForKind('timeline', payload) }
+}
+
+function handleTimelineAction(action: string) {
+  const known = (board.state.payloads.timeline as { window?: unknown } | undefined)?.window
+  const base = timelineCtx.value ?? createDateContext((known as Record<string, unknown>) || {})
+  if (action === 'prev') void applyTimelineCtx(shiftWindow(base, -1))
+  else if (action === 'next') void applyTimelineCtx(shiftWindow(base, 1))
+  else if (action === 'zoom-in') void applyTimelineCtx(zoomWindow(base, -1))
+  else if (action === 'zoom-out') void applyTimelineCtx(zoomWindow(base, 1))
+}
+
+/**
+ * 执行视图：切换正在查看的迭代。
+ *
+ * 选中值只留在宿主层（localStates），不写路由也不回写服务端：迭代是浏览维度，
+ * 不是可分享的现场。视图本身是纯渲染，读 state.selectedIteration 决定哪一组展开。
+ */
+function selectIteration(id: string) {
+  const base = (localStates.value.execution ?? board.state.viewStates.execution) as
+    | Record<string, unknown>
+    | undefined
+  if (!base) return
+  localStates.value = { ...localStates.value, execution: { ...base, selectedIteration: id } }
+}
+
+onMounted(reload)
+watch(() => [props.viewId, board.state.route.project, board.state.route.agent, board.state.route.status, board.state.route.search], reload)
+
+function onListClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+
+  // 时间轴工具栏：四个按钮以前没有接线，点了没有任何反应。
+  const actionEl = target?.closest?.('[data-action]') as HTMLElement | null
+  const action = actionEl?.dataset.action
+  if (props.viewId === 'timeline' && action &&
+      ['prev', 'next', 'zoom-in', 'zoom-out'].includes(action)) {
+    handleTimelineAction(action)
+    return
+  }
+
+  // 时间轴区间：点击即选中，详情面板跟随下钻。
+  if (props.viewId === 'timeline') {
+    const barEl = target?.closest?.('[data-interval-id]') as HTMLElement | null
+    if (barEl?.dataset.intervalId) {
+      timelineSelectedId.value = barEl.dataset.intervalId
+      return
+    }
+  }
+
+  if (RETIRED_VIEWS.has(props.viewId)) return
+
+  const edit = target?.closest?.('[data-project-edit]') as HTMLElement | null
+  if (edit?.dataset.projectEdit) {
+    board.openEditProjectModal(edit.dataset.projectEdit)
+    return
+  }
+
+  // 工程移除走两段式：第一次只切到「确认移除？」，第二次才发请求。
+  const ask = target?.closest?.('[data-project-remove]') as HTMLElement | null
+  if (ask?.dataset.projectRemove) {
+    board.requestRemoveProject(ask.dataset.projectRemove)
+    return
+  }
+  const confirm = target?.closest?.('[data-project-remove-confirm]') as HTMLElement | null
+  if (confirm?.dataset.projectRemoveConfirm) {
+    void board.removeProject(confirm.dataset.projectRemoveConfirm)
+    return
+  }
+  const cancel = target?.closest?.('[data-project-remove-cancel]') as HTMLElement | null
+  if (cancel) {
+    board.cancelRemoveProject()
+    return
+  }
+
+  // 执行视图：先看是不是点了迭代按钮，再看是不是点了任务行。
+  // 两件事都不改路由：迭代是浏览维度，任务详情走抽屉（与看板同一套）。
+  if (props.viewId === 'execution') {
+    const iterEl = target?.closest?.('[data-iteration]') as HTMLElement | null
+    if (iterEl) {
+      selectIteration(iterEl.dataset.iteration || '')
+      return
+    }
+    const taskEl = target?.closest?.('[data-task-id]') as HTMLElement | null
+    if (taskEl?.dataset.taskId) {
+      board.openTaskDrawer(taskEl.dataset.taskId, taskEl.dataset.projectId || '')
+      return
+    }
+  }
+
+  const row = target?.closest?.('tr[data-detail-id]') as HTMLElement | null
+  if (row?.dataset.detailId) board.openDetail(row.dataset.detailId)
+}
+
+</script>
+
+<template>
+  <section
+    v-show="!showDetail"
+    class="vnext"
+    id="vnext-view"
+    aria-label="Workbench view"
+    ref="root"
+    @click="onListClick"
+    @submit.prevent
+    v-html="listHtml"
+  />
+  <section
+    v-if="showDetail"
+    class="vnext-detail"
+    id="vnext-detail"
+    role="region"
+    aria-label="Detail"
+  >
+    <div class="vnext-detail__head">
+      <button type="button" class="vnext-detail__back" @click="board.closeDetail()">
+        {{ board.t('detail.back') }}
+      </button>
+      <h2 class="vnext-detail__title">{{ board.state.route.detail }}</h2>
+      <button type="button" class="vnext-detail__close" @click="board.closeDetail()">×</button>
+    </div>
+    <div class="vnext-detail__body" v-html="detailHtml" />
+  </section>
+</template>

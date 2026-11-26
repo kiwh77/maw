@@ -1,32 +1,40 @@
 # ROADMAP
 
-maw 定位为本机多 Agent **任务中枢**。下列为已交付与规划能力。
+> Languages: **English** | [简体中文](zh/ROADMAP.md)
 
-## 已交付
+maw is a local multi-agent **task hub**. Shipped and planned capabilities:
 
-- 蓝图拆题、持久 worktree、领取 / 提交 / 合并、写盘范围检查
-- 全局状态库（`~/.maw`）与跨工程看板（`maw board` / SSE）
-- 多 IDE 协议注入（Cursor / Qoder / Trae / CodeBuddy 等）与 hooks
+## Shipped
 
-## 进行中 / 已部分交付
+- Blueprint tasks, persistent worktrees, claim / submit / merge, write-scope checks
+- Global state (`~/.maw`) and cross-project board (`maw board` / SSE)
+- Multi-IDE protocol injection (Cursor / Qoder / Trae / CodeBuddy, …) and hooks
+- **i18n (en/zh)**: English-primary docs with Chinese mirrors; board UI language switch; CLI / terminal board / `maw init` protocol / skills catalogs via `MAW_LANG` (default en)
 
-### 跨工程 Agent 状态汇聚
+## In progress / partially shipped
 
-- CLI：`maw status report`（也可 `POST http://127.0.0.1:7420/api/status`，仅 loopback）
-- 增量：`GET /api/feed?since=`
-- SSE：`/api/events` 除 `board-changed` 外推送 `event` 帧
+### Cross-project agent status aggregation
 
-### 桌面客户端（Tauri）
+- CLI: `maw status report` (also `POST http://127.0.0.1:7420/api/status`, loopback only)
+- Incremental: `GET /api/feed?since=`
+- SSE: `/api/events` pushes `event` frames in addition to `board-changed`
 
-把 `maw board --serve` 同一套看板打成桌面壳，系统托盘做实时通知。见 `clients/desktop/`。
+### Desktop client (Tauri)
 
-## 规划中
+Package the same board as `maw board --serve` into a desktop shell with tray notifications. See `clients/desktop/`.
 
-### 托盘通知细化
+## Planned
 
-按事件类型（progress / blocked / merged）区分通知文案与声音；多显示器窗口记忆。
+### Tray notification detail
 
-## 非目标（近期）
+Distinct copy and sounds per event type (progress / blocked / merged); multi-display window memory.
 
-- 云端多机协作与账号体系
-- 替代各 IDE 内置 Agent 运行时
+### Collaboration primitives (borrowed from DeepSeek Agent Teams)
+
+Adopt trusted multi-agent collaboration primitives from session-local Agent Teams — **not** a Harness task-board bridge, and do **not** weaken worktrees / enforced `write_scope`. Priority: task-update CAS, typed status messages, structured submit results, stalled vs idle with occupancy expiry. Decision note (zh): [maw_from_deepseek_agent_teams.zh-CN.md](maw_from_deepseek_agent_teams.zh-CN.md).
+
+## Non-goals (near term)
+
+- Cloud multi-machine collaboration and accounts
+- Replacing each IDE’s built-in agent runtime
+- Natively ingesting DeepSeek Harness Agent Teams task boards (no cross-process coordination protocol)

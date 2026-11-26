@@ -1,0 +1,220 @@
+{
+  "contract": "maw.app.ports/v1",
+  "project_id": "716c30878ba1b95f",
+  "generated_at": "2026-10-23T03:31:00Z",
+  "modules": [
+    {
+      "path": "internal/engine/ports",
+      "layer": "port",
+      "imports": []
+    },
+    {
+      "path": "internal/engine/model",
+      "layer": "port",
+      "imports": []
+    },
+    {
+      "path": "internal/engine/claim",
+      "layer": "app",
+      "imports": [
+        "internal/engine/ports",
+        "internal/engine/model"
+      ]
+    },
+    {
+      "path": "internal/app",
+      "layer": "app",
+      "imports": [
+        "internal/engine/ports",
+        "internal/engine/claim"
+      ]
+    },
+    {
+      "path": "internal/db",
+      "layer": "infra",
+      "imports": [
+        "internal/engine/ports"
+      ]
+    },
+    {
+      "path": "internal/gitops",
+      "layer": "infra",
+      "imports": []
+    },
+    {
+      "path": "internal/runner",
+      "layer": "app",
+      "imports": [
+        "internal/engine/ports",
+        "internal/gitops"
+      ]
+    },
+    {
+      "path": "internal/runner/process",
+      "layer": "infra",
+      "imports": [
+        "internal/engine/ports"
+      ]
+    },
+    {
+      "path": "internal/adapters/codebuddy",
+      "layer": "adapter",
+      "imports": [
+        "internal/engine/ports",
+        "internal/engine/model"
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "port": "ClaimExecution",
+      "impl": "internal/engine/claim",
+      "kind": "use_case"
+    },
+    {
+      "port": "Store",
+      "impl": "internal/db",
+      "kind": "infra"
+    },
+    {
+      "port": "Probe",
+      "impl": "internal/adapters/codebuddy",
+      "kind": "adapter",
+      "capability_version": "2.173.0",
+      "evidence": "docs/evidence/codebuddy/manifest.json"
+    },
+    {
+      "port": "Launch",
+      "impl": "internal/adapters/codebuddy",
+      "kind": "adapter",
+      "capability_version": "2.173.0",
+      "evidence": "docs/evidence/codebuddy/manifest.json"
+    },
+    {
+      "port": "Decode",
+      "impl": "internal/adapters/codebuddy",
+      "kind": "adapter",
+      "capability_version": "2.173.0",
+      "evidence": "docs/evidence/codebuddy/manifest.json"
+    },
+    {
+      "port": "Interpret",
+      "impl": "internal/adapters/codebuddy",
+      "kind": "adapter",
+      "capability_version": "2.173.0",
+      "evidence": "docs/evidence/codebuddy/manifest.json"
+    },
+    {
+      "port": "ProcessController",
+      "impl": "internal/runner/process",
+      "kind": "infra"
+    }
+  ],
+  "calls": [
+    {
+      "port": "ClaimExecution",
+      "caller": "internal/app",
+      "in_tx": true,
+      "effects": [
+        "db_write",
+        "event_append",
+        "task_status_write"
+      ],
+      "errors": [
+        "no_ready",
+        "conflict",
+        "revision_mismatch",
+        "capacity_exhausted"
+      ],
+      "idempotency_key": true,
+      "conflict_check": true
+    },
+    {
+      "port": "Store",
+      "caller": "internal/engine/claim",
+      "in_tx": true,
+      "effects": [
+        "db_write",
+        "event_append"
+      ],
+      "errors": [
+        "busy",
+        "conflict",
+        "invalid_transition"
+      ]
+    },
+    {
+      "port": "Probe",
+      "caller": "internal/runner",
+      "in_tx": false,
+      "effects": [
+        "process_spawn"
+      ],
+      "errors": [
+        "entry_missing",
+        "version_unparsed",
+        "probe_timeout"
+      ]
+    },
+    {
+      "port": "Launch",
+      "caller": "internal/runner",
+      "in_tx": false,
+      "effects": [],
+      "errors": [
+        "invalid_spec",
+        "capability_unsupported"
+      ]
+    },
+    {
+      "port": "Decode",
+      "caller": "internal/runner",
+      "in_tx": false,
+      "effects": [],
+      "errors": [
+        "unparseable_record",
+        "unknown_record_type"
+      ]
+    },
+    {
+      "port": "Interpret",
+      "caller": "internal/runner",
+      "in_tx": false,
+      "effects": [],
+      "errors": [
+        "missing_result_record",
+        "auth_required",
+        "protocol_unknown"
+      ],
+      "exit_code_only_success": false,
+      "unknown_as_success": false
+    },
+    {
+      "port": "ProcessController",
+      "caller": "internal/runner",
+      "in_tx": false,
+      "effects": [
+        "process_spawn",
+        "process_stop"
+      ],
+      "errors": [
+        "not_started",
+        "already_stopped",
+        "stop_unconfirmed"
+      ]
+    },
+    {
+      "port": "Store",
+      "caller": "internal/adapters/codebuddy",
+      "in_tx": true,
+      "effects": [
+        "task_status_write"
+      ],
+      "errors": [
+        "conflict"
+      ]
+    }
+  ],
+  "note": "触发 P130：单点改动的反例",
+  "expect_error": "P130"
+}

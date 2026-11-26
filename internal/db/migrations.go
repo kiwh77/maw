@@ -1,0 +1,1018 @@
+package db
+
+import (
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/kiwh77/maw/internal/version"
+)
+
+// Migration 是一条按版本号升序、只执行一次的 schema 变更。
+//
+// 已发布的条目不可回改：checksum 记进台账，改动会让 VerifySchema 报 ErrSchemaDrift，
+// 而不是让不同机器悄悄跑出两种表结构。
+type Migration struct {
+	Version int
+	Name    string
+	SQL     string
+	// Apply 是可选的 Go 数据步骤，在同一个事务里紧接 SQL 执行；
+	// 需要按行计算身份或补账的迁移用它，而不是在 SQL 里硬编码。
+	Apply func(*sql.Tx) error
+}
+
+// schema 是 vnext 的基线表结构。
+//
+// VN-101 之前，这份 DDL 由 EnsureSchema 在每次 Open／WithTx 时无条件重放；
+// 现在它只是迁移序列里的第 3 版，只在 Migrate 里执行一次。
+const schema = `
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    path TEXT NOT NULL UNIQUE,
+    main_branch TEXT NOT NULL DEFAULT 'main',
+    max_parallel INTEGER NOT NULL DEFAULT 4,
+    created_at TEXT NOT NULL,
+    last_seen TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tasks (
+    project_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 100,
+    merge_order INTEGER NOT NULL DEFAULT 100,
+    owner TEXT,
+    deps_json TEXT NOT NULL DEFAULT '[]',
+    write_scope_json TEXT NOT NULL DEFAULT '[]',
+    read_scope_json TEXT NOT NULL DEFAULT '[]',
+    acceptance_json TEXT NOT NULL DEFAULT '[]',
+    branch TEXT,
+    worktree TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    blocked_reason TEXT,
+    heartbeat TEXT,
+    prev_status TEXT,
+    revision INTEGER NOT NULL DEFAULT 0,
+    extra_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (project_id, id)
+);
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    project_id TEXT,
+    actor TEXT NOT NULL,
+    type TEXT NOT NULL,
+    task_id TEXT,
+    data_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS locks (
+    project_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, path)
+);
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    project_id TEXT,
+    sender TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    type TEXT NOT NULL,
+    task_id TEXT,
+    body_json TEXT NOT NULL DEFAULT '{}',
+    read INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS shared_files (
+    project_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    owner_task TEXT NOT NULL,
+    PRIMARY KEY (project_id, path)
+);
+CREATE TABLE IF NOT EXISTS agents (
+    project_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'worker',
+    status TEXT NOT NULL DEFAULT 'idle',
+    task_id TEXT,
+    worktree TEXT,
+    branch TEXT,
+    registered_at TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (project_id, id)
+);
+`
+
+// identityDDL 是 v4：任务实例身份、冻结版本与 tasks 的实例引用。
+//
+// 三条约束落在库里而不是只写在注释里：
+//   - 同一 (工程, 编号) 至多一个活跃实例（部分唯一索引）；
+//   - 活跃实例必须指向一个已冻结版本，退役实例必须写时间、原因且不持活跃指针（CHECK）；
+//   - tasks 行的 instance_id 非空且唯一（触发器 + 部分唯一索引），已冻结版本不可改不可删（触发器）。
+const identityDDL = `
+CREATE TABLE IF NOT EXISTS task_instances (
+    instance_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    display_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    retired_at TEXT,
+    retired_reason TEXT,
+    active_version INTEGER,
+    ambiguous INTEGER NOT NULL DEFAULT 0,
+    ambiguity_note TEXT,
+    CHECK (state IN ('active', 'retired')),
+    CHECK (
+        (state = 'active' AND active_version IS NOT NULL AND retired_at IS NULL
+            AND retired_reason IS NULL AND ambiguous = 0)
+        OR
+        (state = 'retired' AND active_version IS NULL AND retired_at IS NOT NULL
+            AND retired_reason IS NOT NULL)
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS task_instances_one_active_display
+    ON task_instances(project_id, display_id) WHERE state = 'active';
+CREATE INDEX IF NOT EXISTS task_instances_project_state
+    ON task_instances(project_id, state);
+CREATE TABLE IF NOT EXISTS task_versions (
+    instance_id TEXT NOT NULL,
+    version_no INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    frozen_at TEXT NOT NULL,
+    deps_json TEXT NOT NULL DEFAULT '[]',
+    spec_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (instance_id, version_no),
+    FOREIGN KEY (instance_id) REFERENCES task_instances(instance_id)
+);
+CREATE TRIGGER IF NOT EXISTS task_versions_frozen_no_update
+BEFORE UPDATE ON task_versions
+BEGIN SELECT RAISE(ABORT, 'task_versions: 已冻结版本不可修改'); END;
+CREATE TRIGGER IF NOT EXISTS task_versions_frozen_no_delete
+BEFORE DELETE ON task_versions
+BEGIN SELECT RAISE(ABORT, 'task_versions: 已冻结版本不可删除'); END;
+ALTER TABLE tasks ADD COLUMN instance_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS tasks_instance_id_key
+    ON tasks(instance_id) WHERE instance_id IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS tasks_instance_id_required_insert
+BEFORE INSERT ON tasks
+WHEN NEW.instance_id IS NULL OR NEW.instance_id = ''
+BEGIN SELECT RAISE(ABORT, 'tasks.instance_id: 当前任务必须有实例身份'); END;
+CREATE TRIGGER IF NOT EXISTS tasks_instance_id_required_update
+BEFORE UPDATE ON tasks
+WHEN NEW.instance_id IS NULL OR NEW.instance_id = ''
+BEGIN SELECT RAISE(ABORT, 'tasks.instance_id: 当前任务必须有实例身份'); END;
+`
+
+// resourceDDL 是 v5：节点记录与资源占用。
+//
+// 唯一有效持有者落在库里：未释放的 resource_key 上有部分唯一索引，
+// 因此「同一目录/同一槽位两个持有者」不需要靠调用方自觉。
+const resourceDDL = `
+CREATE TABLE IF NOT EXISTS nodes (
+    node_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    label TEXT NOT NULL DEFAULT '',
+    slot_limit INTEGER NOT NULL DEFAULT 0,
+    account_quota INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    CHECK (slot_limit >= 0 AND account_quota >= 0)
+);
+CREATE TABLE IF NOT EXISTS resource_leases (
+    lease_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    resource_key TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    generation INTEGER NOT NULL,
+    holder TEXT NOT NULL DEFAULT '',
+    acquired_at TEXT NOT NULL,
+    released_at TEXT,
+    release_generation INTEGER,
+    release_reason TEXT,
+    CHECK (kind IN ('node_slot', 'workspace', 'merge')),
+    CHECK (generation >= 1),
+    CHECK (released_at IS NULL OR release_generation IS NOT NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS resource_leases_one_holder
+    ON resource_leases(resource_key) WHERE released_at IS NULL;
+CREATE INDEX IF NOT EXISTS resource_leases_project_kind
+    ON resource_leases(project_id, kind, released_at);
+CREATE TRIGGER IF NOT EXISTS resource_leases_release_once
+BEFORE UPDATE ON resource_leases
+WHEN OLD.released_at IS NOT NULL AND NEW.released_at IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'resource_leases: 占用已释放，不能再次释放'); END;
+`
+
+// runtimeDDL 是 v6：Run、持久操作与标准事件流。
+//
+// 三条硬约束：同一实例同一代际只能有一个 Run；同工程同类型同幂等键只能有一个操作；
+// 事件游标是 AUTOINCREMENT 入库序号（回滚过的号不复用），event_id 唯一（补交去重）。
+const runtimeDDL = `
+CREATE TABLE IF NOT EXISTS runs (
+    run_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    version_no INTEGER NOT NULL,
+    generation INTEGER NOT NULL,
+    phase TEXT NOT NULL,
+    reconciliation_state TEXT NOT NULL,
+    desired_action TEXT NOT NULL DEFAULT 'none',
+    process_stop_confirmed INTEGER NOT NULL DEFAULT 0,
+    delivery_frozen INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT,
+    finished_at TEXT,
+    phase_history_json TEXT NOT NULL DEFAULT '[]',
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    leases_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (generation >= 1),
+    UNIQUE (instance_id, generation)
+);
+CREATE INDEX IF NOT EXISTS runs_instance ON runs(instance_id, generation);
+CREATE TABLE IF NOT EXISTS operations (
+    operation_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    target_phase TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL,
+    coordinator TEXT NOT NULL DEFAULT '',
+    lease_expires_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (kind IN ('dispatch', 'cancel', 'verify')),
+    CHECK (result IN ('pending', 'applied', 'already_finished', 'rejected')),
+    UNIQUE (project_id, kind, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS operations_pending ON operations(result, lease_expires_at);
+CREATE TABLE IF NOT EXISTS run_events (
+    cursor INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    phase TEXT NOT NULL DEFAULT '',
+    lease_id TEXT NOT NULL DEFAULT '',
+    schema_version INTEGER NOT NULL,
+    quality TEXT NOT NULL DEFAULT 'observed',
+    occurred_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    CHECK (schema_version > 0),
+    CHECK (quality IN ('observed', 'estimated', 'unknown'))
+);
+CREATE INDEX IF NOT EXISTS run_events_project_cursor ON run_events(project_id, cursor);
+`
+
+// deliveryDDL 是 v7：交付清单、验证结论与评审结论。
+//
+// 交付行同时存完整清单（manifest_json）与指纹（fingerprint）；验证／评审各自记录
+// 生成时的指纹，因此「产物或提交变了，旧结论失效」是一次比较，而不是一条约定。
+const deliveryDDL = `
+CREATE TABLE IF NOT EXISTS deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    version_no INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    baseline_commit TEXT NOT NULL,
+    candidate_commit TEXT,
+    delivered_at TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    supersedes TEXT,
+    superseded_by TEXT,
+    idempotency_key TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK (mode IN ('code', 'non_code')),
+    UNIQUE (project_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS deliveries_run ON deliveries(run_id);
+CREATE INDEX IF NOT EXISTS deliveries_instance ON deliveries(instance_id, version_no);
+CREATE TABLE IF NOT EXISTS delivery_verifications (
+    verification_id TEXT PRIMARY KEY,
+    delivery_id TEXT NOT NULL,
+    result TEXT NOT NULL,
+    target_version INTEGER NOT NULL,
+    target_commit TEXT,
+    target_artifact_id TEXT,
+    target_artifact_sha256 TEXT,
+    fingerprint TEXT NOT NULL,
+    ran_at TEXT NOT NULL,
+    verification_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS delivery_verifications_delivery
+    ON delivery_verifications(delivery_id, result);
+CREATE TABLE IF NOT EXISTS delivery_reviews (
+    delivery_id TEXT PRIMARY KEY,
+    required INTEGER NOT NULL,
+    verdict TEXT NOT NULL,
+    reviewer TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT,
+    fingerprint TEXT NOT NULL,
+    review_json TEXT NOT NULL
+);
+`
+
+// migrations 是显式迁移序列：版本号唯一、升序执行、只往前走。
+//
+// 版本号从 3 起：3 是 vnext 基线（沿用旧 0.x 把 schema_version 写成 3 的数值），
+// 之后每次结构变更 +1。vnext 的权威是这张台账，而不是 version.SchemaVersion
+// ——后者是发布契约常量，跟随发布节奏单独维护（本卡写盘范围不包含它）。
+// meta.schema_version 只是给旧读法看的镜像，由 MigrateDB 写成台账末端。
+//
+// 历史 0.x 二进制没有台账，只在打开时重放 IF NOT EXISTS 并把 schema_version 写成 3；
+// 这类旧库按「版本 0」处理，重放幂等的基线即得到同一结构，因此不需要单独的补账步骤。
+var migrations = []Migration{
+	{Version: 3, Name: "baseline_core_tables", SQL: schema},
+	{Version: 4, Name: "task_identity", SQL: identityDDL, Apply: backfillTaskIdentity},
+	{Version: 5, Name: "resource_leases", SQL: resourceDDL},
+	{Version: 6, Name: "run_and_operations", SQL: runtimeDDL},
+	{Version: 7, Name: "delivery_manifests", SQL: deliveryDDL},
+	{Version: 8, Name: "source_usage_projection", SQL: observabilityDDL},
+	{Version: 9, Name: "system_agent_jobs", SQL: systemAgentDDL},
+	{Version: 10, Name: "system_agent_dispatch_ready", SQL: systemAgentDispatchReadyDDL},
+	{Version: 11, Name: "iterations", SQL: iterationsDDL},
+	// v12–v14 由 system_jobs.go / task_lane.go 的 init 追加；v15 在台账字面量里声明，
+	// 执行顺序由 sortedMigrations 按版本号统一决定，不依赖注册位置。
+	{Version: 15, Name: "goal_plan_links", SQL: goalDDL},
+	{Version: 16, Name: "usage_attribution", SQL: usageAttributionDDL},
+}
+
+// sortedMigrations 返回按版本号升序的迁移序列。
+//
+// 迁移条目分散在多个文件的 init 里追加，Go 的 init 顺序只能靠文件名保证，
+// 把执行顺序绑在「注册顺序」上迟早会踩坑；这里以版本号为准，注册位置只影响可读性。
+func sortedMigrations() []Migration {
+	out := make([]Migration, len(migrations))
+	copy(out, migrations)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	return out
+}
+
+// goalDDL 是 v15：目标级 Lead 的持久化状态（契约 maw.lead.goal/v1 §2–§9）。
+//
+// 只新增五张表，不改也不搬既有表：历史任务与它们的状态保持原样，
+// 「迁移保留历史任务」由这条约束保证，而不是靠回灌。
+//
+//	表                        职责
+//	goals                     目标身份 + 状态 + revision 乐观锁
+//	goal_versions             冻结的目标定义快照（验收条件、预算）
+//	goal_plan_revisions       不可变的计划修订 + 审批留痕 + 摘要
+//	goal_task_links           卡 → 任务实例的不可变映射（一实例至多一条）
+//	goal_enqueues             入队幂等台账（appended → applied/failed）
+const goalDDL = `
+CREATE TABLE IF NOT EXISTS goals (
+    project_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    iteration_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    active_version INTEGER NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0,
+    abandon_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, goal_id),
+    CHECK (status IN ('draft','active','verifying','paused','done','escalated','abandoned')),
+    CHECK (active_version >= 1),
+    CHECK (revision >= 0)
+);
+CREATE INDEX IF NOT EXISTS goals_status ON goals(project_id, status);
+CREATE INDEX IF NOT EXISTS goals_iteration ON goals(project_id, iteration_id);
+
+CREATE TABLE IF NOT EXISTS goal_versions (
+    project_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    goal_version INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    statement TEXT NOT NULL,
+    acceptance_json TEXT NOT NULL DEFAULT '[]',
+    budget_json TEXT NOT NULL DEFAULT '{}',
+    frozen_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, goal_id, goal_version)
+);
+
+CREATE TABLE IF NOT EXISTS goal_plan_revisions (
+    project_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    plan_rev INTEGER NOT NULL,
+    goal_version INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    baseline_json TEXT NOT NULL DEFAULT '{}',
+    plan_digest TEXT NOT NULL,
+    cards_json TEXT NOT NULL DEFAULT '[]',
+    approval_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    applied_at TEXT,
+    PRIMARY KEY (project_id, goal_id, plan_rev),
+    CHECK (kind IN ('initial','rework')),
+    CHECK (status IN ('proposed','approved','applied','rejected','invalidated','superseded'))
+);
+CREATE INDEX IF NOT EXISTS goal_plan_status ON goal_plan_revisions(project_id, goal_id, status);
+
+CREATE TABLE IF NOT EXISTS goal_task_links (
+    project_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    plan_rev INTEGER NOT NULL,
+    card_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    display_id TEXT NOT NULL,
+    version_no INTEGER NOT NULL,
+    enqueue_key TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'applied',
+    applied_at TEXT NOT NULL,
+    applied_by TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (project_id, instance_id),
+    UNIQUE (project_id, enqueue_key),
+    CHECK (state IN ('applied','drifted')),
+    CHECK (version_no >= 1)
+);
+CREATE INDEX IF NOT EXISTS goal_task_links_goal ON goal_task_links(project_id, goal_id, applied_at);
+
+CREATE TABLE IF NOT EXISTS goal_enqueues (
+    project_id TEXT NOT NULL,
+    enqueue_key TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    plan_rev INTEGER NOT NULL,
+    card_id TEXT NOT NULL,
+    plan_digest TEXT NOT NULL,
+    state TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, enqueue_key),
+    CHECK (state IN ('appended','applied','failed'))
+);
+CREATE INDEX IF NOT EXISTS goal_enqueues_goal ON goal_enqueues(project_id, goal_id, plan_rev);
+`
+
+// systemAgentDDL 是 v9：系统 Agent 任务队列（阻塞自愈 / 拆题 / 运维）。
+//
+// 事件游标复用 projection_state（projection="system_agent.events"），不另建游标表。
+const systemAgentDDL = `
+CREATE TABLE IF NOT EXISTS system_jobs (
+    job_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    trigger_event_id INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    decision_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    locked_by TEXT NOT NULL DEFAULT '',
+    locked_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    CHECK (kind IN ('unblock_assist', 'task_split', 'ops_run')),
+    CHECK (status IN ('queued', 'running', 'done', 'failed', 'escalated', 'cancelled')),
+    CHECK (attempts >= 0),
+    CHECK (max_attempts >= 1)
+);
+CREATE INDEX IF NOT EXISTS system_jobs_status ON system_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS system_jobs_project ON system_jobs(project_id, status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS system_jobs_dedupe
+    ON system_jobs(project_id, kind, task_id, trigger_event_id)
+    WHERE trigger_event_id > 0;
+`
+
+// systemAgentDispatchReadyDDL 是 v10：system_jobs.kind 放行 dispatch_ready。
+//
+// SQLite 不能就地修改 CHECK 约束，只能按原样重建表并回灌数据；索引随旧表删除后重建。
+const systemAgentDispatchReadyDDL = `
+CREATE TABLE system_jobs_v10 (
+    job_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    trigger_event_id INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    decision_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    locked_by TEXT NOT NULL DEFAULT '',
+    locked_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    CHECK (kind IN ('unblock_assist', 'task_split', 'ops_run', 'dispatch_ready')),
+    CHECK (status IN ('queued', 'running', 'done', 'failed', 'escalated', 'cancelled')),
+    CHECK (attempts >= 0),
+    CHECK (max_attempts >= 1)
+);
+INSERT INTO system_jobs_v10(
+    job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
+    decision_json, result_json, attempts, max_attempts, locked_by, locked_at,
+    created_at, updated_at, finished_at
+)
+SELECT
+    job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
+    decision_json, result_json, attempts, max_attempts, locked_by, locked_at,
+    created_at, updated_at, finished_at
+FROM system_jobs;
+DROP TABLE system_jobs;
+ALTER TABLE system_jobs_v10 RENAME TO system_jobs;
+CREATE INDEX IF NOT EXISTS system_jobs_status ON system_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS system_jobs_project ON system_jobs(project_id, status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS system_jobs_dedupe
+    ON system_jobs(project_id, kind, task_id, trigger_event_id)
+    WHERE trigger_event_id > 0;
+`
+
+// systemAgentRunReconcileDDL 是 v13：system_jobs.kind 放行 run_reconcile。
+//
+// 与 v10 同法重建表：SQLite 不能就地修改 CHECK 约束。v12 的 run_id /
+// operation_id / journal_dir 三列必须一并回灌，否则升级会把作业到执行的反查链丢掉。
+const systemAgentRunReconcileDDL = `
+CREATE TABLE system_jobs_v13 (
+    job_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    trigger_event_id INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    decision_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    run_id TEXT NOT NULL DEFAULT '',
+    operation_id TEXT NOT NULL DEFAULT '',
+    journal_dir TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    locked_by TEXT NOT NULL DEFAULT '',
+    locked_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    CHECK (kind IN ('unblock_assist', 'task_split', 'ops_run', 'dispatch_ready', 'run_reconcile')),
+    CHECK (status IN ('queued', 'running', 'done', 'failed', 'escalated', 'cancelled')),
+    CHECK (attempts >= 0),
+    CHECK (max_attempts >= 1)
+);
+INSERT INTO system_jobs_v13(
+    job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
+    decision_json, result_json, run_id, operation_id, journal_dir,
+    attempts, max_attempts, locked_by, locked_at, created_at, updated_at, finished_at
+)
+SELECT
+    job_id, project_id, kind, status, task_id, instance_id, trigger_event_id, reason,
+    decision_json, result_json, run_id, operation_id, journal_dir,
+    attempts, max_attempts, locked_by, locked_at, created_at, updated_at, finished_at
+FROM system_jobs;
+DROP TABLE system_jobs;
+ALTER TABLE system_jobs_v13 RENAME TO system_jobs;
+CREATE INDEX IF NOT EXISTS system_jobs_status ON system_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS system_jobs_project ON system_jobs(project_id, status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS system_jobs_dedupe
+    ON system_jobs(project_id, kind, task_id, trigger_event_id)
+    WHERE trigger_event_id > 0;
+`
+
+// iterationsDDL 是 v11：迭代（批次）容器与任务归属。
+//
+// 迭代是任务的容器与合入单位；老任务升级后 iteration_id 为空，表示「未归属任何迭代」。
+const iterationsDDL = `
+CREATE TABLE IF NOT EXISTS iterations (
+    project_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    goal TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    target_branch TEXT NOT NULL DEFAULT '',
+    merge_commit TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    extra_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (project_id, id),
+    CHECK (status IN ('planning', 'running', 'finishing', 'merged', 'abandoned'))
+);
+CREATE INDEX IF NOT EXISTS iterations_project_status
+    ON iterations(project_id, status, created_at);
+ALTER TABLE tasks ADD COLUMN iteration_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS tasks_iteration
+    ON tasks(project_id, iteration_id, priority);
+`
+
+// usageAttributionDDL 是 v16：给用量与会话关联补上归属字段（PI-201）。
+//
+// 归属要能回答：哪个项目、哪个节点、哪一次 Run、第几代、哪一轮会话、哪一次模型调用，
+// 以及用途（worker／lead／diagnose）、实际供应商模型与来源原始字段。
+// 还要能区分「运行基线」与「调用事实」，并把被 call 级取代的 run 级汇总标出来。
+//
+// SQLite 的 ADD COLUMN 不能带 CHECK：取值约束（scope／quality／cache_state）留在代码里校验，
+// 表上只加 NOT NULL 默认值，老库补列时不会因历史行为空而失败。
+const usageAttributionDDL = `
+ALTER TABLE usage_records ADD COLUMN project_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN instance_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_records ADD COLUMN call_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN session_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN purpose TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN provider TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN model TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN cache_state TEXT NOT NULL DEFAULT 'absent';
+ALTER TABLE usage_records ADD COLUMN cache_evidence TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_records ADD COLUMN baseline INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_records ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_records ADD COLUMN raw_json TEXT NOT NULL DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS usage_records_run
+    ON usage_records(run_id, generation, scope);
+CREATE INDEX IF NOT EXISTS usage_records_project
+    ON usage_records(project_id, recorded_at);
+CREATE INDEX IF NOT EXISTS usage_records_call
+    ON usage_records(call_id);
+CREATE INDEX IF NOT EXISTS usage_records_session
+    ON usage_records(session_id);
+ALTER TABLE run_source_links ADD COLUMN node_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_source_links ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE run_source_links ADD COLUMN call_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_source_links ADD COLUMN purpose TEXT NOT NULL DEFAULT '';
+`
+
+// observabilityDDL 是 v8：来源会话／轮次、用量、投影水位与通知去重身份。
+//
+// 只存可重建读模型所需的权威事实与检查点，不预计算统计值；
+// Token 用可空列，未知不得落成 0（契约 maw.observability.timeline/v1 §4.3）。
+const observabilityDDL = `
+CREATE TABLE IF NOT EXISTS source_sessions (
+    session_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    source_ns TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    adapter TEXT NOT NULL DEFAULT '',
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (source_ns, external_id)
+);
+CREATE INDEX IF NOT EXISTS source_sessions_project
+    ON source_sessions(project_id, opened_at);
+CREATE TABLE IF NOT EXISTS source_turns (
+    turn_id TEXT PRIMARY KEY,
+    source_ns TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    external_id TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    shared_with_json TEXT NOT NULL DEFAULT '[]',
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (source_ns, turn_id),
+    FOREIGN KEY (session_id) REFERENCES source_sessions(session_id)
+);
+CREATE INDEX IF NOT EXISTS source_turns_session
+    ON source_turns(session_id, started_at);
+CREATE TABLE IF NOT EXISTS run_source_links (
+    link_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    instance_id TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL DEFAULT '',
+    turn_id TEXT NOT NULL DEFAULT '',
+    attributed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    CHECK (attributed IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS run_source_links_run ON run_source_links(run_id);
+CREATE INDEX IF NOT EXISTS run_source_links_turn ON run_source_links(turn_id);
+CREATE TABLE IF NOT EXISTS usage_records (
+    usage_id TEXT PRIMARY KEY,
+    source_ns TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL DEFAULT 1,
+    scope TEXT NOT NULL,
+    semantic TEXT NOT NULL,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cache_read_tokens INTEGER,
+    cache_write_tokens INTEGER,
+    total_tokens INTEGER,
+    quality TEXT NOT NULL,
+    basis TEXT NOT NULL DEFAULT '',
+    reset_observed INTEGER NOT NULL DEFAULT 0,
+    event_id TEXT NOT NULL DEFAULT '',
+    recorded_at TEXT NOT NULL,
+    CHECK (epoch >= 1),
+    CHECK (semantic IN ('cumulative', 'delta')),
+    CHECK (quality IN ('observed', 'estimated', 'unknown')),
+    CHECK (reset_observed IN (0, 1)),
+    UNIQUE (source_ns, turn_id, epoch, scope)
+);
+CREATE INDEX IF NOT EXISTS usage_records_turn
+    ON usage_records(turn_id, epoch);
+CREATE TABLE IF NOT EXISTS projection_state (
+    projection TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 1,
+    cursor INTEGER NOT NULL DEFAULT 0,
+    complete_before INTEGER NOT NULL DEFAULT 0,
+    dirty_from INTEGER,
+    dirty_to INTEGER,
+    updated_at TEXT NOT NULL,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (projection, project_id),
+    CHECK (version >= 1),
+    CHECK (cursor >= 0),
+    CHECK (complete_before >= 0)
+);
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    notification_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT '',
+    event_id TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    delivered_at TEXT,
+    acked_at TEXT,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    CHECK (status IN ('pending', 'delivered', 'acked', 'failed')),
+    UNIQUE (event_id, channel)
+);
+CREATE INDEX IF NOT EXISTS notification_deliveries_project
+    ON notification_deliveries(project_id, created_at);
+`
+
+const (
+	// ledgerTable 是迁移台账：每个版本一行，含内容摘要与应用时间。
+	ledgerTable = "schema_migrations"
+
+	ledgerDDL = `CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    checksum TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+)`
+
+	// metaSchemaVersionKey 是旧读法的兼容键，只由 MigrateDB 推进。
+	metaSchemaVersionKey = "schema_version"
+	// metaMinWriterVersionKey 是新写者门槛；INSERT OR IGNORE，绝不把门槛降回去。
+	metaMinWriterVersionKey = "min_writer_version"
+)
+
+var (
+	// ErrNotMigrated 表示库文件缺失或尚未推进到当前迁移序列。
+	ErrNotMigrated = errors.New("db: schema 未迁移")
+	// ErrSchemaDrift 表示台账里的版本／摘要与当前二进制不一致（被手改或库比二进制新）。
+	ErrSchemaDrift = errors.New("db: schema 台账与迁移序列不一致")
+	// ErrReadOnlyStore 表示在只读 Store 上请求写或迁移。
+	ErrReadOnlyStore = errors.New("db: 只读 Store 不允许写或迁移")
+)
+
+// querier 是 inspect 需要的最小连接面：只读查询，不需要事务。
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// Migrations 返回迁移序列的副本（按版本升序）：调用方改切片不会动到内部注册表。
+func Migrations() []Migration {
+	return sortedMigrations()
+}
+
+// LatestVersion 是本二进制迁移台账的末端版本。
+//
+// 发布契约常量 version.SchemaVersion 可滞后于台账（由发布卡单独推进）；
+// 写者门槛与 meta.schema_version 以本函数为准。
+func LatestVersion() int {
+	latest := 0
+	for _, m := range migrations {
+		if m.Version > latest {
+			latest = m.Version
+		}
+	}
+	return latest
+}
+
+func migrationChecksum(sqlText string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(sqlText)))
+	return hex.EncodeToString(sum[:])
+}
+
+// SchemaStatus 是一次只读体检的结果；零值表示「什么都不知道」。
+type SchemaStatus struct {
+	Current   int   // 台账里已应用的最大版本；无台账为 0
+	Latest    int   // 本二进制的最新版本
+	Pending   []int // 尚未应用的版本（升序）
+	Drift     []int // 台账存在但与迁移序列不符的版本
+	HasLedger bool  // 台账表是否存在
+}
+
+// UpToDate 报告库是否正好停在当前迁移序列的末端。
+func (s SchemaStatus) UpToDate() bool {
+	return s.HasLedger && len(s.Pending) == 0 && len(s.Drift) == 0 && s.Current == s.Latest
+}
+
+// InspectSchema 只读检查迁移台账：不建表、不写 meta、不开写事务。
+//
+// 这是查询侧唯一允许的 schema 检查方式；它不会顺手把旧库升级掉。
+func InspectSchema(q querier) (SchemaStatus, error) {
+	st := SchemaStatus{Latest: LatestVersion()}
+	known := make(map[int]string, len(migrations))
+	for _, m := range migrations {
+		known[m.Version] = migrationChecksum(m.SQL)
+	}
+
+	var name string
+	err := q.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, ledgerTable).Scan(&name)
+	ordered := sortedMigrations()
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		for _, m := range ordered {
+			st.Pending = append(st.Pending, m.Version)
+		}
+		return st, nil
+	case err != nil:
+		return st, err
+	}
+	st.HasLedger = true
+
+	rows, err := q.Query(`SELECT version, checksum FROM ` + ledgerTable + ` ORDER BY version ASC`)
+	if err != nil {
+		return st, err
+	}
+	defer rows.Close()
+	applied := make(map[int]bool, len(migrations))
+	for rows.Next() {
+		var v int
+		var sum string
+		if err := rows.Scan(&v, &sum); err != nil {
+			return st, err
+		}
+		applied[v] = true
+		if v > st.Current {
+			st.Current = v
+		}
+		if want, ok := known[v]; !ok || want != sum {
+			st.Drift = append(st.Drift, v)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return st, err
+	}
+	for _, m := range ordered {
+		if !applied[m.Version] {
+			st.Pending = append(st.Pending, m.Version)
+		}
+	}
+	return st, nil
+}
+
+// VerifySchema 只读校验：台账齐备、摘要一致、已停到最新版本。
+func VerifySchema(q querier) error {
+	st, err := InspectSchema(q)
+	if err != nil {
+		return err
+	}
+	if !st.HasLedger {
+		return fmt.Errorf("%w: 缺少 %s 台账", ErrNotMigrated, ledgerTable)
+	}
+	if len(st.Drift) > 0 {
+		return fmt.Errorf("%w: 版本 %v", ErrSchemaDrift, st.Drift)
+	}
+	if len(st.Pending) > 0 {
+		return fmt.Errorf("%w: 待应用迁移 %v", ErrNotMigrated, st.Pending)
+	}
+	return nil
+}
+
+// Migrate 打开（必要时创建目录）并把库推进到最新迁移版本。
+//
+// 这是唯一会改 schema 的入口：读路径与普通写事务都不调用它。
+func Migrate(path string) error {
+	if err := ensureParentDir(path); err != nil {
+		return err
+	}
+	conn, err := openConn(path, writeConnOptions())
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return MigrateDB(conn)
+}
+
+// MigrateDB 在已有连接上按序补齐未应用的迁移。
+//
+// 顺序：先过写者闸门，再动 schema。库被更新的二进制升级过时返回 ErrSchemaAhead，
+// 绝不会把 schema_version 写回旧值。已是最新时不发 DDL，但仍会盖章
+// min_writer_version（INSERT OR IGNORE）。需要补账时全部迁移与台账写入落在同一个
+// 写事务里，中断即整体回滚，不留「表建了一半、台账没记」的中间态。
+func MigrateDB(conn *sql.DB) error {
+	if _, err := checkWriterGate(conn); err != nil {
+		return err
+	}
+	st, err := InspectSchema(conn)
+	if err != nil {
+		return err
+	}
+	if len(st.Drift) > 0 {
+		return fmt.Errorf("%w: 版本 %v", ErrSchemaDrift, st.Drift)
+	}
+	if st.HasLedger && len(st.Pending) == 0 {
+		return stampMinWriterVersion(conn)
+	}
+
+	tx, err := conn.Begin() // _txlock=immediate → BEGIN IMMEDIATE
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ledgerDDL); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	// 另一个进程可能刚补齐同一批迁移，进事务后重读，避免主键冲突与重复执行。
+	applied, err := appliedVersions(tx)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	for _, m := range sortedMigrations() {
+		if applied[m.Version] {
+			continue
+		}
+		if _, err := tx.Exec(m.SQL); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("db: 应用迁移 %d（%s）失败: %w", m.Version, m.Name, err)
+		}
+		if m.Apply != nil {
+			if err := m.Apply(tx); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("db: 迁移 %d（%s）的数据步骤失败: %w", m.Version, m.Name, err)
+			}
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO `+ledgerTable+`(version, name, checksum, applied_at) VALUES (?,?,?,?)`,
+			m.Version, m.Name, migrationChecksum(m.SQL), UTCNow(),
+		); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	// 兼容旧读法：board／status 仍可能读 meta.schema_version。它只在这里推进。
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)`,
+		metaSchemaVersionKey, strconv.Itoa(LatestVersion())); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	// 首次由新写者打开时盖章；已盖章则保留（不把门槛降回去）。
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)`,
+		metaMinWriterVersionKey, version.Version); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// stampMinWriterVersion 在已最新的库上补盖写者门槛（不改 schema_version）。
+func stampMinWriterVersion(conn *sql.DB) error {
+	_, err := conn.Exec(`INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)`,
+		metaMinWriterVersionKey, version.Version)
+	return err
+}
+
+func appliedVersions(q querier) (map[int]bool, error) {
+	rows, err := q.Query(`SELECT version FROM ` + ledgerTable)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int]bool{}
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out[v] = true
+	}
+	return out, rows.Err()
+}

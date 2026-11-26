@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.kiwh77.maw",
   "build": {
-    "frontendDist": "../dist"
+    "frontendDist": "../ui"
   },
   "app": {
     "windows": [
@@ -13,7 +13,7 @@
         "width": 1100,
         "height": 720,
         "resizable": true,
-        "url": "http://127.0.0.1:7420/"
+        "url": "index.html"
       }
     ],
     "security": {

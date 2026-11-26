@@ -1,0 +1,17 @@
+{
+  "assumed_values": [
+    "subtype=success 的空正文形态未实测，此处按结果记录结构构造",
+    "num_turns=0 与 usage 全 0 的取值未实测，仅作解析器边界"
+  ],
+  "defect": "success_subtype_without_content",
+  "derived_from": "VN301-S04",
+  "do_not_use_as": "来源实测；本样本不可用于声称 CLI 会返回空成功",
+  "expected_interpretation": "subtype=success 不足以判定交付；空正文与零用量必须降级为待核实",
+  "files": {
+    "records.json": "d18e93deec719959eeed05d22272f30408923b65f888a821b5eae36188150afb"
+  },
+  "kind": "synthetic",
+  "origin": "由 VN301-S04 清空正文与用量构造",
+  "sample_id": "VN301-X03",
+  "schema": "maw.evidence.codebuddy/v1"
+}

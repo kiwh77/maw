@@ -1,0 +1,22 @@
+{
+  "schema": "maw.evidence.zcode/capability-matrix/v1",
+  "source": {
+    "task": "VN-307",
+    "evidence_dir": "docs/evidence/zcode",
+    "platform": "darwin",
+    "generated_at": "2026-10-24T00:20:00Z"
+  },
+  "version_binding": {
+    "valid_for_cli_versions": ["1.0.0"],
+    "rule": "managed.launch 仅在 runtime+provider+model 三列就绪且版本命中时 observed；model.invoke／cancel／resume 本卡未实测"
+  },
+  "capabilities": [
+    {"id": "Z01", "name": "entry.runtime_probe", "state": "observed"},
+    {"id": "Z02", "name": "config.provider_explicit", "state": "observed"},
+    {"id": "Z03", "name": "config.model_ready", "state": "observed"},
+    {"id": "Z04", "name": "managed.launch", "state": "observed", "requires": ["runtime", "provider", "model", "version=1.0.0"]},
+    {"id": "Z05", "name": "model.invoke", "state": "unobserved"},
+    {"id": "Z06", "name": "cancel.graceful_stop", "state": "unknown"},
+    {"id": "Z07", "name": "session.resume", "state": "unknown"}
+  ]
+}

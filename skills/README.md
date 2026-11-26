@@ -1,26 +1,31 @@
-# Agent Skills（maw 工作流）
+# Agent Skills (maw workflow)
 
-面向 Cursor / Claude Code 等支持 [Agent Skills](https://docs.cursor.com/context/skills) 的客户端：按阶段引导 Agent 正确使用 maw。
+> Languages: **English** | [简体中文](README.zh-CN.md)
 
-| 技能 | 作用 |
+For clients that support [Agent Skills](https://docs.cursor.com/context/skills) (Cursor, Claude Code, …): stage-by-stage guidance for using maw correctly.
+
+Each skill directory has **`SKILL.md` (English)** and **`SKILL.zh-CN.md` (Chinese)**.
+
+| Skill | Role |
 | --- | --- |
-| [maw](maw/SKILL.md) | 系列路由与执行期速查 |
-| [maw-init](maw-init/SKILL.md) | 工程初始化 / 协议升级 |
-| [maw-task-list](maw-task-list/SKILL.md) | 拆可领取任务清单 |
-| [maw-plan-push](maw-plan-push/SKILL.md) | 写蓝图并 `plan apply` |
-| [maw-task-pull](maw-task-pull/SKILL.md) | `maw next` 本仓或跨仓领题 |
+| [maw](maw/SKILL.md) | Series router and execution cheat sheet |
+| [maw-init](maw-init/SKILL.md) | Project init / protocol upgrade |
+| [maw-task-list](maw-task-list/SKILL.md) | Split claimable task cards |
+| [maw-plan-push](maw-plan-push/SKILL.md) | Write blueprint and `plan apply` |
+| [maw-task-pull](maw-task-pull/SKILL.md) | `maw next` in-repo or cross-repo |
+| [maw-status-attach](maw-status-attach/SKILL.md) | Attach non-claimed work; `status report` to the hub |
 
-## 安装到本机
+## Install locally
 
-把本目录下各技能目录复制或软链到客户端的 skills 路径，例如：
+Copy or symlink each skill directory into your client's skills path, for example:
 
 ```bash
-# Cursor（用户技能）
 ln -s "$(pwd)/skills/maw" ~/.cursor/skills/maw
 ln -s "$(pwd)/skills/maw-init" ~/.cursor/skills/maw-init
 ln -s "$(pwd)/skills/maw-task-list" ~/.cursor/skills/maw-task-list
 ln -s "$(pwd)/skills/maw-plan-push" ~/.cursor/skills/maw-plan-push
 ln -s "$(pwd)/skills/maw-task-pull" ~/.cursor/skills/maw-task-pull
+ln -s "$(pwd)/skills/maw-status-attach" ~/.cursor/skills/maw-status-attach
 ```
 
-若使用中央库（如 `~/.agents/skills`），链到中央库后再由各工具互通即可。
+If you use a central library (e.g. `~/.agents/skills`), link there and let tools share it.

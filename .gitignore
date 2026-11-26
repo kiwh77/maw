@@ -16,8 +16,10 @@ build/
 # Local / generated (do not publish)
 output/
 .workbuddy/
+.workbuddy-ai/
 *.db
 .idea/
 .vscode/
 clients/desktop/src-tauri/target/
 coverage.out
+test-results/

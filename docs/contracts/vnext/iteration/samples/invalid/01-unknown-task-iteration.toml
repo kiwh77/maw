@@ -1,0 +1,15 @@
+[meta]
+name = "unknown-task-iteration"
+main_branch = "main"
+
+[[iteration]]
+id = "IT-001"
+name = "唯一迭代"
+
+[[task]]
+id = "T-001"
+title = "挂了不存在的迭代"
+iteration = "IT-999"
+write_scope = ["internal/a/**"]
+acceptance = ["a 完成"]
+verify = ["manual: a"]

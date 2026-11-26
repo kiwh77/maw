@@ -1,0 +1,13 @@
+{
+  "contract": "maw.ui.data/v1",
+  "dicts": {
+    "board": {
+      "zh": {
+        "view.board.title": "任务看板",
+        "view.board.empty": "暂无任务"
+      },
+      "en": { "view.board.title": "Board" }
+    }
+  },
+  "expect": { "codes": ["V131"] }
+}

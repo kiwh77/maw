@@ -1,0 +1,69 @@
+{
+  "contract": "maw.delivery.manifest/v1",
+  "project_id": "716c30878ba1b95f",
+  "deliveries": [
+    {
+      "delivery_id": "dlv_008",
+      "task_instance": "ti_vn003c",
+      "task_version": 1,
+      "run_id": "run_a001",
+      "mode": "code",
+      "baseline_commit": "dedc919",
+      "candidate_commit": "abc1234",
+      "delivered_at": "2026-10-23T07:09:00Z",
+      "artifacts": [
+        {
+          "artifact_id": "art_001",
+          "kind": "commit",
+          "ref": "abc1234",
+          "declared_by": "manual",
+          "exists": true,
+          "in_write_scope": true
+        },
+        {
+          "artifact_id": "art_002",
+          "kind": "file",
+          "ref": "docs/contracts/vnext/delivery/x.md",
+          "declared_by": "cli",
+          "exists": true,
+          "in_write_scope": true,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "verification": [
+        {
+          "verification_id": "vfy_061",
+          "command": "go test ./...",
+          "target_task_version": 1,
+          "result": "pass",
+          "evidence": [
+            "exit_code:0",
+            "go test: 12 packages ok",
+            "diff_stat: 3 files"
+          ],
+          "ran_at": "2026-10-23T07:10:00Z",
+          "target_commit": "abc1234"
+        }
+      ],
+      "review": {
+        "required": true,
+        "verdict": "changes_requested",
+        "reviewer": "r1",
+        "reviewed_at": "2026-10-23T07:12:00Z"
+      },
+      "merge": {
+        "required": true,
+        "merged": false,
+        "merged_commit": null,
+        "merged_at": null
+      },
+      "completion": {
+        "decision": "rejected",
+        "decided_at": "2026-10-23T07:16:00Z",
+        "reason": "合入冲突：docs/x.md 与主干同名文件冲突，需重做"
+      },
+      "supersedes": null,
+      "superseded_by": null
+    }
+  ]
+}

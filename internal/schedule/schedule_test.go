@@ -74,8 +74,8 @@ func TestSerializedByDeps(t *testing.T) {
 	}
 }
 
-func TestPickNextReadyForAffinity(t *testing.T) {
-	// w1 刚做完 nbagent；ready 里有更优先的无关题 + 同模块续题 + 依赖续链
+func TestPickNextReadyAffinityIsTieBreakOnly(t *testing.T) {
+	// 亲和不再压过 priority：pri 更优的无关题应先于续链题。
 	done := &db.Task{
 		ID: "T-074", Status: "done", Owner: "w1", Priority: 1, MergeOrder: 10,
 		WriteScope: []string{"backend/internal/nbagent/**"}, Heartbeat: "2026-01-02T00:00:00Z",
@@ -95,29 +95,18 @@ func TestPickNextReadyForAffinity(t *testing.T) {
 
 	all := []*db.Task{done, unrelated, sameModule, depNext}
 
-	// 无 agent：仍按全局序位 → T-010
-	got := PickNextReady(all)
+	got := PickNextReadyFor(all, "w1")
 	if got == nil || got.ID != "T-010" {
-		t.Fatalf("no-agent want T-010, got %#v", got)
+		t.Fatalf("priority must beat affinity, want T-010, got %#v", got)
 	}
 
-	// w1：依赖续链分最高 → T-080
+	// 同分（同 priority/merge_order）时亲和打破：续链赢
+	sameModule.Priority, sameModule.MergeOrder = 1, 5
+	depNext.Priority, depNext.MergeOrder = 1, 5
+	unrelated.Status = "backlog"
 	got = PickNextReadyFor(all, "w1")
 	if got == nil || got.ID != "T-080" {
-		t.Fatalf("w1 affinity want T-080 (deps), got %#v", got)
-	}
-
-	// 去掉续链后：同模块亲和优先于更优先的前端题
-	depNext.Status = "backlog"
-	got = PickNextReadyFor(all, "w1")
-	if got == nil || got.ID != "T-075" {
-		t.Fatalf("w1 affinity want T-075 (same module), got %#v", got)
-	}
-
-	// 陌生 agent：无锚点，回退全局序位
-	got = PickNextReadyFor(all, "w9")
-	if got == nil || got.ID != "T-010" {
-		t.Fatalf("w9 want T-010, got %#v", got)
+		t.Fatalf("tie-break affinity want T-080, got %#v", got)
 	}
 }
 
@@ -135,5 +124,59 @@ func TestAffinityScore(t *testing.T) {
 	}
 	if AffinityScore(far, hint) != 0 {
 		t.Fatal("docs vs foo should be zero affinity")
+	}
+}
+
+func TestLaneStickyPick(t *testing.T) {
+	import2 := &db.Task{
+		ID: "N-2", Status: "done", Owner: "w1", Priority: 20, MergeOrder: 20, Lane: "IMPORT",
+		WriteScope: []string{"backend/internal/requirement/importdraft/**"},
+		Heartbeat:  "2026-01-02T00:00:00Z",
+	}
+	import4 := &db.Task{
+		ID: "N-4", Status: "ready", Priority: 30, MergeOrder: 31, Lane: "IMPORT",
+		Deps: []string{"N-2"}, WriteScope: []string{"backend/internal/requirement/importdraft/adapters/modao/**"},
+	}
+	bp8 := &db.Task{
+		ID: "N-8", Status: "ready", Priority: 20, MergeOrder: 21, Lane: "BLUEPRINT",
+		WriteScope: []string{"backend/internal/mawbridge/**"},
+	}
+	fig11 := &db.Task{
+		ID: "N-11", Status: "ready", Priority: 20, MergeOrder: 22, Lane: "FIGMA",
+		WriteScope: []string{"backend/internal/app.go"},
+	}
+	all := []*db.Task{import2, import4, bp8, fig11}
+
+	// 粘在 IMPORT：只能领到 4，即使 8/11 priority 更好
+	got := PickNextReadyInLane(all, "w1", "IMPORT", nil, true)
+	if got == nil || got.ID != "N-4" {
+		t.Fatalf("IMPORT lane want N-4, got %#v", got)
+	}
+
+	// 未绑定自动选队：队首最优是 BLUEPRINT 的 N-8（pri 20 mo 21）
+	lane, head := SelectLane(all, nil)
+	if lane != "BLUEPRINT" || head == nil || head.ID != "N-8" {
+		t.Fatalf("SelectLane want BLUEPRINT/N-8, got %q %#v", lane, head)
+	}
+
+	// FIGMA 显式
+	got = PickNextReadyInLane(all, "w1", "FIGMA", nil, true)
+	if got == nil || got.ID != "N-11" {
+		t.Fatalf("FIGMA want N-11, got %#v", got)
+	}
+}
+
+func TestSelectLaneIgnoresEmptyLanes(t *testing.T) {
+	onlyBlocked := &db.Task{
+		ID: "A-2", Status: "ready", Priority: 1, Lane: "A",
+		Deps: []string{"A-1"}, WriteScope: []string{"a/**"},
+	}
+	ok := &db.Task{
+		ID: "B-1", Status: "ready", Priority: 50, Lane: "B",
+		WriteScope: []string{"b/**"},
+	}
+	lane, head := SelectLane([]*db.Task{onlyBlocked, ok}, nil)
+	if lane != "B" || head == nil || head.ID != "B-1" {
+		t.Fatalf("want B/B-1, got %q %#v", lane, head)
 	}
 }

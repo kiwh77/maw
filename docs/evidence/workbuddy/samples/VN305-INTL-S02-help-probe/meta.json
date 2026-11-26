@@ -1,0 +1,49 @@
+{
+  "expectation": "exit 0 且 stdout 为帮助清单；只读，不改配置",
+  "kind": "measured",
+  "outcome": {
+    "duration_ms": 1237,
+    "exit_code": 0,
+    "stderr_bytes": 0,
+    "stdout_bytes": 12654,
+    "stdout_sha256": "59dcfb975ad13ea4750ac611dabea50b59aaf91da9be568ff3ed138c07a4b28e",
+    "timed_out": false,
+    "unparseable_stdout_lines": 0
+  },
+  "probe": "help",
+  "redactions": [
+    "none"
+  ],
+  "sample_id": "VN305-INTL-S02",
+  "schema": "maw.evidence.workbuddy/v1",
+  "source": {
+    "app_name": "WorkBuddy AI",
+    "app_version": "5.8.4",
+    "argv_template": [
+      "<CLI_ENTRY>",
+      "--help"
+    ],
+    "bundle_id": "com.workbuddy.workbuddy-ai",
+    "captured_at": "2026-10-24T00:02:40Z",
+    "cli": "codebuddy",
+    "cli_entry": "<CLI_ENTRY>",
+    "collector": "collect_probe.py v1",
+    "cwd_template": "/tmp",
+    "distribution": "intl",
+    "entry_suffix": "Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+    "env_allowlist": [
+      "HOME",
+      "LANG",
+      "NO_COLOR",
+      "PATH",
+      "SHELL",
+      "TERM",
+      "TMPDIR"
+    ],
+    "env_overrides": {
+      "CODEBUDDY_DISABLE_COMPILE_CACHE": "1",
+      "CODEBUDDY_FORCE_LITE_WB_BUNDLE": "1"
+    },
+    "platform": "darwin"
+  }
+}

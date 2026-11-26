@@ -1,0 +1,61 @@
+{
+  "contract": "maw.delivery.manifest/v1",
+  "project_id": "716c30878ba1b95f",
+  "deliveries": [
+    {
+      "delivery_id": "dlv_002",
+      "task_instance": "ti_vn003c",
+      "task_version": 1,
+      "run_id": "run_a001",
+      "mode": "non_code",
+      "baseline_commit": "dedc919",
+      "candidate_commit": null,
+      "delivered_at": "2026-10-23T07:09:00Z",
+      "artifacts": [
+        {
+          "artifact_id": "art_011",
+          "kind": "file",
+          "ref": "docs/contracts/vnext/delivery/spec.md",
+          "declared_by": "manual",
+          "exists": true,
+          "in_write_scope": true,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "verification": [
+        {
+          "verification_id": "vfy_011",
+          "command": "manual: 逐条核对契约表述",
+          "target_task_version": 1,
+          "result": "manual",
+          "evidence": [
+            "reviewer:boss",
+            "checklist:6/6"
+          ],
+          "ran_at": "2026-10-23T07:10:00Z",
+          "target_artifact_id": "art_011",
+          "target_artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "review": {
+        "required": true,
+        "verdict": "approved",
+        "reviewer": "boss",
+        "reviewed_at": "2026-10-23T07:20:00Z"
+      },
+      "merge": {
+        "required": false,
+        "merged": false,
+        "merged_commit": null,
+        "merged_at": null
+      },
+      "completion": {
+        "decision": "done",
+        "decided_at": "2026-10-23T07:16:00Z",
+        "reason": ""
+      },
+      "supersedes": null,
+      "superseded_by": null
+    }
+  ]
+}

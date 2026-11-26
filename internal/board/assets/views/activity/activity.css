@@ -1,0 +1,167 @@
+/* 全天活动热图（VN-742）——只用共享 token，不另起色板。 */
+
+.activity {
+  font-family: var(--sans);
+  font-size: var(--font-body);
+  line-height: var(--line-body);
+  color: var(--text);
+  /* 左右／底部留白由外层 .vnext + .content 提供，视图内不再叠加一层。 */
+  padding: 0;
+}
+
+.activity__head h1 {
+  font-size: var(--font-title);
+  margin: 0 0 4px;
+}
+
+.activity__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: var(--space-block) 0;
+}
+
+.activity__filter select {
+  font: inherit;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-key);
+  padding: 2px 6px;
+}
+
+.activity__kbd {
+  font-size: var(--font-meta);
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-key);
+  padding: 1px 5px;
+  background: var(--card);
+}
+
+.activity__missing-banner {
+  border: 1px solid var(--warn);
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: var(--font-meta);
+  color: var(--text);
+  margin: 0 0 var(--space-block);
+}
+
+.activity__metric {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-card);
+  margin-bottom: var(--space-block);
+}
+
+.activity__metric h2 {
+  font-size: var(--font-panel);
+  margin: 0 0 4px;
+}
+
+.activity__unit {
+  font-size: var(--font-meta);
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.activity__grid {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.activity__cell {
+  position: relative;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-key);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  padding: 2px 1px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.activity__cell:focus {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+  z-index: 2;
+}
+
+/* 色阶共用执行覆盖的强调色，只调透明度；缺测用斜线纹理而非颜色。 */
+.activity__cell--l1 { background: color-mix(in srgb, var(--accent) 25%, var(--panel)); }
+.activity__cell--l2 { background: color-mix(in srgb, var(--accent) 45%, var(--panel)); }
+.activity__cell--l3 { background: color-mix(in srgb, var(--accent) 70%, var(--panel)); }
+.activity__cell--l4 { background: var(--accent); color: var(--accent-ink); }
+
+.activity__cell--missing {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--panel),
+    var(--panel) 3px,
+    var(--line-strong) 3px,
+    var(--line-strong) 6px
+  );
+  color: var(--muted);
+}
+
+.activity__cell--selected {
+  border-color: var(--text);
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+
+.activity__cell-hour {
+  color: var(--muted);
+}
+
+.activity__cell--l4 .activity__cell-hour {
+  color: var(--accent-ink);
+}
+
+.activity__cell-value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.activity__detail {
+  margin-top: var(--space-block);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-card);
+}
+
+.activity__detail h2 {
+  font-size: var(--font-panel);
+  margin: 0 0 8px;
+}
+
+@media (max-width: 700px) {
+  /* 窄屏也不在视图内补内边距：外层 .content 已经按断点收窄（28px → 16px）。 */
+  .activity__toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .activity__grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+  .activity__cell {
+    min-height: 40px;
+  }
+}

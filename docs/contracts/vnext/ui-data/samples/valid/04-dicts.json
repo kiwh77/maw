@@ -1,0 +1,20 @@
+{
+  "contract": "maw.ui.data/v1",
+  "dicts": {
+    "board": {
+      "zh": {
+        "view.board.title": "任务看板",
+        "view.board.empty": "暂无任务"
+      },
+      "en": {
+        "view.board.title": "Board",
+        "view.board.empty": "No tasks"
+      },
+      "fallback": ["current", "zh", "global", "key"],
+      "resolution": [
+        { "key": "view.board.title", "value": "任务看板" },
+        { "key": "view.board.missing", "value": "view.board.missing" }
+      ]
+    }
+  }
+}

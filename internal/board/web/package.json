@@ -1,0 +1,23 @@
+{
+  "name": "maw-board-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Board topology front-end bundle (Vite + TypeScript + @antv/x6)",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "watch": "vite build --watch"
+  },
+  "dependencies": {
+    "@antv/x6": "^3.1.8",
+    "three": "0.180.0",
+    "tslib": "^2.8.1",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.10",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}

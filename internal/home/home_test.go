@@ -26,39 +26,15 @@ func gitInit(t *testing.T, dir string) {
 }
 
 func samePath(a, b string) bool {
-	resolve := func(p string) string {
-		if p == "" {
-			return p
-		}
-		if abs, err := filepath.Abs(p); err == nil {
-			p = abs
-		}
-		if r, err := filepath.EvalSymlinks(p); err == nil {
-			return filepath.Clean(r)
-		}
-		// Path may not exist yet — resolve existing parents.
-		dir, base := filepath.Split(filepath.Clean(p))
-		for dir != "" && dir != string(filepath.Separator) {
-			if r, err := filepath.EvalSymlinks(dir); err == nil {
-				return filepath.Clean(filepath.Join(r, base))
-			}
-			parent := filepath.Dir(dir)
-			base = filepath.Join(filepath.Base(dir), base)
-			if parent == dir {
-				break
-			}
-			dir = parent + string(filepath.Separator)
-		}
-		return filepath.Clean(p)
-	}
-	return resolve(a) == resolve(b)
+	return CanonicalRepoPath(a) == CanonicalRepoPath(b)
 }
 
 func TestRepoRootAndMawHome(t *testing.T) {
+	g := t.TempDir()
+	t.Setenv("MAW_GLOBAL", g)
+	t.Setenv("MAW_HOME", "")
+
 	repo := t.TempDir()
-	if r, err := filepath.EvalSymlinks(repo); err == nil {
-		repo = r
-	}
 	gitInit(t, repo)
 	root, err := RepoRoot(repo)
 	if err != nil {
@@ -71,26 +47,64 @@ func TestRepoRootAndMawHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(repo, MultiagentDir)
-	if !samePath(h, want) {
+	// ProjectHome 必须以 git 解析后的 root 为准（macOS /var vs /private/var）
+	want, err := ProjectHome(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h != want {
 		t.Fatalf("home=%s want %s", h, want)
 	}
+	expect := filepath.Join(g, ProjectsDir, ProjectIDFromPath(root))
+	if h != expect && !samePath(h, expect) {
+		t.Fatalf("expected under %s/projects, got %s", g, h)
+	}
 	if _, err := RequireHome(repo); err == nil {
-		t.Fatal("RequireHome should fail before init dir exists")
+		t.Fatal("RequireHome should fail before attach dir exists")
 	}
 	if err := os.MkdirAll(want, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := RequireHome(repo); err != nil || !samePath(got, want) {
-		t.Fatalf("RequireHome=%s %v", got, err)
+	got, err := RequireHome(repo)
+	if err != nil {
+		t.Fatalf("RequireHome: %v", err)
+	}
+	if got != want {
+		t.Fatalf("RequireHome=%s want %s", got, want)
+	}
+}
+
+func TestMawHomeIgnoresInRepoMultiagent(t *testing.T) {
+	g := t.TempDir()
+	t.Setenv("MAW_GLOBAL", g)
+	t.Setenv("MAW_HOME", "")
+
+	repo := t.TempDir()
+	gitInit(t, repo)
+	inRepo := filepath.Join(repo, MultiagentDir)
+	if err := os.MkdirAll(inRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h, err := MawHome(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if samePath(h, inRepo) {
+		t.Fatal("MawHome must not use in-repo .multiagent")
+	}
+	want, _ := ProjectHome(repo)
+	if !samePath(h, want) {
+		t.Fatalf("home=%s want %s", h, want)
 	}
 }
 
 func TestMAW_HOMEOverride(t *testing.T) {
+	g := t.TempDir()
+	t.Setenv("MAW_GLOBAL", g)
 	repo := t.TempDir()
 	gitInit(t, repo)
 	custom := filepath.Join(t.TempDir(), "custom-home")
-	if err := os.MkdirAll(filepath.Join(custom, MultiagentDir), 0o755); err != nil {
+	if err := os.MkdirAll(custom, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("MAW_HOME", custom)
@@ -98,36 +112,15 @@ func TestMAW_HOMEOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !samePath(root, custom) {
-		t.Fatalf("RepoRoot with MAW_HOME=%s want %s", root, custom)
+	if !samePath(root, repo) {
+		t.Fatalf("RepoRoot must stay git root, got %s want %s", root, repo)
 	}
 	h, err := MawHome(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !samePath(h, filepath.Join(custom, MultiagentDir)) {
-		t.Fatalf("MawHome=%s", h)
-	}
-}
-
-func TestMAW_HOMEPointsAtMultiagent(t *testing.T) {
-	repo := t.TempDir()
-	gitInit(t, repo)
-	ma := filepath.Join(repo, MultiagentDir)
-	if err := os.MkdirAll(ma, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("MAW_HOME", ma)
-	root, err := RepoRoot(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !samePath(root, repo) {
-		t.Fatalf("root=%s want %s", root, repo)
-	}
-	h, err := MawHome(".")
-	if err != nil || !samePath(h, ma) {
-		t.Fatalf("home=%s %v", h, err)
+	if !samePath(h, custom) {
+		t.Fatalf("MawHome=%s want %s", h, custom)
 	}
 }
 
@@ -157,7 +150,7 @@ func TestProjectIDFromPathStable(t *testing.T) {
 }
 
 func TestPathHelpers(t *testing.T) {
-	h := "/repo/.multiagent"
+	h := "/tmp/maw-projects/abc"
 	if ConfigPath(h) != filepath.Join(h, ConfigName) {
 		t.Fatal("config")
 	}

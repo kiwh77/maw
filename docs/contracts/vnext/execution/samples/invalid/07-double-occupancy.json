@@ -1,0 +1,166 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E240",
+  "note": "同一任务实例同时有两个有效 Run：重复派发，两份进程会互相覆盖同一份产物。",
+  "auto_execution": {
+    "enabled": false,
+    "managed_execution_limit": 0
+  },
+  "runs": [
+    {
+      "run_id": "run_g007",
+      "task_instance": "ti_vn016g",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "running",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": false,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T07:20:01Z",
+      "finished_at": null,
+      "evidence": [],
+      "phase_history": [
+        {
+          "phase": "reserved",
+          "at": "2026-10-23T07:20:00Z"
+        },
+        {
+          "phase": "preparing",
+          "at": "2026-10-23T07:20:01Z"
+        },
+        {
+          "phase": "launching",
+          "at": "2026-10-23T07:20:02Z"
+        },
+        {
+          "phase": "running",
+          "at": "2026-10-23T07:21:00Z"
+        }
+      ]
+    },
+    {
+      "run_id": "run_g008",
+      "task_instance": "ti_vn016g",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "running",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": false,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T07:22:01Z",
+      "finished_at": null,
+      "evidence": [],
+      "phase_history": [
+        {
+          "phase": "reserved",
+          "at": "2026-10-23T07:22:00Z"
+        },
+        {
+          "phase": "preparing",
+          "at": "2026-10-23T07:22:01Z"
+        },
+        {
+          "phase": "launching",
+          "at": "2026-10-23T07:22:02Z"
+        },
+        {
+          "phase": "running",
+          "at": "2026-10-23T07:23:00Z"
+        }
+      ]
+    }
+  ],
+  "operations": [],
+  "leases": [],
+  "events": [
+    {
+      "event_id": "evt_0100",
+      "cursor": 100,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g007",
+      "occurred_at": "2026-10-23T07:20:00Z",
+      "received_at": "2026-10-23T07:20:00Z",
+      "quality": "observed",
+      "to_phase": "reserved"
+    },
+    {
+      "event_id": "evt_0101",
+      "cursor": 101,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g007",
+      "occurred_at": "2026-10-23T07:20:01Z",
+      "received_at": "2026-10-23T07:20:01Z",
+      "quality": "observed",
+      "to_phase": "preparing"
+    },
+    {
+      "event_id": "evt_0102",
+      "cursor": 102,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g007",
+      "occurred_at": "2026-10-23T07:20:02Z",
+      "received_at": "2026-10-23T07:20:02Z",
+      "quality": "observed",
+      "to_phase": "launching"
+    },
+    {
+      "event_id": "evt_0103",
+      "cursor": 103,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g007",
+      "occurred_at": "2026-10-23T07:21:00Z",
+      "received_at": "2026-10-23T07:21:00Z",
+      "quality": "observed",
+      "to_phase": "running"
+    },
+    {
+      "event_id": "evt_0200",
+      "cursor": 200,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g008",
+      "occurred_at": "2026-10-23T07:22:00Z",
+      "received_at": "2026-10-23T07:22:00Z",
+      "quality": "observed",
+      "to_phase": "reserved"
+    },
+    {
+      "event_id": "evt_0201",
+      "cursor": 201,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g008",
+      "occurred_at": "2026-10-23T07:22:01Z",
+      "received_at": "2026-10-23T07:22:01Z",
+      "quality": "observed",
+      "to_phase": "preparing"
+    },
+    {
+      "event_id": "evt_0202",
+      "cursor": 202,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g008",
+      "occurred_at": "2026-10-23T07:22:02Z",
+      "received_at": "2026-10-23T07:22:02Z",
+      "quality": "observed",
+      "to_phase": "launching"
+    },
+    {
+      "event_id": "evt_0203",
+      "cursor": 203,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g008",
+      "occurred_at": "2026-10-23T07:23:00Z",
+      "received_at": "2026-10-23T07:23:00Z",
+      "quality": "observed",
+      "to_phase": "running"
+    }
+  ]
+}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/kiwh77/maw/internal/config"
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/home"
 )
 
 // TestPlanApplyPreservesHistory：增量 apply 不得抹掉 done / in_progress。
@@ -189,8 +190,8 @@ merge_order = 20
 			by[tsk.ID] = tsk
 		}
 		idle := by["T-IDLE"]
-		if idle == nil || idle.Status != "cancelled" {
-			t.Fatalf("T-IDLE 应软删除为 cancelled，实际 %#v", idle)
+		if idle != nil {
+			t.Fatalf("T-IDLE 应从计划退役（tasks 行释放），实际 %#v", idle)
 		}
 		if by["T-DONE"] == nil || by["T-DONE"].Status != "done" {
 			t.Fatalf("T-DONE 应保留 done，实际 %#v", by["T-DONE"])
@@ -292,7 +293,16 @@ func TestPlanApplySyncsMainBranch(t *testing.T) {
 	if out, err := run("init"); err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
-	cfgPath := filepath.Join(repo, ".multiagent", "config.toml")
+	t.Setenv("MAW_GLOBAL", globalDir)
+	root, err := home.RepoRoot(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := home.ProjectHome(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := home.ConfigPath(local)
 	cfg0, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)

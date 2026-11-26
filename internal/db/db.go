@@ -4,102 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"github.com/kiwh77/maw/internal/version"
+	"github.com/kiwh77/maw/internal/engine/model"
 )
-
-const schema = `
-CREATE TABLE IF NOT EXISTS meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    path TEXT NOT NULL UNIQUE,
-    main_branch TEXT NOT NULL DEFAULT 'main',
-    max_parallel INTEGER NOT NULL DEFAULT 4,
-    created_at TEXT NOT NULL,
-    last_seen TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS tasks (
-    project_id TEXT NOT NULL,
-    id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    status TEXT NOT NULL,
-    priority INTEGER NOT NULL DEFAULT 100,
-    merge_order INTEGER NOT NULL DEFAULT 100,
-    owner TEXT,
-    deps_json TEXT NOT NULL DEFAULT '[]',
-    write_scope_json TEXT NOT NULL DEFAULT '[]',
-    read_scope_json TEXT NOT NULL DEFAULT '[]',
-    acceptance_json TEXT NOT NULL DEFAULT '[]',
-    branch TEXT,
-    worktree TEXT,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    blocked_reason TEXT,
-    heartbeat TEXT,
-    prev_status TEXT,
-    revision INTEGER NOT NULL DEFAULT 0,
-    extra_json TEXT NOT NULL DEFAULT '{}',
-    PRIMARY KEY (project_id, id)
-);
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts TEXT NOT NULL,
-    project_id TEXT,
-    actor TEXT NOT NULL,
-    type TEXT NOT NULL,
-    task_id TEXT,
-    data_json TEXT NOT NULL DEFAULT '{}'
-);
-CREATE TABLE IF NOT EXISTS locks (
-    project_id TEXT NOT NULL,
-    path TEXT NOT NULL,
-    owner TEXT NOT NULL,
-    task_id TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    PRIMARY KEY (project_id, path)
-);
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts TEXT NOT NULL,
-    project_id TEXT,
-    sender TEXT NOT NULL,
-    recipient TEXT NOT NULL,
-    type TEXT NOT NULL,
-    task_id TEXT,
-    body_json TEXT NOT NULL DEFAULT '{}',
-    read INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS shared_files (
-    project_id TEXT NOT NULL,
-    path TEXT NOT NULL,
-    owner_task TEXT NOT NULL,
-    PRIMARY KEY (project_id, path)
-);
-CREATE TABLE IF NOT EXISTS agents (
-    project_id TEXT NOT NULL,
-    id TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'worker',
-    status TEXT NOT NULL DEFAULT 'idle',
-    task_id TEXT,
-    worktree TEXT,
-    branch TEXT,
-    registered_at TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    meta_json TEXT NOT NULL DEFAULT '{}',
-    PRIMARY KEY (project_id, id)
-);
-`
 
 type Project struct {
 	ID          string `json:"id"`
@@ -112,13 +24,19 @@ type Project struct {
 }
 
 type Task struct {
-	ProjectID     string         `json:"project_id"`
-	ProjectName   string         `json:"project_name,omitempty"`
-	ID            string         `json:"id"`
+	ProjectID   string `json:"project_id"`
+	ProjectName string `json:"project_name,omitempty"`
+	ID          string `json:"id"`
+	// InstanceID 是当前行的稳定实例身份（ti_...）。写入时留空表示「按编号找活跃实例，
+	// 没有就新建」；已填的引用必须仍存在、未被退役，否则拒绝写入。
+	InstanceID    string         `json:"instance_id"`
+	IterationID   string         `json:"iteration_id"`
 	Title         string         `json:"title"`
 	Status        string         `json:"status"`
 	Priority      int            `json:"priority"`
 	MergeOrder    int            `json:"merge_order"`
+	// Lane 是上下文子队列 id；空表示未标 lane（落入默认空队列，彼此仍可并行粘住）。
+	Lane          string         `json:"lane"`
 	Owner         string         `json:"owner"`
 	Deps          []string       `json:"deps"`
 	WriteScope    []string       `json:"write_scope"`
@@ -163,46 +81,6 @@ func UTCNow() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05Z")
 }
 
-// sqliteDSN builds a modernc DSN with busy_timeout (wait for locks) and
-// BEGIN IMMEDIATE so writers queue instead of racing deferred upgrades.
-func sqliteDSN(path string) string {
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
-	q := u.Query()
-	q.Add("_pragma", "busy_timeout(30000)")
-	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "foreign_keys(ON)")
-	q.Set("_txlock", "immediate")
-	u.RawQuery = q.Encode()
-	return u.String()
-}
-
-func openSQLite(path string) (*sql.DB, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	db, err := sql.Open("sqlite", sqliteDSN(path))
-	if err != nil {
-		return nil, err
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(0)
-	// Belt-and-suspenders: DSN already sets these on each new connection.
-	if _, err := db.Exec("PRAGMA busy_timeout=30000"); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	return db, nil
-}
-
 // IsBusy reports SQLITE_BUSY / SQLITE_LOCKED (incl. extended codes) or the
 // common "database is locked" message from drivers that wrap the code away.
 func IsBusy(err error) bool {
@@ -223,37 +101,41 @@ func IsBusy(err error) bool {
 		strings.Contains(msg, "sqlite_locked")
 }
 
+// Open 打开并推进迁移，返回裸连接（旧入口，需要自行 Close）。
+//
+// 它会改 schema，所以只给「本来就是写入口」的调用方用；纯查询请走
+// OpenReadOnly／WithReadTx，那条路径不建表、不升级、不加写锁。
 func Open(path string) (*sql.DB, error) {
-	db, err := openSQLite(path)
+	if err := ensureParentDir(path); err != nil {
+		return nil, err
+	}
+	db, err := openConn(path, writeConnOptions())
 	if err != nil {
 		return nil, err
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := MigrateDB(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return db, nil
 }
 
-// OpenRaw 打开数据库但不跑 schema 迁移（用于读取旧库）
+// OpenRaw 打开数据库但不跑 schema 迁移（用于读取旧库）。
 func OpenRaw(path string) (*sql.DB, error) {
-	return openSQLite(path)
+	return openConn(path, readConnOptions())
 }
 
+// EnsureSchema 兼容旧名：等价于 MigrateDB。
+//
+// 写者闸门与 min_writer_version 盖章由 MigrateDB 负责：库比二进制新时
+// 返回 ErrSchemaAhead，绝不会把 schema_version 写回旧值。
 func EnsureSchema(db *sql.DB) error {
-	if _, err := db.Exec(schema); err != nil {
-		return err
-	}
-	_, err := db.Exec(`INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)`, version.SchemaVersion)
-	return err
+	return MigrateDB(db)
 }
 
+// Init 建目录、建库并把 schema 推进到最新版本。
 func Init(path string) error {
-	db, err := Open(path)
-	if err != nil {
-		return err
-	}
-	return db.Close()
+	return Migrate(path)
 }
 
 func mustJSON(v any) string {
@@ -280,51 +162,21 @@ func nullStr(s string) any {
 	return s
 }
 
-const (
-	withTxMaxAttempts = 8
-	withTxBackoffMin  = 50 * time.Millisecond
-	withTxBackoffMax  = 2 * time.Second
-)
-
-func withTxOnce(path string, fn func(*sql.Tx) error) error {
-	db, err := Open(path)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	tx, err := db.Begin() // _txlock=immediate → BEGIN IMMEDIATE
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
-}
-
-// WithTx runs fn in a write transaction. On SQLITE_BUSY it retries with
-// exponential backoff (busy_timeout already waits up to 30s per attempt).
+// WithTx 是旧的一次性写入口：一次调用＝一个写事务。
+//
+// 迁移在重试循环之外、每次调用至多尝试一次补齐（已最新时只是两条只读查询）；
+// 重试循环内只有 BEGIN IMMEDIATE 与业务语句，不建目录、不跑 DDL、不起进程。
+// 需要复用的调用方应改用 OpenStore。
 func WithTx(path string, fn func(*sql.Tx) error) error {
-	backoff := withTxBackoffMin
-	var last error
-	for attempt := 0; attempt < withTxMaxAttempts; attempt++ {
-		last = withTxOnce(path, fn)
-		if last == nil || !IsBusy(last) {
-			return last
-		}
-		if attempt+1 == withTxMaxAttempts {
-			break
-		}
-		time.Sleep(backoff)
-		if backoff < withTxBackoffMax {
-			backoff *= 2
-			if backoff > withTxBackoffMax {
-				backoff = withTxBackoffMax
-			}
-		}
+	s, err := OpenStore(path)
+	if err != nil {
+		return err
 	}
-	return last
+	defer s.Close()
+	if err := s.Migrate(); err != nil {
+		return err
+	}
+	return s.Write(fn)
 }
 
 func UpsertProject(tx *sql.Tx, p *Project) error {
@@ -386,19 +238,23 @@ func scanProject(row interface{ Scan(dest ...any) error }) (*Project, error) {
 	return &p, nil
 }
 
-const taskCols = `project_id, id, title, status, priority, merge_order, owner, deps_json, write_scope_json, read_scope_json, acceptance_json, branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json`
+const taskCols = `project_id, id, title, status, priority, merge_order, owner, deps_json, write_scope_json, read_scope_json, acceptance_json, branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json, instance_id, iteration_id, lane`
 
 func scanTask(row interface{ Scan(dest ...any) error }) (*Task, error) {
 	var t Task
 	var owner, branch, wt, blocked, hb, prev sql.NullString
-	var deps, ws, rs, acc, extra string
+	var deps, ws, rs, acc, extra, instanceID, iterationID, lane string
 	err := row.Scan(
 		&t.ProjectID, &t.ID, &t.Title, &t.Status, &t.Priority, &t.MergeOrder, &owner,
 		&deps, &ws, &rs, &acc, &branch, &wt, &t.Attempts, &blocked, &hb, &prev, &t.Revision, &extra,
+		&instanceID, &iterationID, &lane,
 	)
 	if err != nil {
 		return nil, err
 	}
+	t.InstanceID = instanceID
+	t.IterationID = iterationID
+	t.Lane = lane
 	t.Owner = owner.String
 	t.Branch = branch.String
 	t.Worktree = wt.String
@@ -445,7 +301,7 @@ func ListTasksFiltered(tx *sql.Tx, projectID, agent, status string) ([]*Task, er
 	q := `SELECT t.project_id, t.id, t.title, t.status, t.priority, t.merge_order, t.owner,
 		t.deps_json, t.write_scope_json, t.read_scope_json, t.acceptance_json, t.branch, t.worktree,
 		t.attempts, t.blocked_reason, t.heartbeat, t.prev_status, t.revision, t.extra_json,
-		COALESCE(p.name,'')
+		t.instance_id, t.iteration_id, t.lane, COALESCE(p.name,'')
 		FROM tasks t LEFT JOIN projects p ON p.id = t.project_id WHERE 1=1`
 	var args []any
 	if projectID != "" {
@@ -468,31 +324,11 @@ func ListTasksFiltered(tx *sql.Tx, projectID, agent, status string) ([]*Task, er
 	defer rows.Close()
 	var out []*Task
 	for rows.Next() {
-		var t Task
-		var owner, branch, wt, blocked, hb, prev sql.NullString
-		var deps, ws, rs, acc, extra, pname string
-		err := rows.Scan(
-			&t.ProjectID, &t.ID, &t.Title, &t.Status, &t.Priority, &t.MergeOrder, &owner,
-			&deps, &ws, &rs, &acc, &branch, &wt, &t.Attempts, &blocked, &hb, &prev, &t.Revision, &extra,
-			&pname,
-		)
+		t, err := scanTaskWithName(rows)
 		if err != nil {
 			return nil, err
 		}
-		t.Owner = owner.String
-		t.Branch = branch.String
-		t.Worktree = wt.String
-		t.BlockedReason = blocked.String
-		t.Heartbeat = hb.String
-		t.PrevStatus = prev.String
-		t.Deps = parseJSONArr(deps)
-		t.WriteScope = parseJSONArr(ws)
-		t.ReadScope = parseJSONArr(rs)
-		t.Acceptance = parseJSONArr(acc)
-		t.Extra = map[string]any{}
-		_ = json.Unmarshal([]byte(extra), &t.Extra)
-		t.ProjectName = pname
-		out = append(out, &t)
+		out = append(out, t)
 	}
 	return out, rows.Err()
 }
@@ -501,12 +337,25 @@ func UpsertTask(tx *sql.Tx, t *Task) error {
 	if t.Extra == nil {
 		t.Extra = map[string]any{}
 	}
+	if t.IterationID != "" {
+		it, err := GetIteration(tx, t.ProjectID, t.IterationID)
+		if err != nil {
+			return err
+		}
+		if it == nil {
+			return ErrIterationNotFound
+		}
+	}
+	if err := bindTaskIdentity(tx, t); err != nil {
+		return err
+	}
 	_, err := tx.Exec(`
 INSERT INTO tasks(
   project_id, id, title, status, priority, merge_order, owner,
   deps_json, write_scope_json, read_scope_json, acceptance_json,
-  branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  branch, worktree, attempts, blocked_reason, heartbeat, prev_status, revision, extra_json,
+  instance_id, iteration_id, lane
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(project_id, id) DO UPDATE SET
   title=excluded.title, status=excluded.status, priority=excluded.priority,
   merge_order=excluded.merge_order, owner=excluded.owner,
@@ -514,23 +363,57 @@ ON CONFLICT(project_id, id) DO UPDATE SET
   read_scope_json=excluded.read_scope_json, acceptance_json=excluded.acceptance_json,
   branch=excluded.branch, worktree=excluded.worktree, attempts=excluded.attempts,
   blocked_reason=excluded.blocked_reason, heartbeat=excluded.heartbeat,
-  prev_status=excluded.prev_status, revision=excluded.revision, extra_json=excluded.extra_json
+  prev_status=excluded.prev_status, revision=excluded.revision, extra_json=excluded.extra_json,
+  instance_id=excluded.instance_id, iteration_id=excluded.iteration_id, lane=excluded.lane
 `, t.ProjectID, t.ID, t.Title, t.Status, t.Priority, t.MergeOrder, nullStr(t.Owner),
 		mustJSON(t.Deps), mustJSON(t.WriteScope), mustJSON(t.ReadScope), mustJSON(t.Acceptance),
 		nullStr(t.Branch), nullStr(t.Worktree), t.Attempts, nullStr(t.BlockedReason),
-		nullStr(t.Heartbeat), nullStr(t.PrevStatus), t.Revision, mustJSON(t.Extra))
+		nullStr(t.Heartbeat), nullStr(t.PrevStatus), t.Revision, mustJSON(t.Extra),
+		t.InstanceID, t.IterationID, t.Lane)
 	return err
 }
 
+// DeleteTasks 清空某工程的任务行，并把它们的实例一并退役（plan apply --reset 用）。
+//
+// 退役与别名释放同事务：不会留下「实例还是 active、tasks 行却没了」的半状态。
 func DeleteTasks(tx *sql.Tx, projectID string) error {
+	if err := retireActiveInstances(tx, projectID, RetireReset); err != nil {
+		return err
+	}
 	_, err := tx.Exec(`DELETE FROM tasks WHERE project_id = ?`, projectID)
 	return err
 }
 
-// DeleteTask 删除单条任务（plan apply 剔除蓝图外的 idle 题时用）。
+// DeleteTask 删除单条任务，并退役它持有的实例（plan apply 剔除蓝图外的 idle 题时用）。
 func DeleteTask(tx *sql.Tx, projectID, id string) error {
-	_, err := tx.Exec(`DELETE FROM tasks WHERE project_id = ? AND id = ?`, projectID, id)
+	t, err := GetTask(tx, projectID, id)
+	if err != nil {
+		return err
+	}
+	if t != nil && t.InstanceID != "" {
+		if err := RetireInstance(tx, t.InstanceID, RetireRemovedFromPlan); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(`DELETE FROM tasks WHERE project_id = ? AND id = ?`, projectID, id)
 	return err
+}
+
+// retireActiveInstances 退役某工程全部活跃实例，别名释放由 RetireInstance 完成。
+func retireActiveInstances(tx *sql.Tx, projectID, reason string) error {
+	insts, err := ListInstances(tx, projectID)
+	if err != nil {
+		return err
+	}
+	for _, inst := range insts {
+		if inst.State != model.InstanceStateActive {
+			continue
+		}
+		if err := RetireInstance(tx, string(inst.InstanceID), reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func AppendEvent(tx *sql.Tx, projectID, actor, typ, taskID string, data any) error {
@@ -560,7 +443,7 @@ func FindTask(tx *sql.Tx, projectID, id string) (*Task, error) {
 SELECT t.project_id, t.id, t.title, t.status, t.priority, t.merge_order, t.owner,
   t.deps_json, t.write_scope_json, t.read_scope_json, t.acceptance_json, t.branch, t.worktree,
   t.attempts, t.blocked_reason, t.heartbeat, t.prev_status, t.revision, t.extra_json,
-  COALESCE(p.name,'')
+  t.instance_id, t.iteration_id, t.lane, COALESCE(p.name,'')
 FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
 WHERE t.id = ? ORDER BY t.project_id LIMIT 1`, id)
 	t, err := scanTaskWithName(row)
@@ -573,15 +456,18 @@ WHERE t.id = ? ORDER BY t.project_id LIMIT 1`, id)
 func scanTaskWithName(row interface{ Scan(dest ...any) error }) (*Task, error) {
 	var t Task
 	var owner, branch, wt, blocked, hb, prev sql.NullString
-	var deps, ws, rs, acc, extra, pname string
+	var deps, ws, rs, acc, extra, instanceID, iterationID, lane, pname string
 	err := row.Scan(
 		&t.ProjectID, &t.ID, &t.Title, &t.Status, &t.Priority, &t.MergeOrder, &owner,
 		&deps, &ws, &rs, &acc, &branch, &wt, &t.Attempts, &blocked, &hb, &prev, &t.Revision, &extra,
-		&pname,
+		&instanceID, &iterationID, &lane, &pname,
 	)
 	if err != nil {
 		return nil, err
 	}
+	t.InstanceID = instanceID
+	t.IterationID = iterationID
+	t.Lane = lane
 	t.Owner = owner.String
 	t.Branch = branch.String
 	t.Worktree = wt.String

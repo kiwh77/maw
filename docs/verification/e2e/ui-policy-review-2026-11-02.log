@@ -1,0 +1,158 @@
+
+Running 14 tests using 1 worker
+
+[1A[2K[1/14] tests/browser/specs/board-policy-review.browser.spec.ts:48:7 › D 组：执行策略（自动化策略） › D-01 计算上限显示服务端实际值（不是「—」）
+[1A[2K  1) tests/browser/specs/board-policy-review.browser.spec.ts:48:7 › D 组：执行策略（自动化策略） › D-01 计算上限显示服务端实际值（不是「—」） 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoHaveText[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Locator:  locator('tr[data-concept="limit"] td.num')
+    Expected: [32m"1"[39m
+    Received: [31m"—"[39m
+    Timeout:  5000ms
+
+    Call log:
+    [2m  - Expect "toHaveText" with timeout 5000ms[22m
+    [2m  - waiting for locator('tr[data-concept="limit"] td.num')[22m
+    [2m    9 × locator resolved to <td class="num">—</td>[22m
+    [2m      - unexpected value "—"[22m
+
+
+      51 |     expect(typeof limit, '/api/runtime 应给出整数上限').toBe('number');
+      52 |     const cell = page.locator('tr[data-concept="limit"] td.num');
+    > 53 |     await expect(cell).toHaveText(String(limit));
+         |                        ^
+      54 |   });
+      55 |
+      56 |   test('D-02 平台支持未声明时自动化应显示「未就绪」', async ({ page }) => {
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-policy-review.browser.spec.ts:53:24
+
+    Error Context: test-results/tests-browser-specs-board--9e81b-略）-D-01-计算上限显示服务端实际值（不是「—」）/error-context.md
+
+
+[1A[2K[2/14] tests/browser/specs/board-policy-review.browser.spec.ts:56:7 › D 组：执行策略（自动化策略） › D-02 平台支持未声明时自动化应显示「未就绪」
+[1A[2K  2) tests/browser/specs/board-policy-review.browser.spec.ts:56:7 › D 组：执行策略（自动化策略） › D-02 平台支持未声明时自动化应显示「未就绪」 
+
+    Error: 平台支持未声明却显示成「关闭」，会让人以为手动开一下就行
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoMatch[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected pattern: [32m/Not ready|未就绪/i[39m
+    Received string:  [31m"Off"[39m
+
+      61 |     if (platform === undefined) {
+      62 |       // 设计注释：平台支持「没说不猜成支持」，缺失时不能显示成「关闭」。
+    > 63 |       expect(text, '平台支持未声明却显示成「关闭」，会让人以为手动开一下就行').toMatch(/Not ready|未就绪/i);
+         |                                                    ^
+      64 |     } else {
+      65 |       expect(text.length).toBeGreaterThan(0);
+      66 |     }
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-policy-review.browser.spec.ts:63:52
+
+    Error Context: test-results/tests-browser-specs-board--92b00-略）-D-02-平台支持未声明时自动化应显示「未就绪」/error-context.md
+
+
+[1A[2K[3/14] tests/browser/specs/board-policy-review.browser.spec.ts:69:7 › D 组：执行策略（自动化策略） › D-03 表单回填当前策略值
+[1A[2K  3) tests/browser/specs/board-policy-review.browser.spec.ts:69:7 › D 组：执行策略（自动化策略） › D-03 表单回填当前策略值 
+
+    Error: 计算上限输入框没有回填当前值
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"1"[39m
+    Received: [31m""[39m
+
+      71 |     const limit = String(api.body?.auto_execution?.managed_execution_limit ?? '');
+      72 |     const value = await page.locator('#settings-limit').inputValue();
+    > 73 |     expect(value, '计算上限输入框没有回填当前值').toBe(limit);
+         |                                     ^
+      74 |   });
+      75 |
+      76 |   test('D-04 点「保存设置」不跳走、不丢当前视图', async ({ page }) => {
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-policy-review.browser.spec.ts:73:37
+
+    Error Context: test-results/tests-browser-specs-board--016c7-：执行策略（自动化策略）-D-03-表单回填当前策略值/error-context.md
+
+
+[1A[2K[4/14] tests/browser/specs/board-policy-review.browser.spec.ts:76:7 › D 组：执行策略（自动化策略） › D-04 点「保存设置」不跳走、不丢当前视图
+[1A[2K  4) tests/browser/specs/board-policy-review.browser.spec.ts:76:7 › D 组：执行策略（自动化策略） › D-04 点「保存设置」不跳走、不丢当前视图 
+
+    Error: 保存按钮触发了原生表单提交，把用户带离策略页
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"http://127.0.0.1:7421/?[7mview=settings&project=7b24d390e1ee056d[27m"[39m
+    Received: [31m"http://127.0.0.1:7421/?[7mlimit=2&capacity=&retentionDays=&retentionRuns=[27m"[39m
+
+      79 |     await page.locator('.settings-form button[type="submit"]').click();
+      80 |     await page.waitForTimeout(1200);
+    > 81 |     expect(page.url(), '保存按钮触发了原生表单提交，把用户带离策略页').toBe(before);
+         |                                                  ^
+      82 |     await expect(page.locator('#page-h1')).toHaveText(/Execution policy|执行策略/i);
+      83 |   });
+      84 |
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-policy-review.browser.spec.ts:81:50
+
+    Error Context: test-results/tests-browser-specs-board--f049b-化策略）-D-04-点「保存设置」不跳走、不丢当前视图/error-context.md
+
+
+[1A[2K[5/14] tests/browser/specs/board-policy-review.browser.spec.ts:85:7 › D 组：执行策略（自动化策略） › D-05 页面不出现秘密字段且明确声明
+[1A[2K[6/14] tests/browser/specs/board-policy-review.browser.spec.ts:91:7 › D 组：执行策略（自动化策略） › D-06 中文界面下策略文案本地化
+[1A[2K[7/14] tests/browser/specs/board-policy-review.browser.spec.ts:111:7 › E 组：回顾数据 › E-01 时间轴未知态给出解释而不是「没有区间」
+[1A[2K[8/14] tests/browser/specs/board-policy-review.browser.spec.ts:123:7 › E 组：回顾数据 › E-02 时间轴窗口标签能区分 24 小时跨度
+[1A[2K  5) tests/browser/specs/board-policy-review.browser.spec.ts:123:7 › E 组：回顾数据 › E-02 时间轴窗口标签能区分 24 小时跨度 
+
+    Error: 24h 窗口只显示时分且首尾相同，缺少日期
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoMatch[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected pattern: [32m/\d{4}-\d{2}-\d{2}|[A-Z][a-z]{2}\s+\d{1,2}/[39m
+    Received string:  [31m"Hour window: 16:17 – 16:17 (24h · Asia/Shanghai)"[39m
+
+      128 |     expect(parts, `窗口标签无法解析: ${label}`).toBeTruthy();
+      129 |     if (parts && parts[1] === parts[2]) {
+    > 130 |       expect(label, '24h 窗口只显示时分且首尾相同，缺少日期').toMatch(/\d{4}-\d{2}-\d{2}|[A-Z][a-z]{2}\s+\d{1,2}/);
+          |                                              ^
+      131 |     }
+      132 |   });
+      133 |
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-policy-review.browser.spec.ts:130:46
+
+    Error Context: test-results/tests-browser-specs-board--af8c2-顾数据-E-02-时间轴窗口标签能区分-24-小时跨度/error-context.md
+
+
+[1A[2K[9/14] tests/browser/specs/board-policy-review.browser.spec.ts:134:7 › E 组：回顾数据 › E-03 时间轴工具栏（上一段/下一段）可用
+[1A[2K  6) tests/browser/specs/board-policy-review.browser.spec.ts:134:7 › E 组：回顾数据 › E-03 时间轴工具栏（上一段/下一段）可用 
+
+    Error: 点「Previous」既没发请求也没改变窗口
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBeGreaterThan[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected: > [32m0[39m
+    Received:   [31m0[39m
+
+      142 |     await page.waitForTimeout(1200);
+      143 |     const after = (await page.locator('.timeline__toolbar .field-hint').innerText()).trim();
+    > 144 |     expect(reqs.length + (before === after ? 0 : 1), '点「Previous」既没发请求也没改变窗口').toBeGreaterThan(0);
+          |                                                                                ^
+      145 |   });
+      146 |
+      147 |   test('E-04 热图把缺测小时标成 missing 而不是 0', async ({ page }) => {
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-policy-review.browser.spec.ts:144:80
+
+    Error Context: test-results/tests-browser-specs-board--6cf18-回顾数据-E-03-时间轴工具栏（上一段-下一段）可用/error-context.md
+
+
+[1A[2K[10/14] tests/browser/specs/board-policy-review.browser.spec.ts:147:7 › E 组：回顾数据 › E-04 热图把缺测小时标成 missing 而不是 0
+[1A[2K[11/14] tests/browser/specs/board-policy-review.browser.spec.ts:157:7 › E 组：回顾数据 › E-05 统计页的交付数与接口一致且标注不完整
+[1A[2K[12/14] tests/browser/specs/board-policy-review.browser.spec.ts:170:7 › E 组：回顾数据 › E-06 会话空态说明「查过没有」而不是沉默
+[1A[2K[13/14] tests/browser/specs/board-policy-review.browser.spec.ts:186:7 › F 组：空库冷启动（浏览器） › F-01 空库首页不白屏且能进各视图
+[1A[2K[14/14] tests/browser/specs/board-policy-review.browser.spec.ts:198:7 › F 组：空库冷启动（浏览器） › F-02 空库不提供工程下拉选项、看板给出空态
+[1A[2K  6 failed
+    tests/browser/specs/board-policy-review.browser.spec.ts:48:7 › D 组：执行策略（自动化策略） › D-01 计算上限显示服务端实际值（不是「—」） 
+    tests/browser/specs/board-policy-review.browser.spec.ts:56:7 › D 组：执行策略（自动化策略） › D-02 平台支持未声明时自动化应显示「未就绪」 
+    tests/browser/specs/board-policy-review.browser.spec.ts:69:7 › D 组：执行策略（自动化策略） › D-03 表单回填当前策略值 
+    tests/browser/specs/board-policy-review.browser.spec.ts:76:7 › D 组：执行策略（自动化策略） › D-04 点「保存设置」不跳走、不丢当前视图 
+    tests/browser/specs/board-policy-review.browser.spec.ts:123:7 › E 组：回顾数据 › E-02 时间轴窗口标签能区分 24 小时跨度 
+    tests/browser/specs/board-policy-review.browser.spec.ts:134:7 › E 组：回顾数据 › E-03 时间轴工具栏（上一段/下一段）可用 
+  8 passed (44.9s)

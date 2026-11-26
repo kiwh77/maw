@@ -4,7 +4,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/kiwh77/maw/internal/errx"
+	"github.com/kiwh77/maw/internal/i18n"
 )
 
 func norm(p string) string {
@@ -88,9 +88,9 @@ func AssertFilesInScope(files, patterns []string, taskID string) error {
 	if len(bad) == 0 {
 		return nil
 	}
-	msg := "task " + taskID + " out-of-scope files: " + strings.Join(bad, ", ")
+	list := strings.Join(bad, ", ")
 	if len(bad) > 8 {
-		msg = "task " + taskID + " out-of-scope files: " + strings.Join(bad[:8], ", ") + "..."
+		list = strings.Join(bad[:8], ", ") + "..."
 	}
-	return errx.New(msg, "run `maw request-change` or narrow the diff to write_scope")
+	return i18n.E("err.out_of_scope_files", "next.request_change_or_narrow", taskID, list)
 }

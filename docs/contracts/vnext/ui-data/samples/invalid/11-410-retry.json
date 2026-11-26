@@ -1,0 +1,19 @@
+{
+  "contract": "maw.ui.data/v1",
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/tasks/ti_abc",
+      "query": {},
+      "headers": { "host": "127.0.0.1:8787", "origin": "http://127.0.0.1:8787" },
+      "attempts": 2,
+      "result": {
+        "status": 410,
+        "ok": false,
+        "data": null,
+        "error": { "code": "gone", "message": "task retired", "retryable": false }
+      }
+    }
+  ],
+  "expect": { "codes": ["V123"] }
+}

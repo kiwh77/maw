@@ -1,0 +1,33 @@
+[meta]
+name = "two-iterations"
+version = 1
+main_branch = "main"
+
+[[iteration]]
+id = "IT-001"
+name = "第一批交付"
+goal = "现状：任务散落无批次。目标：统一归属并作为合入单位。"
+target_branch = ""
+
+[[iteration]]
+id = "IT-002"
+name = "第二批交付"
+status = "执行中"
+deps = ["IT-001"]
+
+[[task]]
+id = "T-001"
+title = "第一批任务"
+iteration = "IT-001"
+write_scope = ["internal/a/**"]
+acceptance = ["a 完成"]
+verify = ["manual: a"]
+
+[[task]]
+id = "T-002"
+title = "第二批任务"
+iteration = "IT-002"
+deps = ["T-001"]
+write_scope = ["internal/b/**"]
+acceptance = ["b 完成"]
+verify = ["manual: b"]

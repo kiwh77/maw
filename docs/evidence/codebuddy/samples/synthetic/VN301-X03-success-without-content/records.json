@@ -1,0 +1,151 @@
+[
+  {
+    "__codebuddyLocal": {
+      "sensitiveUserInputReviewed": true
+    },
+    "content": [
+      {
+        "text": "<CLI_INJECTED_CONTEXT>",
+        "type": "input_text"
+      },
+      {
+        "text": "<user_query>Reply with exactly: MAW-OK</user_query>",
+        "type": "input_text"
+      }
+    ],
+    "id": "<UUID>",
+    "providerData": {
+      "agent": "cli",
+      "conversationRequestId": "<REQUEST_ID>"
+    },
+    "role": "user",
+    "sessionId": "<SESSION_ID>",
+    "timestamp": 1792724711983,
+    "type": "message"
+  },
+  {
+    "isSnapshotUpdate": false,
+    "messageId": "<UUID>",
+    "snapshot": {
+      "messageId": "<UUID>",
+      "trackedFileBackups": {}
+    },
+    "timestamp": 1792724712291,
+    "type": "file-history-snapshot"
+  },
+  {
+    "content": [],
+    "id": "<UUID>",
+    "parentId": "<UUID>",
+    "providerData": {
+      "agent": "cli",
+      "conversationRequestId": "<REQUEST_ID>",
+      "messageId": "<UUID>",
+      "model": "step-5-preview",
+      "requestModelId": "step-5-preview",
+      "requestModelName": "Step-5-Preview",
+      "stepSeq": 1,
+      "traceId": "<REQUEST_ID>"
+    },
+    "rawContent": [
+      {
+        "text": "The user wants exactly \"MAW-OK\" as the reply.",
+        "type": "reasoning_text"
+      }
+    ],
+    "sessionId": "<SESSION_ID>",
+    "timestamp": 1792724716155,
+    "type": "reasoning"
+  },
+  {
+    "content": [
+      {
+        "text": "",
+        "type": "output_text"
+      }
+    ],
+    "id": "<UUID>",
+    "parentId": "<UUID>",
+    "providerData": {
+      "agent": "cli",
+      "conversationRequestId": "<REQUEST_ID>",
+      "messageId": "<UUID>",
+      "model": "step-5-preview",
+      "rawUsage": {
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cached_tokens": 0,
+        "completion_thinking_tokens": 0,
+        "completion_tokens": 20,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0
+        },
+        "credit": 0,
+        "prompt_cache_hit_tokens": 2816,
+        "prompt_cache_miss_tokens": 21125,
+        "prompt_cache_write_tokens": 0,
+        "prompt_tokens": 23941,
+        "prompt_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "cached_tokens": 2816,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0
+        },
+        "total_tokens": 23961
+      },
+      "requestModelId": "step-5-preview",
+      "requestModelName": "Step-5-Preview",
+      "stepSeq": 1,
+      "traceId": "<REQUEST_ID>",
+      "usage": {
+        "inputTokens": 23941,
+        "inputTokensDetails": [
+          {
+            "cached_tokens": 2816
+          }
+        ],
+        "outputTokens": 20,
+        "outputTokensDetails": [
+          {
+            "reasoning_tokens": 0
+          }
+        ],
+        "requests": 1,
+        "totalTokens": 23961
+      }
+    },
+    "role": "assistant",
+    "sessionId": "<SESSION_ID>",
+    "status": "completed",
+    "timestamp": 1792724716171,
+    "type": "message"
+  },
+  {
+    "__timestamp": "2026-10-23T03:05:16.468Z",
+    "duration_api_ms": 4146,
+    "duration_ms": 4147,
+    "is_error": false,
+    "num_turns": 0,
+    "permission_denials": [],
+    "result": "",
+    "session_id": "<SESSION_ID>",
+    "subtype": "success",
+    "total_cost_usd": 0,
+    "type": "result",
+    "usage": {
+      "cache_creation": null,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "server_tool_use": null,
+      "service_tier": null
+    },
+    "uuid": "<UUID>"
+  }
+]

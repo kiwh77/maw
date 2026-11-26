@@ -43,10 +43,13 @@ func Install(repo string) ([]string, error) {
 		}
 		written = append(written, p)
 	}
-	src := filepath.Join(repo, home.MultiagentDir, "hooks")
-	_ = os.MkdirAll(src, 0o755)
-	_ = os.WriteFile(filepath.Join(src, "pre-commit"), []byte(preCommit), 0o644)
-	_ = os.WriteFile(filepath.Join(src, "pre-push"), []byte(prePush), 0o644)
+	// 钩子副本放仓外 project home；不再写仓内 .multiagent/hooks。
+	if local, err := home.ProjectHome(repo); err == nil {
+		src := filepath.Join(local, "hooks")
+		_ = os.MkdirAll(src, 0o755)
+		_ = os.WriteFile(filepath.Join(src, "pre-commit"), []byte(preCommit), 0o644)
+		_ = os.WriteFile(filepath.Join(src, "pre-push"), []byte(prePush), 0o644)
+	}
 	return written, nil
 }
 

@@ -1,0 +1,23 @@
+{
+  "contract": "maw.ui.data/v1",
+  "dicts": {
+    "board": {
+      "zh": { "view.board.title": "任务看板" },
+      "en": { "view.board.title": "Board" }
+    }
+  },
+  "registry": {
+    "single_active": true,
+    "views": [
+      {
+        "id": "board",
+        "title_key": "view.board.missing",
+        "order": 10,
+        "match": ["#/v/board"],
+        "has_mount": true,
+        "has_unmount": true
+      }
+    ]
+  },
+  "expect": { "codes": ["V140"] }
+}

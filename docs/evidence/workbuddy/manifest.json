@@ -1,0 +1,149 @@
+{
+  "schema": "maw.evidence.workbuddy/manifest/v1",
+  "task": "VN-305",
+  "generated_at": "2026-10-24T00:05:00Z",
+  "generated_by": "collect_probe.py v1",
+  "platform": "darwin",
+  "probe_scope": {
+    "commands": [
+      ["<CLI_ENTRY>", "--version"],
+      ["<CLI_ENTRY>", "--help"]
+    ],
+    "side_effects": "只读：不登录、不发模型任务、不改配置；stdin 关闭，工作目录 /tmp，超时 60s",
+    "not_done": [
+      "未做固定文本模型调用（会发模型任务，属 Probe 边界外）",
+      "未登录／未登出、未改账号、未改 App 文件",
+      "未验证取消传播、会话恢复、完整用量字段"
+    ]
+  },
+  "env_allowlist": [
+    "HOME",
+    "LANG",
+    "NO_COLOR",
+    "PATH",
+    "SHELL",
+    "TERM",
+    "TMPDIR"
+  ],
+  "required_env": {
+    "CODEBUDDY_FORCE_LITE_WB_BUNDLE": "1",
+    "CODEBUDDY_DISABLE_COMPILE_CACHE": "1"
+  },
+  "required_env_provenance": "两包工作目录只随包携带 codebuddy-lite-wb.mjs；CODEBUDDY_FORCE_LITE_WB_BUNDLE=1 用来选中随包实现，CODEBUDDY_DISABLE_COMPILE_CACHE=1 是同一轮最小调用里一起设置的编译缓存开关（见 docs/CLI_SMOKE_TEST.zh-CN.md:36,42）",
+  "distributions": [
+    {
+      "kind": "cn",
+      "app_name": "WorkBuddy",
+      "app_version": "5.8.3",
+      "bundle_id": "com.tencent.workbuddy.mac",
+      "app_bundle": "/Applications/WorkBuddy.app",
+      "entry": "/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+      "entry_suffix": "Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+      "entry_shebang": "#!/usr/bin/env node",
+      "cli": "codebuddy",
+      "cli_version": "2.161.0",
+      "cli_version_provenance": "measured:VN305-CN-S01",
+      "help_lines": 104,
+      "help_bytes": 12706,
+      "help_sha256": "afe7bad91a91cd35a7f068eb6ce89cfeb0e688b2598e39f6005d18431436bac2",
+      "samples": {
+        "version_probe": "samples/VN305-CN-S01-version-probe",
+        "help_probe": "samples/VN305-CN-S02-help-probe"
+      },
+      "model_ids": [
+        "auto",
+        "glm-5v-turbo",
+        "glm-5.1",
+        "glm-5.0-turbo",
+        "glm-5.0",
+        "glm-4.7",
+        "kimi-k2.5",
+        "minimax-m2.7",
+        "deepseek-v3-2-volc"
+      ]
+    },
+    {
+      "kind": "intl",
+      "app_name": "WorkBuddy AI",
+      "app_version": "5.8.4",
+      "bundle_id": "com.workbuddy.workbuddy-ai",
+      "app_bundle": "/Applications/WorkBuddy AI.app",
+      "entry": "/Applications/WorkBuddy AI.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+      "entry_suffix": "Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
+      "entry_shebang": "#!/usr/bin/env node",
+      "cli": "codebuddy",
+      "cli_version": "2.161.0",
+      "cli_version_provenance": "measured:VN305-INTL-S01",
+      "help_lines": 104,
+      "help_bytes": 12654,
+      "help_sha256": "59dcfb975ad13ea4750ac611dabea50b59aaf91da9be568ff3ed138c07a4b28e",
+      "samples": {
+        "version_probe": "samples/VN305-INTL-S01-version-probe",
+        "help_probe": "samples/VN305-INTL-S02-help-probe"
+      },
+      "model_ids": [
+        "fast-model",
+        "balanced-model",
+        "primary-model",
+        "deep-model"
+      ]
+    }
+  ],
+  "differences": [
+    {
+      "id": "D01",
+      "field": "--model 取值枚举",
+      "cn": "auto, glm-5v-turbo, glm-5.1, glm-5.0-turbo, glm-5.0, glm-4.7, kimi-k2.5, minimax-m2.7, deepseek-v3-2-volc",
+      "intl": "fast-model, balanced-model, primary-model, deep-model",
+      "basis": "两份 --help 输出逐行比较，唯一差异是第 34 行（VN305-CN-S02 与 VN305-INTL-S02，各 104 行）",
+      "conclusion": "模型取值按包登记，任何按模型名匹配的实现不得跨包复制；对应能力 W15／W16"
+    },
+    {
+      "id": "D02",
+      "field": "App 版本与 bundle id",
+      "cn": "5.8.3 / com.tencent.workbuddy.mac",
+      "intl": "5.8.4 / com.workbuddy.workbuddy-ai",
+      "basis": "两个 .app 的 Info.plist",
+      "conclusion": "两个独立发行包，升级节奏不同；桌面包版本不计入随包 CLI 版本"
+    },
+    {
+      "id": "D03",
+      "field": "随包 CLI 版本",
+      "cn": "2.161.0",
+      "intl": "2.161.0",
+      "basis": "VN305-CN-S01／VN305-INTL-S01",
+      "conclusion": "两包版本相同，所以版本号不能用来区分来源；能力归属只能靠发行包登记 + 证据目录"
+    }
+  ],
+  "recorded_samples": [
+    {
+      "sample_id": "VN305-X01",
+      "kind": "recorded",
+      "path": "samples/VN305-X01-auth-required",
+      "provenance": "docs/CLI_SMOKE_TEST.zh-CN.md:15,16,48",
+      "why": "认证缺失形态（退出码 0 + stdout 空 + stderr 有错误）来自已记录实测；本轮只读探测不复测模型调用"
+    }
+  ],
+  "redaction_rules": [
+    {
+      "id": "R01",
+      "rule": "cli_entry",
+      "detail": "绝对入口路径替换为 <CLI_ENTRY>"
+    },
+    {
+      "id": "R02",
+      "rule": "home_dir",
+      "detail": "用户家目录替换为 <HOME>"
+    },
+    {
+      "id": "R03",
+      "rule": "user_name",
+      "detail": "用户名替换为 <USER>"
+    },
+    {
+      "id": "R04",
+      "rule": "no_credentials",
+      "detail": "不读取、不输出任何账号、令牌、会话内容；本轮未执行登录相关命令"
+    }
+  ]
+}

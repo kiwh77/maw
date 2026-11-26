@@ -1,0 +1,338 @@
+/* 工程清单的视图局部样式。
+ *
+ * 只放共享组件覆盖不到的排版：页首一行元信息、固定列宽、工程名／路径的双行单元格、
+ * 危险动作的两段式确认。颜色一律取 tokens，深浅主题靠 token 换，不在这里分支。
+ *
+ * 为什么要固定列宽：共享 .table 是 `table-layout: auto`，配合 `.table .name`
+ * 的 `max-width: 0`，工程名会被相邻的长文本挤到只剩四五个字符（旧版就是这样，
+ * 六行工程名全被截成 `Nove…`／`goal-…`）。这里用 colgroup + 固定布局，
+ * 让每列宽度由本页决定，省略号只截真正过长的值。
+ */
+
+.projects-meta {
+  margin: 0 0 var(--space-tight, 4px);
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 策略归属说明：一行灰字，不与表格抢注意力。 */
+.projects-note {
+  margin: 0 0 var(--space-block, 16px);
+  max-width: 78ch;
+  color: var(--muted);
+}
+
+/* ---------- 表格 ---------- */
+
+.projects-table {
+  table-layout: fixed;
+  /* 窄屏下让表格在内容区横向滚动，而不是把列压成一个个省略号。 */
+  min-width: 760px;
+}
+
+.projects-col--name { width: auto; }
+.projects-col--tasks { width: 96px; }
+.projects-col--branch { width: 200px; }
+.projects-col--ref { width: 148px; }
+.projects-col--seen { width: 116px; }
+.projects-col--actions { width: 132px; }
+
+/* 数字与时间列的表头跟随单元格右对齐：契约 §6 的「表头左对齐」是文本列的默认值，
+   数字右对齐而表头留在左边，同一列会被读成两截。 */
+.projects-table th.projects-th--num {
+  text-align: right;
+}
+
+/* 双行单元格：上行名称、下行路径。行高仍不低于 36px（契约 §3）。 */
+.projects-table td.name {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  white-space: normal;
+}
+
+.projects-name,
+.projects-path,
+.projects-branch {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 分支名是「这行属于哪条线」的标识，不是数字：左对齐 + mono，
+   截断后靠 title 看全值。 */
+.projects-cell-branch {
+  text-align: left;
+}
+
+.projects-name {
+  font-size: var(--font-body);
+  color: var(--text);
+}
+
+/* 路径是「这是哪个目录」的证据，用 mono；截断后悬停看全值。 */
+.projects-path {
+  font-family: var(--mono);
+  font-size: var(--font-meta, 12px);
+  line-height: 1.35;
+  color: var(--faint);
+}
+
+.projects-path--missing {
+  font-family: var(--sans, sans-serif);
+}
+
+.projects-branch {
+  font-family: var(--mono);
+  font-size: var(--font-meta, 12px);
+}
+
+/* 数字列的第二行（进行中 / 无任务）：仍是 12px，但不再用 mono 数字对齐。 */
+.projects-sub {
+  display: block;
+  font-family: var(--sans, sans-serif);
+  font-size: var(--font-meta, 12px);
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.projects-sub--running {
+  color: var(--warn);
+}
+
+.projects-num {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+.projects-muted {
+  color: var(--muted);
+}
+
+/* ---------- 操作 ---------- */
+
+/* 操作列用本页私有类名：legacy board.css 里 `.actions` 是 flex 卡片底栏，
+   套到 <td> 上会让单元格脱离表格布局，后面的列全部错位。 */
+.projects-table td.projects-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.projects-edit,
+.projects-remove {
+  padding: 2px 8px;
+  font-size: var(--font-meta, 12px);
+  font-family: var(--sans, sans-serif);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  cursor: pointer;
+}
+
+.projects-edit + .projects-remove {
+  margin-left: 6px;
+}
+
+.projects-edit:hover,
+.projects-edit:focus-visible {
+  color: var(--text);
+  border-color: var(--line-strong, var(--muted));
+}
+
+/* 移除是危险动作：悬停才变色，平时与普通次要操作同权重。 */
+.projects-remove:hover,
+.projects-remove:focus-visible {
+  color: var(--danger, var(--text));
+  border-color: var(--danger, var(--line));
+}
+
+.projects-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.projects-confirm__ask {
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+}
+
+.projects-confirm__yes,
+.projects-confirm__no {
+  padding: 2px 8px;
+  font-size: var(--font-meta, 12px);
+  font-family: var(--sans, sans-serif);
+  border-radius: var(--radius, 6px);
+  cursor: pointer;
+}
+
+/* 确认按钮用 status 色而不是新造的红：token 里没有 danger 变体。 */
+.projects-confirm__yes {
+  color: var(--danger, var(--text));
+  background: transparent;
+  border: 1px solid var(--danger, var(--line));
+}
+
+.projects-confirm__no {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+.projects-notice {
+  margin: 0 0 var(--space-block, 16px);
+  font-size: var(--font-meta, 12px);
+  color: var(--muted);
+}
+
+.projects-notice--error {
+  color: var(--danger, var(--text));
+}
+
+/* ---------- 窄屏 ---------- */
+
+@media (max-width: 1100px) {
+  .projects-col--branch { width: 140px; }
+  .projects-col--ref { width: 132px; }
+}
+
+/* 窄屏不靠横向滚动塞下六列：主分支与 max_parallel 参考值是次要信息，
+   收起来后剩下工程／任务／最近活动／操作四列，仍在一屏内读得完。
+ *
+ * 收列只能对「整列」下手：给 th/td 设 display:none 只是让这些单元格消失，
+ * colgroup 里的列还在，后面的单元格会前移去占 0 宽的列，行就叠在一起。
+ * 这里用 visibility: collapse 把 <col> 与对应单元格一起收掉，并显式 width:100%
+ * 让表格继续铺满内容区。 */
+@media (max-width: 700px) {
+  .projects-table { width: 100%; }
+  .projects-col--tasks { width: 84px; }
+  .projects-col--seen { width: 96px; }
+  .projects-col--actions { width: 120px; }
+
+  .projects-table col.projects-col--branch,
+  .projects-table col.projects-col--ref,
+  .projects-table th:nth-child(3),
+  .projects-table td:nth-child(3),
+  .projects-table th:nth-child(4),
+  .projects-table td:nth-child(4) {
+    visibility: collapse;
+  }
+}
+
+/* ---------- 编辑模态框 ---------- */
+
+.projects-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: color-mix(in srgb, var(--bg, #0b0d10) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.projects-modal {
+  position: fixed;
+  z-index: 81;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 0;
+  background: var(--panel, #14181e);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius, 6px) + 2px);
+  box-shadow: 0 16px 48px color-mix(in srgb, #000 35%, transparent);
+}
+
+.projects-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.projects-modal__head h2 {
+  margin: 0;
+  font-size: var(--font-title, 18px);
+  color: var(--text);
+}
+
+.projects-modal__close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: var(--radius, 6px);
+}
+
+.projects-modal__close:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.projects-modal__body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.projects-modal__id {
+  font-family: var(--mono);
+}
+
+.projects-modal__section {
+  margin: 4px 0 0;
+  font-size: var(--font-body, 14px);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* 两列排在宽屏；窄屏回落单列，避免标签与输入互相挤压。 */
+.projects-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.projects-modal__full {
+  grid-column: 1 / -1;
+}
+
+.projects-modal .field {
+  margin-bottom: 0;
+}
+
+.projects-modal .input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.projects-modal__error {
+  margin: 0;
+  font-size: var(--font-meta, 12px);
+  color: var(--danger, var(--text));
+}
+
+.projects-modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 640px) {
+  .projects-modal__grid { grid-template-columns: 1fr; }
+  .projects-modal__full { grid-column: auto; }
+}

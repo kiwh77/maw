@@ -1,0 +1,63 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E221",
+  "note": "reserved 直接跳到 completed：跳过了准备与启动，无法证明真跑过。",
+  "auto_execution": {
+    "enabled": false,
+    "managed_execution_limit": 0
+  },
+  "runs": [
+    {
+      "run_id": "run_g001",
+      "task_instance": "ti_vn010g",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "completed",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": true,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T06:00:00Z",
+      "finished_at": "2026-10-23T06:01:00Z",
+      "evidence": [
+        "exit_code:0"
+      ],
+      "phase_history": [
+        {
+          "phase": "reserved",
+          "at": "2026-10-23T06:00:00Z"
+        },
+        {
+          "phase": "completed",
+          "at": "2026-10-23T06:01:00Z"
+        }
+      ]
+    }
+  ],
+  "operations": [],
+  "leases": [],
+  "events": [
+    {
+      "event_id": "evt_0100",
+      "cursor": 100,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g001",
+      "occurred_at": "2026-10-23T06:00:00Z",
+      "received_at": "2026-10-23T06:00:00Z",
+      "quality": "observed",
+      "to_phase": "reserved"
+    },
+    {
+      "event_id": "evt_0101",
+      "cursor": 101,
+      "schema_version": 1,
+      "type": "run.phase",
+      "run_id": "run_g001",
+      "occurred_at": "2026-10-23T06:01:00Z",
+      "received_at": "2026-10-23T06:01:00Z",
+      "quality": "observed",
+      "to_phase": "completed"
+    }
+  ]
+}

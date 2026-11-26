@@ -1,0 +1,24 @@
+{
+  "contract": "maw.task.instance/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E160",
+  "note": "旧主键与 (project_id, display_id) 不一致：tasks 表物理主键必须可原样回填，否则重建时会对不上号。",
+  "instances": [
+    {
+      "instance_id": "ti_pkbad001",
+      "display_id": "VN-006",
+      "state": "active",
+      "created_at": "2026-10-23T03:45:00Z",
+      "active_version": 1,
+      "versions": [
+        { "version_no": 1, "frozen_at": "2026-10-23T03:45:00Z", "title": "冻结可观测字段边界", "deps": [] }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-006",
+        "primary_key": "716c30878ba1b95f/VN-005",
+        "ambiguous": false
+      }
+    }
+  ]
+}

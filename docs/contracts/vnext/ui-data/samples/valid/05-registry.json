@@ -1,0 +1,37 @@
+{
+  "contract": "maw.ui.data/v1",
+  "dicts": {
+    "board": {
+      "zh": { "view.board.title": "任务看板" },
+      "en": { "view.board.title": "Board" }
+    },
+    "timeline": {
+      "zh": { "view.timeline.title": "时间轴" },
+      "en": { "view.timeline.title": "Timeline" }
+    }
+  },
+  "registry": {
+    "single_active": true,
+    "views": [
+      {
+        "id": "board",
+        "title_key": "view.board.title",
+        "order": 10,
+        "match": ["#/v/board"],
+        "has_mount": true,
+        "has_unmount": true
+      },
+      {
+        "id": "timeline",
+        "title_key": "view.timeline.title",
+        "order": 30,
+        "match": ["#/v/timeline"],
+        "has_mount": true,
+        "has_unmount": true
+      }
+    ],
+    "transitions": [
+      { "from": "board", "to": "timeline", "unmounted_first": true }
+    ]
+  }
+}

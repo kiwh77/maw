@@ -1,0 +1,27 @@
+{
+  "contract": "maw.ui.data/v1",
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/ti_abc/submissions",
+      "query": {},
+      "headers": {
+        "host": "127.0.0.1:8787",
+        "origin": "http://127.0.0.1:8787",
+        "cookie": "maw_session=abc; maw_csrf=csrf123456",
+        "x-csrf-token": "csrf123456",
+        "idempotency-key": "idem-0123456789abcdef"
+      },
+      "body": {},
+      "attempts": 2,
+      "reused_idempotency_key": false,
+      "result": {
+        "status": 503,
+        "ok": false,
+        "data": null,
+        "error": { "code": "busy", "message": "database busy", "retryable": true }
+      }
+    }
+  ],
+  "expect": { "codes": ["V121"] }
+}

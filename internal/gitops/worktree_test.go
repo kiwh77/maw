@@ -84,12 +84,83 @@ func TestChangedFilesAndSquashMerge(t *testing.T) {
 	if err := SquashMerge(repo, "agent/w1/T-1", "main", "merge T-1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(repo, "feat.txt")); err != nil {
-		t.Fatal("feat.txt not on main")
+	// 隔离合入后主检出工作区可能尚未刷新出文件；以主干树为准。
+	out, err := exec.Command("git", "-C", repo, "ls-tree", "-r", "--name-only", "main").CombinedOutput()
+	if err != nil {
+		t.Fatalf("ls-tree: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "feat.txt") {
+		t.Fatalf("feat.txt not on main ref: %s", out)
 	}
 	// empty squash should fail
 	if err := SquashMerge(repo, "agent/w1/T-1", "main", "again"); err == nil {
 		t.Fatal("expected empty squash error")
+	}
+}
+
+func TestSquashMergeIsolatedIgnoresDirtyMainCheckout(t *testing.T) {
+	repo := initRepo(t)
+	wt := filepath.Join(repo, ".worktrees", "w2")
+	if err := CreateWorktree(repo, wt, "agent/w2/T-2", "main"); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(wt, "ok.txt"), []byte("ok\n"), 0o644)
+	run := func(dir string, args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run(wt, "add", "ok.txt")
+	run(wt, "commit", "-m", "ok")
+
+	// 主检出留无关脏文件
+	_ = os.WriteFile(filepath.Join(repo, "WIP.md"), []byte("human wip\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(repo, "README.md"), []byte("base\ndirty\n"), 0o644)
+	if err := AssertWorkingTreeClean(repo); err == nil {
+		t.Fatal("expected dirty main checkout")
+	}
+	tip, err := SquashMergeIsolated(repo, "agent/w2/T-2", "main", "merge T-2")
+	if err != nil {
+		t.Fatalf("isolated merge: %v", err)
+	}
+	if tip == "" {
+		t.Fatal("empty tip")
+	}
+	// 脏文件仍在
+	if _, err := os.Stat(filepath.Join(repo, "WIP.md")); err != nil {
+		t.Fatal("WIP should remain")
+	}
+	out, _ := exec.Command("git", "-C", repo, "ls-tree", "-r", "--name-only", "main").CombinedOutput()
+	if !strings.Contains(string(out), "ok.txt") {
+		t.Fatalf("ok.txt missing on main: %s", out)
+	}
+}
+
+func TestBranchHasUniqueChanges(t *testing.T) {
+	repo := initRepo(t)
+	wt := filepath.Join(repo, ".worktrees", "w3")
+	if err := CreateWorktree(repo, wt, "agent/w3/T-3", "main"); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := BranchHasUniqueChanges(wt, "main")
+	if err != nil || ok {
+		t.Fatalf("expected no unique changes, ok=%v err=%v", ok, err)
+	}
+	_ = os.WriteFile(filepath.Join(wt, "x.txt"), []byte("x\n"), 0o644)
+	c := exec.Command("git", "add", "x.txt")
+	c.Dir = wt
+	_ = c.Run()
+	c = exec.Command("git", "commit", "-m", "x")
+	c.Dir = wt
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+	ok, err = BranchHasUniqueChanges(wt, "main")
+	if err != nil || !ok {
+		t.Fatalf("expected unique changes, ok=%v err=%v", ok, err)
 	}
 }
 
@@ -104,6 +175,24 @@ func TestCleanupMergedTaskKeepWorktree(t *testing.T) {
 	CleanupMergedTask(repo, wtRel, branch, true)
 	if st, err := os.Stat(wt); err != nil || !st.IsDir() {
 		t.Fatal("worktree should remain")
+	}
+	out, _ := exec.Command("git", "-C", repo, "branch", "--list", branch).CombinedOutput()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("branch should be deleted: %s", out)
+	}
+}
+
+func TestCleanupMergedTaskRemoveWorktree(t *testing.T) {
+	repo := initRepo(t)
+	wtRel := filepath.Join(".worktrees", "drop")
+	wt := filepath.Join(repo, wtRel)
+	branch := "agent/drop/T-1"
+	if err := CreateWorktree(repo, wt, branch, "main"); err != nil {
+		t.Fatal(err)
+	}
+	CleanupMergedTask(repo, wtRel, branch, false)
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be removed: %v", err)
 	}
 	out, _ := exec.Command("git", "-C", repo, "branch", "--list", branch).CombinedOutput()
 	if strings.TrimSpace(string(out)) != "" {

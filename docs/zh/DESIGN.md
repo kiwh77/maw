@@ -1,0 +1,21 @@
+# maw 设计说明
+
+**maw**（Multi-Agent Workspace）是本机多 Agent **任务中枢**的 CLI（Go 单二进制）：编排并行开发、跨工程汇聚状态；客户端状态栏等见 [ROADMAP.md](ROADMAP.md)。
+
+- 语言：Go，`CGO_ENABLED=0` + modernc.org/sqlite
+- **全局状态**：`~/.maw/maw.db`（可用 `MAW_GLOBAL` 覆盖），含 `projects` / `tasks` / `agents`（均带 `project_id`）
+- **工程本地（仓外）**：`~/.maw/projects/<id>/` 存 `config.toml`、`blueprint.toml`、`project.json`；仓内 `.multiagent/` 若存在也不再读取。`maw init` / `project add` / 进仓命令自动登记，不写工程树
+- 蓝图：`blueprint.toml` → `maw plan apply`（**0.3.2 起增量合并**进全局库该工程任务；`--reset` 才全量清空重灌）
+- **主干分支（0.3.9）**：不以协议写死 `main`；`init` 仅探测占位。创建任务清单 / 写蓝图时在 `[meta] main_branch` 显式指定本波合入与 worktree 基线；`plan apply` 同步到仓外 `config.toml` 与全局 `projects.main_branch`。缺省 meta 则沿用现有 config（兼容旧蓝图）
+- **合入清理（0.3.10）**：`maw merge` 成功后 best-effort 删除对应 `agent/*` 本地分支
+- **每 Agent 持久 worktree（0.4.1 / 协议 v8）**：路径固定为 `.worktrees/{agent}`；`next` 时创建/reset 到主干 tip 并 `checkout -B` 新题分支；`merge` 成功后 **删除** worktree 与题分支（下一题再重建同路径）。残留用 `maw prune`（默认预览，`--yes` 删除）清理：无主 `agent/*` 分支、非 `working` 的 Agent 树；输出 `kept_reasons`。终态收尾：`merge`/`task cancel` 清空 `blocked_reason` 并归档
+- 协议：Agent 提示词可由仓库自行维护；CLI 接入不再注入协议段或安装 hooks（v7 命名等仍适用于编排约定）
+- **全局看板**：`maw board --serve`，HTTP API `/api/board?project=&agent=&status=`，页面内可筛选
+- **调度（0.3.1）**：`internal/schedule` — 同 `write_scope` 重叠的任务可并存于蓝图；`promoteReady` / `maw next` 仅激活「deps 已满足且写盘序位最前」的题（序位键：`priority` 升序 → `merge_order` → `id`）
+- **子队列粘性（lane）**：拆题时按上下文写入任务 `lane`；Agent 默认首题粘住该子队列，之后只从本队领（`maw next --claim --lane` 可显式指定/换队，`--release-lane` 解除）。并行靠多队×多 Agent；本队暂无可激活题时不自动跳队
+- **上下文亲和**：降级为**队内** `priority`/`merge_order` 同分时的打破（deps 续链 > 写盘重叠 > 同模块前缀），不再跨队压过序位键
+- **派活不卡槽（0.3.6）**：`maw next` 不再因 `max_parallel` 拒绝领取；Agent 来拉且存在可激活 ready 即派活。写盘重叠仍串行；`max_parallel` 仅看板参考
+
+权威产品规格为设计文档 v0.2；多工程为 0.3.x 增量。
+
+外部对照：DeepSeek Harness「智能团队」可借鉴点与不采纳项见 [maw_from_deepseek_agent_teams.zh-CN.md](../maw_from_deepseek_agent_teams.zh-CN.md)。

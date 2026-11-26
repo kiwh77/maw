@@ -1,0 +1,14 @@
+{
+  "assumed_values": [],
+  "defect": "corrupted_json_line",
+  "derived_from": "VN301-S03",
+  "do_not_use_as": "来源实测；本样本不可用于声称 CLI 会输出坏行",
+  "expected_interpretation": "无法解析的记录只能保留为证据，不得推断文本内容，也不得据此生成 done",
+  "files": {
+    "events.jsonl": "075c0bba07d4414d0422aa89a03c038fa17c4b4513ad3b7c3b23b56a63d21266"
+  },
+  "kind": "synthetic",
+  "origin": "由 VN301-S03 事件流截断一行构造",
+  "sample_id": "VN301-X01",
+  "schema": "maw.evidence.codebuddy/v1"
+}

@@ -33,19 +33,8 @@ func writeProjectMeta(localHome string, p *db.Project) error {
 }
 
 func resolveProject(cwd string) (*projCtx, error) {
-	repo, err := home.RepoRoot(cwd)
+	repo, local, gdb, _, _, err := EnsureAttached(cwd, false)
 	if err != nil {
-		return nil, err
-	}
-	local, err := home.RequireHome(cwd)
-	if err != nil {
-		return nil, err
-	}
-	gdb, err := home.GlobalDBPath()
-	if err != nil {
-		return nil, err
-	}
-	if err := db.Init(gdb); err != nil {
 		return nil, err
 	}
 	cfg, err := config.Load(home.ConfigPath(local))

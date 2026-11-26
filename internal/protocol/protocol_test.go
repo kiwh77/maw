@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/protocol"
 )
 
@@ -102,5 +103,19 @@ func TestInstallFilesClaudeOnlyIfExists(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(repo, "CLAUDE.md"))
 	if !strings.Contains(string(b), "existing") || !strings.Contains(string(b), "maw:begin") {
 		t.Fatalf("should preserve + upsert: %s", b)
+	}
+}
+
+func TestSegmentLangEnZh(t *testing.T) {
+	en := protocol.SegmentLang(i18n.En)
+	zh := protocol.SegmentLang(i18n.Zh)
+	if !strings.Contains(en, "Multi-agent protocol") {
+		t.Fatalf("en segment: %s", en[:120])
+	}
+	if !strings.Contains(zh, "多 Agent 协议") {
+		t.Fatalf("zh segment: %s", zh[:120])
+	}
+	if !strings.Contains(en, "maw:begin") || !strings.Contains(zh, "maw:end") {
+		t.Fatal("missing markers")
 	}
 }

@@ -1,0 +1,108 @@
+/* 执行视图的局部样式（EV-001）。
+ *
+ * 只放共享组件覆盖不到的排版：迭代选择条、三类摘要卡、分区小标题。
+ * 颜色一律取 tokens，不写死色值——深浅主题靠 token 换，不靠这里分支。
+ */
+
+.execution-head {
+  margin: 0 0 var(--space-block, 16px);
+}
+
+.execution-head .field-hint {
+  margin: 0 0 var(--space-tight, 4px);
+}
+
+/* 迭代选择条：横向可滚，条目不会被压成两行。 */
+.execution-iterations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-tight, 8px);
+  margin: 0 0 var(--space-block, 16px);
+}
+
+.execution-iteration {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-tight, 8px);
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-small, 12px);
+  cursor: pointer;
+}
+
+.execution-iteration:hover {
+  border-color: var(--accent);
+}
+
+.execution-iteration.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.execution-iteration:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.execution-iteration__count {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.execution-panel__title {
+  margin: 0 0 var(--space-tight, 4px);
+  font-size: var(--font-title, 20px);
+  color: var(--text);
+}
+
+.execution-panel__section {
+  margin: var(--space-block, 16px) 0 var(--space-tight, 8px);
+  font-size: var(--font-label, 14px);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* 三类摘要卡：等宽分布，窄屏自动折行，长文案换行而不撑破页面。 */
+.execution-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-tight, 8px);
+  margin: var(--space-tight, 8px) 0 var(--space-block, 16px);
+}
+
+.execution-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.execution-card__label {
+  font-size: var(--font-small, 12px);
+  color: var(--text-dim);
+}
+
+.execution-card__value {
+  font-size: var(--font-title, 20px);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.execution-card .field-hint {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .execution-summary {
+    grid-template-columns: 1fr;
+  }
+}

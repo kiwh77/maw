@@ -1,0 +1,62 @@
+{
+  "contract": "maw.delivery.manifest/v1",
+  "project_id": "716c30878ba1b95f",
+  "deliveries": [
+    {
+      "delivery_id": "dlv_116",
+      "task_instance": "ti_vn003c",
+      "task_version": 1,
+      "run_id": "run_a001",
+      "mode": "non_code",
+      "baseline_commit": "dedc919",
+      "candidate_commit": null,
+      "delivered_at": "2026-10-23T07:09:00Z",
+      "artifacts": [
+        {
+          "artifact_id": "art_117",
+          "kind": "file",
+          "ref": "docs/spec.md",
+          "declared_by": "manual",
+          "exists": true,
+          "in_write_scope": true,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "verification": [
+        {
+          "verification_id": "vfy_116",
+          "command": "go test ./...",
+          "target_task_version": 1,
+          "result": "manual",
+          "evidence": [
+            "reviewer:boss"
+          ],
+          "ran_at": "2026-10-23T07:10:00Z",
+          "target_artifact_id": "art_117",
+          "target_artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "review": {
+        "required": true,
+        "verdict": "approved",
+        "reviewer": "r1",
+        "reviewed_at": "2026-10-23T07:12:00Z"
+      },
+      "merge": {
+        "required": true,
+        "merged": true,
+        "merged_commit": "def5678",
+        "merged_at": "2026-10-23T07:15:00Z"
+      },
+      "completion": {
+        "decision": "done",
+        "decided_at": "2026-10-23T07:16:00Z",
+        "reason": ""
+      },
+      "supersedes": null,
+      "superseded_by": null
+    }
+  ],
+  "expect_error": "E351",
+  "note": "非代码任务记录了合入：完成方式与任务模式错位。"
+}

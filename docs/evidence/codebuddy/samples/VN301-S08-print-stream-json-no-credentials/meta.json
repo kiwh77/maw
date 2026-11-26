@@ -1,0 +1,74 @@
+{
+  "expectation": "隔离空 HOME 复现未登录：用于确认退出码 0 不等于成功",
+  "kind": "measured",
+  "outcome": {
+    "duration_ms": 1182,
+    "error_class": "authentication_required",
+    "errors": [
+      "Authentication required. Please use /login command to sign in to your account"
+    ],
+    "exit_code": 0,
+    "is_error": true,
+    "protocol_records": 4,
+    "result_record_present": true,
+    "result_subtype": "error_during_execution",
+    "stderr_bytes": 0,
+    "stdout_bytes": 4441,
+    "success": false,
+    "success_basis": "exit_code_and_result_record",
+    "timed_out": false,
+    "unparseable_stdout_lines": 0
+  },
+  "output_format": "stream-json",
+  "probe": "print.stream_json_no_credentials",
+  "redactions": [
+    "R01",
+    "R02",
+    "R03",
+    "R04",
+    "R05",
+    "R06",
+    "R07",
+    "R08",
+    "R09",
+    "R10",
+    "R11",
+    "R12",
+    "R13",
+    "R14"
+  ],
+  "sample_id": "VN301-S08",
+  "schema": "maw.evidence.codebuddy/v1",
+  "source": {
+    "argv_template": [
+      "<CLI_PATH>",
+      "-p",
+      "Reply with exactly: MAW-OK",
+      "--output-format",
+      "stream-json",
+      "--port",
+      "0"
+    ],
+    "captured_at": "2026-10-23T03:05:34Z",
+    "cli": "codebuddy",
+    "cli_entry": "<CLI_PATH>",
+    "cli_version": "2.173.0",
+    "cli_version_source": "measured:VN301-S01",
+    "collector": "collect_probe.py v1",
+    "cwd_template": "<WORKDIR>",
+    "env_overrides": {
+      "HOME": "<EMPTY_HOME>"
+    },
+    "env_whitelist": [
+      "HOME",
+      "LANG",
+      "NO_COLOR",
+      "PATH",
+      "SHELL",
+      "TERM",
+      "TMPDIR"
+    ],
+    "fixed_prompt": "Reply with exactly: MAW-OK",
+    "platform": "darwin"
+  }
+}

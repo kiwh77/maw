@@ -1,0 +1,35 @@
+{
+  "contract": "maw.ui.data/v1",
+  "registry": {
+    "single_active": true,
+    "views": [
+      {
+        "id": "board",
+        "title_key": "view.board.title",
+        "order": 10,
+        "match": ["#/v/board"],
+        "has_mount": true,
+        "has_unmount": true
+      }
+    ]
+  },
+  "navigation": {
+    "roundtrip": true,
+    "invalid_params": "ignore",
+    "urls": [
+      {
+        "url": "#/v/ghost",
+        "change": "fallback",
+        "history": "replace",
+        "resolved": {
+          "view_id": "board",
+          "project_id": "",
+          "filters": {},
+          "legacy": false,
+          "error": true
+        }
+      }
+    ]
+  },
+  "expect": { "codes": ["V150"] }
+}

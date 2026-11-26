@@ -1,0 +1,105 @@
+/* Workbench 共享组件入口 —— 新增视图从此文件取样式。
+ *
+ * 装配方式：
+ *   @import "../styles/tokens.css";      // 唯一色值与尺寸源
+ *   @import "./components.css";          // 组件层
+ * 生产路径由 board-web injectStyles 等价注入（tokens 必须在本文件之前）。
+ *
+ * 约定（契约 §1、§14）：
+ * - 组件层只允许 var(--token)，不得出现新的色值字面量；
+ * - 不引入第二套 token、字体或图标库；
+ * - 新增页面以本包为默认样式，页面局部差异必须在任务卡登记理由。
+ */
+
+@import "./badge.css";
+@import "./table.css";
+@import "./form.css";
+@import "./empty.css";
+@import "./drawer.css";
+
+/* ---------- 基础层：字体、焦点、动效、断点 ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--font-body)/var(--line-body) var(--sans);
+}
+
+h1 { font-size: var(--font-title); line-height: 1.3; }
+h2 { font-size: var(--font-panel); line-height: var(--line-panel); }
+
+code,
+kbd,
+samp {
+  font-family: var(--mono);
+}
+
+/* 契约 §10：焦点可见，禁止只 outline:none 不给替代。 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* 契约 §11：一次性入场与状态过渡，不循环、不视差。 */
+.surface-enter {
+  animation: surface-enter var(--dur-enter) var(--ease) both;
+}
+
+@keyframes surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--enter-shift));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* 契约 §13：断点固定 1500 / 1100 / 700，不新增。 */
+@media (max-width: 1500px) {
+  .page {
+    padding: 0 var(--space-block) 0;
+  }
+}
+
+@media (max-width: 1100px) {
+  .page {
+    padding: 22px 20px 0;
+  }
+
+  .page__topbar {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+
+@media (max-width: 700px) {
+  .page {
+    padding: 20px 16px 0;
+  }
+
+  .page h1 {
+    font-size: 20px;
+  }
+}

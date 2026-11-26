@@ -1,0 +1,77 @@
+{
+  "contract": "maw.delivery.manifest/v1",
+  "project_id": "716c30878ba1b95f",
+  "deliveries": [
+    {
+      "delivery_id": "dlv_005",
+      "task_instance": "ti_vn003c",
+      "task_version": 1,
+      "run_id": "run_a001",
+      "mode": "code",
+      "baseline_commit": "dedc919",
+      "candidate_commit": "abc1234",
+      "delivered_at": "2026-10-23T07:09:00Z",
+      "artifacts": [
+        {
+          "artifact_id": "art_031",
+          "kind": "file",
+          "ref": "docs/x.md",
+          "declared_by": "cli",
+          "exists": true,
+          "in_write_scope": true,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "verification": [
+        {
+          "verification_id": "vfy_031",
+          "command": "go test ./...",
+          "target_task_version": 1,
+          "result": "stale",
+          "evidence": [
+            "exit_code:0"
+          ],
+          "ran_at": "2026-10-23T07:05:00Z",
+          "target_commit": "abc1234",
+          "target_artifact_id": "art_031",
+          "target_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "verification_id": "vfy_032",
+          "command": "go test ./...",
+          "target_task_version": 1,
+          "result": "pass",
+          "evidence": [
+            "exit_code:0",
+            "go test: 12 packages ok",
+            "diff_stat: 3 files"
+          ],
+          "ran_at": "2026-10-23T07:25:00Z",
+          "target_commit": "abc1234",
+          "target_artifact_id": "art_031",
+          "target_artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "review": {
+        "required": true,
+        "verdict": "approved",
+        "reviewer": "r1",
+        "reviewed_at": "2026-10-23T07:12:00Z"
+      },
+      "merge": {
+        "required": true,
+        "merged": true,
+        "merged_commit": "def5678",
+        "merged_at": "2026-10-23T07:15:00Z"
+      },
+      "completion": {
+        "decision": "done",
+        "decided_at": "2026-10-23T07:16:00Z",
+        "reason": ""
+      },
+      "supersedes": null,
+      "superseded_by": null
+    }
+  ],
+  "note": "产物被修改：旧验证降级为 stale（对当前产物无效），必须针对新哈希重新验证才能 done。"
+}

@@ -1,0 +1,53 @@
+{
+  "contract": "maw.task.instance/v1",
+  "project_id": "716c30878ba1b95f",
+  "generated_at": "2026-10-23T04:30:00Z",
+  "note": "同一显示编号曾被多次创建且历史事件无法可靠归属：歧义部分只作为退役锚点保留，不并入当前活跃实例。",
+  "instances": [
+    {
+      "instance_id": "ti_vn009amb",
+      "display_id": "VN-009",
+      "state": "retired",
+      "created_at": "2026-10-15T07:00:00Z",
+      "retired_at": "2026-10-18T07:00:00Z",
+      "retired_reason": "ambiguous_history",
+      "active_version": null,
+      "versions": [
+        {
+          "version_no": 1,
+          "frozen_at": "2026-10-15T07:00:00Z",
+          "title": "历史同名题（旧库无稳定身份）",
+          "deps": []
+        }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-009",
+        "primary_key": "716c30878ba1b95f/VN-009",
+        "ambiguous": true,
+        "ambiguity_note": "旧库中该编号先后有 3 条创建记录，事件里没有可区分实例的字段，按 TASK-SPEC 保留 legacy 身份，不推断归属。"
+      }
+    },
+    {
+      "instance_id": "ti_vn009cur",
+      "display_id": "VN-009",
+      "state": "active",
+      "created_at": "2026-10-21T07:00:00Z",
+      "active_version": 1,
+      "versions": [
+        {
+          "version_no": 1,
+          "frozen_at": "2026-10-21T07:00:00Z",
+          "title": "重建同名任务",
+          "deps": []
+        }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-009",
+        "primary_key": "716c30878ba1b95f/VN-009",
+        "ambiguous": false
+      }
+    }
+  ]
+}

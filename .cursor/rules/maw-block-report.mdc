@@ -1,0 +1,15 @@
+---
+description: maw 遇阻必须 block 落库，供迭代
+alwaysApply: true
+---
+
+# maw 阻塞上报（强制）
+
+执行 maw 任务时，**凡无法按验收继续**（缺依赖、write_scope 不够、环境/工具失败、规格不清、写盘冲突、等人决策、CLI/协议卡死等），一律先向 maw 落库，再向用户说明。
+
+- 编排题（已 `next`/`claim`）：`maw block -m "[类别] 卡点：…；需要：…"`
+- 旁路未领题：`maw status report --phase blocked -m "阻塞：…"`
+- 类别建议：`scope` | `deps` | `env` | `spec` | `conflict` | `maw-cli` | `human` | `other`
+
+禁止：只在对话里说卡住、静默停工、未 block 就换题/unregister、擅自绕过协议硬改。  
+目的：看板可见 + 积累阻塞样本，便于迭代 maw（拆题、协议、调度）。

@@ -1,0 +1,57 @@
+{
+  "contract": "maw.task.instance/v1",
+  "project_id": "716c30878ba1b95f",
+  "generated_at": "2026-10-23T03:20:00Z",
+  "instances": [
+    {
+      "instance_id": "ti_vn001a",
+      "display_id": "VN-001",
+      "state": "active",
+      "created_at": "2026-10-23T02:50:00Z",
+      "active_version": 2,
+      "versions": [
+        {
+          "version_no": 1,
+          "frozen_at": "2026-10-23T02:50:00Z",
+          "title": "冻结任务实例与版本契约",
+          "deps": []
+        },
+        {
+          "version_no": 2,
+          "frozen_at": "2026-10-23T03:10:00Z",
+          "title": "冻结任务实例与版本契约",
+          "deps": []
+        }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-001",
+        "primary_key": "716c30878ba1b95f/VN-001",
+        "ambiguous": false
+      }
+    },
+    {
+      "instance_id": "ti_vn002b",
+      "display_id": "VN-002",
+      "state": "active",
+      "created_at": "2026-10-23T03:00:00Z",
+      "active_version": 1,
+      "versions": [
+        {
+          "version_no": 1,
+          "frozen_at": "2026-10-23T03:00:00Z",
+          "title": "冻结运行状态与资源契约",
+          "deps": [
+            { "kind": "instance", "target": "ti_vn001a" }
+          ]
+        }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-002",
+        "primary_key": "716c30878ba1b95f/VN-002",
+        "ambiguous": false
+      }
+    }
+  ]
+}

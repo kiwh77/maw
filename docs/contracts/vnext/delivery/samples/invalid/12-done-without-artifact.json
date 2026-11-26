@@ -1,0 +1,53 @@
+{
+  "contract": "maw.delivery.manifest/v1",
+  "project_id": "716c30878ba1b95f",
+  "deliveries": [
+    {
+      "delivery_id": "dlv_112",
+      "task_instance": "ti_vn003c",
+      "task_version": 1,
+      "run_id": "run_a001",
+      "mode": "code",
+      "baseline_commit": "dedc919",
+      "candidate_commit": "abc1234",
+      "delivered_at": "2026-10-23T07:09:00Z",
+      "artifacts": [],
+      "verification": [
+        {
+          "verification_id": "vfy_112",
+          "command": "go test ./...",
+          "target_task_version": 1,
+          "result": "pass",
+          "evidence": [
+            "exit_code:0",
+            "go test: 12 packages ok",
+            "diff_stat: 3 files"
+          ],
+          "ran_at": "2026-10-23T07:10:00Z",
+          "target_commit": "abc1234"
+        }
+      ],
+      "review": {
+        "required": true,
+        "verdict": "approved",
+        "reviewer": "r1",
+        "reviewed_at": "2026-10-23T07:12:00Z"
+      },
+      "merge": {
+        "required": true,
+        "merged": true,
+        "merged_commit": "def5678",
+        "merged_at": "2026-10-23T07:15:00Z"
+      },
+      "completion": {
+        "decision": "done",
+        "decided_at": "2026-10-23T07:16:00Z",
+        "reason": ""
+      },
+      "supersedes": null,
+      "superseded_by": null
+    }
+  ],
+  "expect_error": "E341",
+  "note": "代码任务一个产物都没有就 done：交付物不存在。"
+}

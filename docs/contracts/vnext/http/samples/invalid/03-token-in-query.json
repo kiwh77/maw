@@ -1,0 +1,40 @@
+{
+  "contract": "maw.http.api/v1",
+  "cases": [
+    {
+      "name": "令牌放进 query",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/716c30878ba1b95f/tasks",
+        "query": {
+          "access_token": "maw_pat_5f7c2a9e1b"
+        },
+        "headers": {
+          "Host": "127.0.0.1:7777"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "ok": true,
+          "items": [],
+          "next_cursor": null
+        }
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "H112",
+          "H110"
+        ],
+        "expect_error": [
+          "H112",
+          "H110"
+        ]
+      }
+    }
+  ]
+}

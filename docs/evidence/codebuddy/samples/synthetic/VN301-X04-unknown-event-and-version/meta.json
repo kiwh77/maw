@@ -1,0 +1,16 @@
+{
+  "assumed_values": [
+    "system/hook 事件与 cli_version 字段均未实测，按未知结构构造"
+  ],
+  "defect": "unknown_event_type_and_fields",
+  "derived_from": "VN301-S03",
+  "do_not_use_as": "来源实测；本样本不可用于声称 CLI 2.173.0 会输出 hook 事件",
+  "expected_interpretation": "未识别事件与字段只保留证据，不得映射为状态迁移，也不得按旧版本口径解释用量",
+  "files": {
+    "events.jsonl": "eaff136468a20f71c13dfeb1b138b7617359d3c13abb24c72fa1c3318ace10e2"
+  },
+  "kind": "synthetic",
+  "origin": "由 VN301-S03 追加未知事件与未知字段构造",
+  "sample_id": "VN301-X04",
+  "schema": "maw.evidence.codebuddy/v1"
+}

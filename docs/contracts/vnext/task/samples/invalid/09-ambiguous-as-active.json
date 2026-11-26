@@ -1,0 +1,24 @@
+{
+  "contract": "maw.task.instance/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E161",
+  "note": "歧义历史被当成当前活跃别名：无法归属的旧事件不能借由新实例“变成确定的”。",
+  "instances": [
+    {
+      "instance_id": "ti_ambact01",
+      "display_id": "VN-011",
+      "state": "active",
+      "created_at": "2026-10-23T04:10:00Z",
+      "active_version": 1,
+      "versions": [
+        { "version_no": 1, "frozen_at": "2026-10-23T04:10:00Z", "title": "试图收编历史", "deps": [] }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-011",
+        "primary_key": "716c30878ba1b95f/VN-011",
+        "ambiguous": true
+      }
+    }
+  ]
+}

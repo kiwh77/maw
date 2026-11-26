@@ -1,0 +1,58 @@
+/* 状态徽标 —— 契约 §4 状态词汇、§5 颜色职责。
+ *
+ * 规则：颜色只表达状态；徽标必须自带文本标签（由 i18n 提供），
+ * 色盲用户仅凭文本即可读懂，不使用图标替代文字。
+ * 状态键固定 11 个，不得同义改写或新增。
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 拆开写：--font-meta 空值时 font 简写整条失效会导致字号异常 */
+  font-size: var(--font-meta, 12px);
+  line-height: 1.4;
+  font-family: var(--sans, sans-serif);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* 待办：尚未进入执行 */
+.badge--backlog { color: var(--muted); }
+.badge--ready { color: var(--muted); }
+/* 需关注：已绑定 Agent 或正在执行 */
+.badge--claimed { color: var(--warn); }
+.badge--in_progress { color: var(--warn); }
+/* 自检与评审属于流程内等待，不提示人工 */
+.badge--self_check { color: var(--muted); }
+.badge--in_review { color: var(--muted); }
+.badge--merging { color: var(--muted); }
+/* 异常：必须人工介入 */
+.badge--conflict { color: var(--danger); }
+.badge--blocked { color: var(--danger); }
+/* 结束态 */
+.badge--done { color: var(--ok); }
+.badge--cancelled { color: var(--muted); }
+
+/* 来源标记（工程、应用、Agent、分支、任务 ID）不分配色相，统一 muted + mono。 */
+.source-mark {
+  font-size: var(--font-meta, 12px);
+  font-family: var(--mono, ui-monospace, monospace);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-mark--current {
+  color: var(--accent);
+}

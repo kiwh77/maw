@@ -1,0 +1,274 @@
+/* 分层执行时间轴（VN-741）——只用共享 token，不另起色板。 */
+
+.timeline {
+  /* 泳道行标签统一宽度，轨道与下方时间轴才能对齐。 */
+  --timeline-row-label: 64px;
+  font-family: var(--sans);
+  font-size: var(--font-body);
+  line-height: var(--line-body);
+  color: var(--text);
+  /* 左右／底部留白由外层 .vnext + .content 提供，视图内不再叠加一层。 */
+  padding: 0;
+}
+
+.timeline__head h1 {
+  font-size: var(--font-title);
+  margin: 0 0 4px;
+}
+
+.timeline__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 12px;
+}
+
+.timeline__toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.timeline__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 var(--space-block);
+}
+
+.timeline__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  list-style: none;
+  padding: 0;
+}
+
+.timeline__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-meta);
+  color: var(--muted);
+}
+
+.timeline__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-key);
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+}
+
+.timeline__swatch--task_phase { background: var(--warn); }
+.timeline__swatch--cli_process { background: var(--accent); }
+.timeline__swatch--turn { background: var(--ok); opacity: 0.85; }
+.timeline__swatch--explicit_wait { background: var(--offline); }
+.timeline__swatch--unknown {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--panel),
+    var(--panel) 3px,
+    var(--line) 3px,
+    var(--line) 6px
+  );
+}
+
+/* 有数据但不完整时，用一条紧凑提示，不占整块空态高度。 */
+.timeline__notice {
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.timeline__lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline__lane {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px 8px;
+}
+
+.timeline__lane:focus-within,
+.timeline__lane--focused {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.timeline__lane-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.timeline__lane-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.timeline__lane-kind {
+  font-size: var(--font-meta);
+  color: var(--muted);
+}
+
+.timeline__lane-id {
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline__lane-meta {
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.timeline__lane-count {
+  font-size: var(--font-meta);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.timeline__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 四类区间各占一行，同屏可见且不会互相遮挡。 */
+.timeline__row {
+  display: grid;
+  grid-template-columns: var(--timeline-row-label) 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline__row-label {
+  font-size: var(--font-meta);
+  color: var(--faint);
+  line-height: 1.2;
+}
+
+.timeline__track {
+  position: relative;
+  height: 20px;
+  background: var(--panel);
+  border-radius: var(--radius-tight);
+  overflow: hidden;
+}
+
+.timeline__bar {
+  position: absolute;
+  top: 2px;
+  height: 16px;
+  border-radius: var(--radius-key);
+  min-width: 2px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.timeline__bar:focus {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+  z-index: 2;
+}
+
+.timeline__bar--task_phase { background: var(--warn); }
+.timeline__bar--cli_process { background: var(--accent); color: var(--accent-ink); }
+.timeline__bar--turn { background: var(--ok); }
+.timeline__bar--explicit_wait { background: var(--offline); }
+.timeline__bar--unknown,
+.timeline__bar--open {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--panel),
+    var(--panel) 3px,
+    var(--line-strong) 3px,
+    var(--line-strong) 6px
+  );
+  border-color: var(--line-strong);
+}
+
+.timeline__axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-meta);
+  color: var(--faint);
+  font-family: var(--mono);
+  margin: 4px 0 0 calc(var(--timeline-row-label) + 8px);
+}
+
+.timeline__detail {
+  margin-top: var(--space-block);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-card);
+}
+
+.timeline__detail h2 {
+  font-size: var(--font-panel);
+  margin: 0 0 8px;
+}
+
+.timeline__kbd {
+  font-size: var(--font-meta);
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-key);
+  padding: 1px 5px;
+  background: var(--card);
+}
+
+.timeline__cursors {
+  font-size: var(--font-meta);
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-top: 8px;
+}
+
+@media (max-width: 700px) {
+  /* 窄屏也不在视图内补内边距：外层 .content 已经按断点收窄（28px → 16px）。 */
+  .timeline {
+    --timeline-row-label: 52px;
+  }
+
+  .timeline__toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .timeline__toolbar-actions {
+    margin-left: 0;
+  }
+
+  .timeline__meta {
+    align-items: flex-start;
+  }
+
+  .timeline__lane-head {
+    flex-wrap: wrap;
+  }
+}

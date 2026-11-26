@@ -2,14 +2,49 @@ package board
 
 import (
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kiwh77/maw/internal/db"
+	"github.com/kiwh77/maw/internal/localauth"
 )
+
+// 协作消息分型（契约 maw.collaboration.primitives/v1 §2）：把「提问」与「阻塞」
+// 从自由文本里分出来，编排侧才不用人读消息判断该不该介入。
+const (
+	KindProgress = "progress"
+	KindQuestion = "question"
+	KindBlocker  = "blocker"
+	KindFinal    = "final"
+)
+
+// NormalizeKind 归一化 kind：空值映射为 contract 默认值 progress，
+// 枚举外的值返回 invalid_kind 错误（调用方按 400/非零退出处理）。
+func NormalizeKind(raw string) (string, error) {
+	k := strings.ToLower(strings.TrimSpace(raw))
+	switch k {
+	case "":
+		return KindProgress, nil
+	case KindProgress, KindQuestion, KindBlocker, KindFinal:
+		return k, nil
+	}
+	return "", fmt.Errorf("invalid_kind: %q 不是 progress|question|blocker|final", raw)
+}
+
+// IsCollaborationKind 判断该值是否属于协作消息枚举（供测试与筛选复用）。
+func IsCollaborationKind(k string) bool {
+	switch strings.ToLower(strings.TrimSpace(k)) {
+	case KindProgress, KindQuestion, KindBlocker, KindFinal:
+		return true
+	}
+	return false
+}
 
 // StatusReport is the write payload for POST /api/status.
 type StatusReport struct {
@@ -21,6 +56,9 @@ type StatusReport struct {
 	Pct       *int   `json:"pct"`
 	Client    string `json:"client"`
 	Status    string `json:"status"`
+	LogPath   string `json:"log_path"`
+	// Kind 是协作消息分型；省略时按 progress 处理（旧客户端零改动）。
+	Kind string `json:"kind"`
 }
 
 // StatusFunc applies an injected status report. Returns a JSON-serializable result map.
@@ -29,12 +67,55 @@ type StatusFunc func(StatusReport) (map[string]any, error)
 // FeedFunc returns events with id > since (optional project/agent filters).
 type FeedFunc func(since int64, projectID, agent string) ([]*db.Event, error)
 
+// RuntimeViewFunc 返回受管／自动执行配置视图（自动模式默认关闭）。
+type RuntimeViewFunc func() map[string]any
+
 // ServeOpts configures the local status hub HTTP server.
 type ServeOpts struct {
-	Load   LoadFunc
-	Detail TaskDetailFunc
-	Status StatusFunc // nil → POST /api/status returns 501
-	Feed   FeedFunc   // nil → GET /api/feed returns 501; SSE stays invalidation-only
+	Load    LoadFunc
+	Detail  TaskDetailFunc
+	Status  StatusFunc // nil → POST /api/status returns 501
+	Feed    FeedFunc   // nil → GET /api/feed returns 501; SSE stays invalidation-only
+	Log     LogFunc    // nil → GET /api/log returns 501; SSE skips log-append
+	Runtime RuntimeViewFunc
+	// Auth 非空时：旧写入口与 /api/v1 共用一次接入授权；匿名 POST /api/status 被拒绝。
+	Auth *localauth.Authenticator
+	// V1 挂载版本化 API（events／read／commands 等）；路径须自带 /api/v1 前缀。
+	V1 http.Handler
+	// DefaultActiveView 为真时，/api/board 未带 include 参数的响应默认只列活动态
+	// （隐藏 done / archived）。ServeWith 的生产入口统一开启；旧只读兼容包装
+	// newHandler 不开启，保持既有调用方与迭代筛选测试的响应形状不变。
+	// 无论此开关如何，只要请求显式带了 include 参数，就按 ParseTaskView 过滤。
+	DefaultActiveView bool
+}
+
+// MaxSSEEventBurst 是单次 SSE／feed 页的事件上限；更大积压走 catchup，禁止跳过。
+const MaxSSEEventBurst = 200
+
+// assetHandler 提供嵌入的前端构建产物（assets/dist）。
+// 只暴露真实文件：不做目录列举，且与页面一致使用 no-store 避免旧 bundle 残留。
+func assetHandler() http.Handler {
+	assets, err := BoardAssets()
+	if err != nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "assets unavailable", http.StatusNotImplemented)
+		})
+	}
+	files := http.FileServerFS(assets)
+	return http.StripPrefix("/assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if name == "" {
+			http.NotFound(w, r)
+			return
+		}
+		info, statErr := fs.Stat(assets, name)
+		if statErr != nil || info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		files.ServeHTTP(w, r)
+	}))
 }
 
 func isLoopback(r *http.Request) bool {
@@ -46,10 +127,19 @@ func isLoopback(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
 func newHandlerOpts(opts ServeOpts) http.Handler {
 	mux := http.NewServeMux()
-	events := newEventHub(opts.Load, opts.Feed, 500*time.Millisecond)
+	events := newEventHub(opts.Load, opts.Feed, opts.Log, 500*time.Millisecond)
 	mux.Handle("/api/events", events.handler(15*time.Second))
+	mux.Handle("/assets/", assetHandler())
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
 			http.NotFound(w, r)
@@ -59,6 +149,7 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write([]byte(PageHTML()))
 	})
+
 	mux.HandleFunc("/api/board", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		snap, err := opts.Load(q.Get("project"), q.Get("agent"), q.Get("status"))
@@ -66,10 +157,67 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(snap)
+		// 迭代筛选按「参数是否出现」判定：?iteration= 表示只保留未归属任何迭代的任务，
+		// 与「不带 iteration 参数＝不按迭代筛」必须区分开。
+		if q.Has("iteration") {
+			snap = snap.WithIteration(strings.TrimSpace(q.Get("iteration")))
+		}
+		// 生产看板默认只展示活动态；?include=done,archived 或 ?include=all 显式取回。
+		// 放在迭代筛选之后，保证两者叠加时聚合仍基于完整迭代数据。
+		// 兼容包装 newHandler 不开启默认视图，显式 include 则一律生效。
+		if opts.DefaultActiveView || q.Has("include") {
+			snap = snap.WithTaskView(ParseTaskView(q.Get("include")))
+		}
+		out := map[string]any{
+			"updated_at":   snap.UpdatedAt,
+			"generated_at": snap.GeneratedAt,
+			"max_parallel": snap.MaxParallel,
+			"total":        snap.Total,
+			"done":         snap.Done,
+			"active":       snap.Active,
+			"blocked":      snap.Blocked,
+			"percent":      snap.Percent,
+			"next_hint":    snap.NextHint,
+			"risks":        snap.Risks,
+			// 问题审查视图读的就是这一份快照：以前漏了这个字段，
+			// 界面拿到 undefined 只能显示「没有问题」，把真实阻塞藏了起来。
+			"problems": snap.Problems,
+			"counts":   snap.Counts,
+			"tasks":    snap.Tasks,
+			"agents":   snap.Agents,
+			// 与 agents 同批推导的展示态（working|stalled|idle），只读。
+			"agent_activity":   snap.AgentActivity,
+			"projects":         snap.Projects,
+			"iterations":       snap.Iterations,
+			"filter_project":   snap.FilterProject,
+			"filter_agent":     snap.FilterAgent,
+			"filter_status":    snap.FilterStatus,
+			"filter_iteration": snap.FilterIteration,
+			"include_done":     snap.IncludeDone,
+			"include_archived": snap.IncludeArchived,
+			"global":           snap.Global,
+			// 旧只读响应保持字段兼容；附带契约视图（自动模式默认关闭）。
+			"auto_execution": defaultAutoExecution(opts),
+			"api_compat":     "board-v1",
+		}
+		writeJSON(w, http.StatusOK, out)
 	})
+
+	mux.HandleFunc("/api/runtime", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":             true,
+			"auto_execution": defaultAutoExecution(opts),
+			// 静态页／导出 HTML 不得发起受管写操作；受管入口只走受权 CLI／v1。
+			"managed_via":           "cli_or_api_v1",
+			"static_export_managed": false,
+		})
+	})
+
 	mux.HandleFunc("/api/task", func(w http.ResponseWriter, r *http.Request) {
 		if opts.Detail == nil {
 			http.Error(w, "task detail unavailable", http.StatusNotImplemented)
@@ -94,11 +242,10 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		if d.Events == nil {
 			d.Events = []*db.Event{}
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(d)
+		writeJSON(w, http.StatusOK, d)
 	})
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+
+	statusHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -119,14 +266,96 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		}
 		rep.Actor = strings.TrimSpace(rep.Actor)
 		rep.ProjectID = strings.TrimSpace(rep.ProjectID)
+		// 分型在入口处就校验：非法值不该走到写库才失败（契约 §2.4 要求 400 invalid_kind）。
+		kind, kerr := NormalizeKind(rep.Kind)
+		if kerr != nil {
+			localauth.WriteJSONError(w, http.StatusBadRequest, "invalid_kind",
+				"kind 必须是 progress|question|blocker|final", nil)
+			return
+		}
+		rep.Kind = kind
+		if id, ok := localauth.IdentityFrom(r.Context()); ok {
+			if rep.Actor == "" {
+				rep.Actor = id.Actor
+			} else if id.Via == "token" && id.Actor != "" && id.Actor != rep.Actor {
+				localauth.WriteJSONError(w, http.StatusForbidden, "actor_mismatch",
+					"actor 必须与令牌主体一致", nil)
+				return
+			}
+		}
 		out, err := opts.Status(rep)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(out)
+		writeJSON(w, http.StatusOK, out)
 	})
+	if opts.Auth != nil {
+		mux.Handle("/api/status", opts.Auth.Middleware(opts.Auth.RequireScope(localauth.ScopeWrite, statusHandler)))
+	} else {
+		// 未注入 Auth 时拒绝写：避免匿名写通道；装配层必须显式注入。
+		mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+			localauth.WriteJSONError(w, http.StatusUnauthorized, "unauthenticated",
+				"旧 POST /api/status 需要本机令牌或会话；请先完成授权引导", nil)
+		})
+	}
+
+	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if opts.Auth == nil || opts.Auth.Sessions == nil {
+			localauth.WriteJSONError(w, http.StatusNotImplemented, "session_unavailable",
+				"会话引导未装配", nil)
+			return
+		}
+		if !isLoopback(r) || !localauth.IsLoopbackHost(r.Host) {
+			localauth.WriteJSONError(w, http.StatusForbidden, "loopback_required",
+				"会话只在本机下发", nil)
+			return
+		}
+		sess, err := opts.Auth.Sessions.Issue(w, r.Host)
+		if err != nil {
+			localauth.WriteJSONError(w, http.StatusForbidden, "session_issue_failed", err.Error(), nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "session_id": sess.ID, "csrf": sess.CSRFToken(),
+			"next": "浏览器写请求带 CSRF；CLI 写请求用 Authorization: Bearer",
+		})
+	})
+
+	mux.HandleFunc("/api/log", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if opts.Log == nil {
+			http.Error(w, "log unavailable", http.StatusNotImplemented)
+			return
+		}
+		q := r.URL.Query()
+		projectID := strings.TrimSpace(q.Get("project"))
+		agent := strings.TrimSpace(q.Get("agent"))
+		if projectID == "" || agent == "" {
+			http.Error(w, "missing project or agent", http.StatusBadRequest)
+			return
+		}
+		offset, _ := strconv.ParseInt(q.Get("offset"), 10, 64)
+		fromTail := q.Get("tail") == "1" || q.Get("tail") == "true"
+		chunk, err := opts.Log(projectID, agent, offset, fromTail)
+		if err != nil && !chunk.OK {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(chunk)
+	})
+
 	mux.HandleFunc("/api/feed", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
@@ -147,14 +376,46 @@ func newHandlerOpts(opts ServeOpts) http.Handler {
 		if evs == nil {
 			evs = []*db.Event{}
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "events": evs})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "events": evs,
+			"has_more": len(evs) >= MaxSSEEventBurst,
+			"next_since": func() int64 {
+				if len(evs) == 0 {
+					return since
+				}
+				return evs[len(evs)-1].ID
+			}(),
+		})
 	})
+
 	mux.HandleFunc("/snapshot.json", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/api/board?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
 	})
-	return mux
+
+	var root http.Handler = mux
+	if opts.V1 != nil {
+		root = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+				opts.V1.ServeHTTP(w, r)
+				return
+			}
+			mux.ServeHTTP(w, r)
+		})
+	}
+	return root
+}
+
+func defaultAutoExecution(opts ServeOpts) map[string]any {
+	if opts.Runtime != nil {
+		if v := opts.Runtime(); v != nil {
+			return v
+		}
+	}
+	return map[string]any{
+		"enabled":                 false,
+		"managed_execution_limit": 1,
+		"config_version":          1,
+	}
 }
 
 // Serve starts the local hub. Prefer ServeWith for status inject + feed.
@@ -171,6 +432,9 @@ func ServeWith(addr string, opts ServeOpts) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// 真实看板入口启用「默认活动任务」；兼容包装与直连 newHandlerOpts 的
+	// 旧调用方保持原响应形状，不产生破坏性变更。
+	opts.DefaultActiveView = true
 	url := "http://" + ln.Addr().String() + "/"
 	go func() {
 		_ = http.Serve(ln, newHandlerOpts(opts))

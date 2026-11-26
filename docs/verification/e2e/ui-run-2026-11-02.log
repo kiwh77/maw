@@ -1,0 +1,182 @@
+
+Running 26 tests using 1 worker
+
+[1A[2K[1/26] tests/browser/specs/board-e2e.browser.spec.ts:76:7 › B 组：看板真实渲染 › B-01 无工程首屏落到执行节点视图且无脚本错误
+[1A[2K[2/26] tests/browser/specs/board-e2e.browser.spec.ts:85:7 › B 组：看板真实渲染 › B-02 侧栏导航齐全且当前项可辨识
+[1A[2K[3/26] tests/browser/specs/board-e2e.browser.spec.ts:96:7 › B 组：看板真实渲染 › B-03 13 个视图都能渲染出标题、说明与正文
+[1A[2K[4/26] tests/browser/specs/board-e2e.browser.spec.ts:116:7 › B 组：看板真实渲染 › B-04 观测视图未选工程时应说明「先选工程」
+[1A[2K  1) tests/browser/specs/board-e2e.browser.spec.ts:116:7 › B 组：看板真实渲染 › B-04 观测视图未选工程时应说明「先选工程」 ────
+
+    Error: 这些视图把「没选工程」渲染成了「没有数据」{"timeline":"Hour window: 10:00 – 16:00 (6h · Asia/Shanghai) Previous Next Zoom out Zoom in Keys: ← → move bar, Enter open detail, Esc close Phase dwell CLI process Model turn Explicit wait Unknown / open No intervals in this hour window. Try another hour or zoom out.","activity":"2026-11-02 · Asia/Shanghai Keys: arrows move, Home／End jump, Enter selects the hour Execution coverage (minutes) task_phase ∪ cli_process union by identity (minutes) 0 missing 1 missing 2 missing 3 missing 4 missing 5 missing 6 missing 7 missing 8 missing 9 missing 10 missing 11 missing 12 missing 13 missing 14 missing 15 missing 16 missing 17 missing 18 missing 19 missing 20 missing 21 missing 22 missing 23 missing Event activity (turn·minutes) Model turn duration (turn·minutes); a different unit from coverage 0 missing 1 missing 2 missing 3 missing 4 missing 5 missing 6 missing 7 missing 8 missing 9 missing 10 missing 11 missing 12 missing 13 missing 14 missing 15 missing 16 missing 17 missing 18 missing 19 missing 20 missing 21 missing 22 missing 23 missing No observed activity on this day. Try another day or widen the project filter.","sessions":"Keys: ↑ ↓ move, Enter opens detail, Esc closes No observable source sessions yet. Sessions appear here once source runs produce turns.","analytics":"No statistics in this scope yet. Summaries appear once deliveries or turns enter the projection."}
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoEqual[2m([22m[32mexpected[39m[2m) // deep equality[22m
+
+    [32m- Expected  - 1[39m
+    [31m+ Received  + 4[39m
+
+    [32m- Array [][39m
+    [31m+ Array [[39m
+    [31m+   "timeline: Hour window: 10:00 – 16:00 (6h · Asia/Shanghai) Previous Next Zoom out Zoom in Keys: ← → m",[39m
+    [31m+   "sessions: Keys: ↑ ↓ move, Enter opens detail, Esc closes No observable source sessions yet. Sessions",[39m
+    [31m+ ][39m
+
+      123 |       if (!/工程|project/i.test(states[view])) bad.push(`${view}: ${states[view].slice(0, 90)}`);
+      124 |     }
+    > 125 |     expect(bad, '这些视图把「没选工程」渲染成了「没有数据」' + JSON.stringify(states)).toEqual([]);
+          |                                                                   ^
+      126 |   });
+      127 |
+      128 |   test('B-05 工程下拉与数据联动', async ({ page }) => {
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-e2e.browser.spec.ts:125:67
+
+    Error Context: test-results/tests-browser-specs-board--610da-实渲染-B-04-观测视图未选工程时应说明「先选工程」/error-context.md
+
+
+[1A[2K[5/26] tests/browser/specs/board-e2e.browser.spec.ts:128:7 › B 组：看板真实渲染 › B-05 工程下拉与数据联动
+[1A[2K  2) tests/browser/specs/board-e2e.browser.spec.ts:128:7 › B 组：看板真实渲染 › B-05 工程下拉与数据联动 ─────────────
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoHaveText[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Locator: locator('#page-h1')
+    Expected pattern: [32m/Task board|任务看板/i[39m
+    Received string:  [31m"Execution nodes"[39m
+    Timeout: 5000ms
+
+    Call log:
+    [2m  - Expect "toHaveText" with timeout 5000ms[22m
+    [2m  - waiting for locator('#page-h1')[22m
+    [2m    9 × locator resolved to <h1 id="page-h1">Execution nodes</h1>[22m
+    [2m      - unexpected value "Execution nodes"[22m
+
+
+      136 |     // BOARD_DESIGN §Views：选「全部工程」应强制看板视图，而不是把用户踢去别的视图。
+      137 |     await page.selectOption('#f-project', '');
+    > 138 |     await expect(page.locator('#page-h1')).toHaveText(/Task board|任务看板/i);
+          |                                            ^
+      139 |
+      140 |     await page.selectOption('#f-project', pid);
+      141 |     // 设计约定：工程选择写 URL（旧链接形态为 hash 锚点）。
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-e2e.browser.spec.ts:138:44
+
+    Error Context: test-results/tests-browser-specs-board--cec01-r-B-组：看板真实渲染-B-05-工程下拉与数据联动/error-context.md
+
+
+[1A[2K[6/26] tests/browser/specs/board-e2e.browser.spec.ts:147:7 › B 组：看板真实渲染 › B-06 看板统计与接口一致
+[1A[2K[7/26] tests/browser/specs/board-e2e.browser.spec.ts:160:7 › B 组：看板真实渲染 › B-07 侧栏只列工作中的 Agent
+[1A[2K[8/26] tests/browser/specs/board-e2e.browser.spec.ts:168:7 › B 组：看板真实渲染 › B-08 Agent 与状态筛选即时生效
+[1A[2K[9/26] tests/browser/specs/board-e2e.browser.spec.ts:191:7 › B 组：看板真实渲染 › B-09 重置清空 Agent、状态与搜索
+[1A[2K[10/26] tests/browser/specs/board-e2e.browser.spec.ts:205:7 › B 组：看板真实渲染 › B-10 斜杠快捷键聚焦搜索框
+[1A[2K  3) tests/browser/specs/board-e2e.browser.spec.ts:205:7 › B 组：看板真实渲染 › B-10 斜杠快捷键聚焦搜索框 ────────────
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeFocused[2m([22m[2m)[22m failed
+
+    Locator:  locator('#task-search')
+    Expected: focused
+    Received: inactive
+    Timeout:  5000ms
+
+    Call log:
+    [2m  - Expect "toBeFocused" with timeout 5000ms[22m
+    [2m  - waiting for locator('#task-search')[22m
+    [2m    9 × locator resolved to <input type="search" id="task-search" placeholder="Search tasks…"/>[22m
+    [2m      - unexpected value "inactive"[22m
+
+
+      207 |     await page.locator('body').click({ position: { x: 5, y: 5 } });
+      208 |     await page.keyboard.press('/');
+    > 209 |     await expect(page.locator('#task-search')).toBeFocused();
+          |                                                ^
+      210 |   });
+      211 |
+      212 |   test('B-11 搜索即时过滤看板卡片', async ({ page }) => {
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-e2e.browser.spec.ts:209:48
+
+    Error Context: test-results/tests-browser-specs-board--9fe50--B-组：看板真实渲染-B-10-斜杠快捷键聚焦搜索框/error-context.md
+
+
+[1A[2K[11/26] tests/browser/specs/board-e2e.browser.spec.ts:212:7 › B 组：看板真实渲染 › B-11 搜索即时过滤看板卡片
+[1A[2K[12/26] tests/browser/specs/board-e2e.browser.spec.ts:225:7 › B 组：看板真实渲染 › B-12 任务抽屉可开可关且不影响列表
+[1A[2K[13/26] tests/browser/specs/board-e2e.browser.spec.ts:240:7 › B 组：看板真实渲染 › B-13 抽屉打开后焦点进入对话框
+[1A[2K  4) tests/browser/specs/board-e2e.browser.spec.ts:240:7 › B 组：看板真实渲染 › B-13 抽屉打开后焦点进入对话框 ──────────
+
+    Error: 焦点仍停在卡片上：抽屉没有接管焦点（BOARD_DESIGN 承诺 trap focus）
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBeTruthy[2m()[22m
+
+    Received: [31mfalse[39m
+
+      246 |       return Boolean(drawer && document.activeElement && drawer.contains(document.activeElement));
+      247 |     });
+    > 248 |     expect(inside, '焦点仍停在卡片上：抽屉没有接管焦点（BOARD_DESIGN 承诺 trap focus）').toBeTruthy();
+          |                                                                     ^
+      249 |   });
+      250 |
+      251 |   test('B-14 深链刷新后视图与列表仍在', async ({ page }) => {
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-e2e.browser.spec.ts:248:69
+
+    Error Context: test-results/tests-browser-specs-board--33f33--组：看板真实渲染-B-13-抽屉打开后焦点进入对话框/error-context.md
+
+
+[1A[2K[14/26] tests/browser/specs/board-e2e.browser.spec.ts:251:7 › B 组：看板真实渲染 › B-14 深链刷新后视图与列表仍在
+[1A[2K[15/26] tests/browser/specs/board-e2e.browser.spec.ts:262:7 › B 组：看板真实渲染 › B-15 主题切换即时生效并持久化
+[1A[2K[16/26] tests/browser/specs/board-e2e.browser.spec.ts:277:7 › B 组：看板真实渲染 › B-16 语言切换改变文案并持久化
+[1A[2K[17/26] tests/browser/specs/board-e2e.browser.spec.ts:291:7 › B 组：看板真实渲染 › B-17 外部写入后看板自动更新（SSE 或轮询）
+[1A[2K[18/26] tests/browser/specs/board-e2e.browser.spec.ts:331:7 › B 组：看板真实渲染 › B-18 服务不可达时降级为离线并保留旧数据
+[1A[2K[19/26] tests/browser/specs/board-e2e.browser.spec.ts:350:7 › B 组：看板真实渲染 › B-19 390px 窄屏无横向溢出
+[1A[2K[20/26] tests/browser/specs/board-e2e.browser.spec.ts:360:7 › B 组：看板真实渲染 › B-20 拓扑视图渲染依赖节点
+[1A[2K[21/26] tests/browser/specs/board-e2e.browser.spec.ts:369:7 › B 组：看板真实渲染 › B-21 未选工程时不提供拓扑入口
+[1A[2K[22/26] tests/browser/specs/board-e2e.browser.spec.ts:377:7 › B 组：看板真实渲染 › B-22 复制加入提示词写入剪贴板
+[1A[2K[23/26] tests/browser/specs/board-e2e.browser.spec.ts:389:7 › B 组：看板真实渲染 › B-23 空结果给出空态而不是白屏
+[1A[2K[24/26] tests/browser/specs/board-e2e.browser.spec.ts:398:7 › B 组：看板真实渲染 › B-24 键盘可达：Tab 进入导航、卡片回车打开
+[1A[2K[25/26] tests/browser/specs/board-e2e.browser.spec.ts:411:7 › B 组：看板真实渲染 › B-26 看板泳道覆盖全部状态，卡片总数与统计一致
+[1A[2K  5) tests/browser/specs/board-e2e.browser.spec.ts:411:7 › B 组：看板真实渲染 › B-26 看板泳道覆盖全部状态，卡片总数与统计一致 ──
+
+    Error: 泳道合计 383 与接口 total 420 不一致：backlog/cancelled 没有落位（BOARD_DESIGN 的 Queued 含 backlog）
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m420[39m
+    Received: [31m383[39m
+
+      420 |       cards,
+      421 |       `泳道合计 ${cards} 与接口 total ${global.total} 不一致：backlog/cancelled 没有落位（BOARD_DESIGN 的 Queued 含 backlog）`,
+    > 422 |     ).toBe(global.total);
+          |       ^
+      423 |   });
+      424 |
+      425 |   test('B-25 筛选与搜索在刷新后保留', async ({ page }) => {
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-e2e.browser.spec.ts:422:7
+
+    Error Context: test-results/tests-browser-specs-board--957e6-染-B-26-看板泳道覆盖全部状态，卡片总数与统计一致/error-context.md
+
+
+[1A[2K[26/26] tests/browser/specs/board-e2e.browser.spec.ts:425:7 › B 组：看板真实渲染 › B-25 筛选与搜索在刷新后保留
+[1A[2K  6) tests/browser/specs/board-e2e.browser.spec.ts:425:7 › B 组：看板真实渲染 › B-25 筛选与搜索在刷新后保留 ───────────
+
+    Error: 看板视图把筛选丢出地址栏：刷新/分享链接都会回到未筛选状态
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoMatch[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected pattern: [32m/status=done|q=/[39m
+    Received string:  [31m"http://127.0.0.1:7421/#7b24d390e1ee056d"[39m
+
+      431 |
+      432 |     const url = page.url();
+    > 433 |     expect(url, '看板视图把筛选丢出地址栏：刷新/分享链接都会回到未筛选状态').toMatch(/status=done|q=/);
+          |                                                  ^
+      434 |
+      435 |     await page.reload({ waitUntil: 'domcontentloaded' });
+      436 |     await page.waitForSelector('#task-search');
+        at /Users/wuhao/Documents/Projects/goal-agents/tests/browser/specs/board-e2e.browser.spec.ts:433:50
+
+    Error Context: test-results/tests-browser-specs-board--874f3-B-组：看板真实渲染-B-25-筛选与搜索在刷新后保留/error-context.md
+
+
+[1A[2K  6 failed
+    tests/browser/specs/board-e2e.browser.spec.ts:116:7 › B 组：看板真实渲染 › B-04 观测视图未选工程时应说明「先选工程」 ─────
+    tests/browser/specs/board-e2e.browser.spec.ts:128:7 › B 组：看板真实渲染 › B-05 工程下拉与数据联动 ──────────────
+    tests/browser/specs/board-e2e.browser.spec.ts:205:7 › B 组：看板真实渲染 › B-10 斜杠快捷键聚焦搜索框 ─────────────
+    tests/browser/specs/board-e2e.browser.spec.ts:240:7 › B 组：看板真实渲染 › B-13 抽屉打开后焦点进入对话框 ───────────
+    tests/browser/specs/board-e2e.browser.spec.ts:411:7 › B 组：看板真实渲染 › B-26 看板泳道覆盖全部状态，卡片总数与统计一致 ───
+    tests/browser/specs/board-e2e.browser.spec.ts:425:7 › B 组：看板真实渲染 › B-25 筛选与搜索在刷新后保留 ────────────
+  20 passed (54.2s)

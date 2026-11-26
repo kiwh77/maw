@@ -1,5 +1,7 @@
 # maw 蓝图字段速查（配合 maw-plan-push）
 
+对照：[`docs/zh/TASK-SPEC.md`](../../docs/zh/TASK-SPEC.md)；maw ≥ 0.4.0 / protocol 7。
+
 ## [meta] 字段
 
 | 字段 | 必填 | 说明 |
@@ -12,14 +14,17 @@
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `id` | 是 | 稳定 ID，如 `T-061`；全蓝图唯一 |
-| `title` | 是 | 短标题，看板展示 |
+| `id` | **是**（L1） | 稳定 ID，如 `T-061`；全蓝图唯一 |
+| `title` | **是**（L1） | 短标题，看板展示；动词开头可交付结果 |
+| `goal` | **是**（L1） | `现状：…。目标：…`；进 `task.extra`，`maw next` 下发 |
+| `write_scope` | **是**（L1） | 允许改动的路径 glob（`/**` 前缀匹配） |
+| `acceptance` | **是**（L1） | 字符串数组，≥1 条**可判定**断言；空数组 → apply 拒绝 |
+| `verify` | **是**（L1） | 字符串数组，≥1 条可执行命令或 `manual: …`；空 → apply 拒绝；**勿**塞进 acceptance |
 | `priority` | 建议 | 整数，**越小越先**；默认缺失时按 100 |
 | `merge_order` | 建议 | 合流/展示序；缺省回落为 priority |
-| `deps` | 否 | 前置任务 id 列表；未完成则不可 ready |
-| `write_scope` | 是 | 允许改动的路径 glob（`/**` 前缀匹配） |
-| `read_scope` | 否 | 只读参考，不参与写盘冲突 |
-| `acceptance` | 建议 | 字符串数组，完成定义 |
+| `deps` | 否（L2） | 前置任务 id 列表；未完成则不可 ready；拼成 `depends` **静默丢弃** |
+| `read_scope` | 否（L2，实现题应有） | 只读参考，不参与写盘冲突；契约/设计 md |
+| `not_doing` | 否（L2） | 负面约束字符串数组；进 `task.extra` |
 
 ## 调度（maw ≥ 0.3.1）
 
@@ -56,28 +61,41 @@
 ```toml
 [[task]]
 id = "T-A"
-title = "模块 A"
+title = "实现模块 A 核心端口"
+goal = "现状：模块 A 无领域类型。目标：端口可序列化往返。"
 priority = 10
 write_scope = ["mod_a/**"]
-acceptance = ["ok"]
+read_scope = ["docs/contracts/mod_a.md"]
+acceptance = ["核心对象可往返序列化"]
+verify = ["manual: ok"]
+not_doing = ["不改 mod_b"]
 merge_order = 10
 
 [[task]]
 id = "T-B"
-title = "模块 B"
+title = "实现模块 B 核心端口"
+goal = "现状：模块 B 无领域类型。目标：端口可序列化往返。"
 priority = 10
 write_scope = ["mod_b/**"]
-acceptance = ["ok"]
+read_scope = ["docs/contracts/mod_b.md"]
+acceptance = ["核心对象可往返序列化"]
+verify = ["manual: ok"]
+not_doing = ["不改 mod_a"]
 merge_order = 20
 
 [[task]]
 id = "T-A2"
-title = "模块 A 后续"
+title = "补齐模块 A 存储适配"
+goal = "现状：端口已有、无持久化。目标：存储读写通过单测。"
 priority = 20
 deps = ["T-A"]
 write_scope = ["mod_a/**"]
-acceptance = ["ok"]
+read_scope = ["docs/contracts/mod_a.md"]
+acceptance = ["存储适配单测通过且 ID 稳定"]
+verify = ["go test ./mod_a/... -count=1"]
+not_doing = ["不改 HTTP 路由"]
 merge_order = 30
 ```
 
-预期 ready：`T-A` ‖ `T-B`；`T-A2` backlog 至 `T-A` done。
+预期 ready：`T-A` ‖ `T-B`；`T-A2` backlog 至 `T-A` done。  
+写完后核对 `plan check` 的 **deps_depth / layer_widths / 无 deps 入口数**。

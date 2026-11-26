@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 )
 
 const MergeEnv = "MAW_INTERNAL_MERGE"
@@ -24,7 +24,7 @@ func EnsureBranchBase(repo, mainBranch string) (string, error) {
 			return ref, nil
 		}
 	}
-	return "", errx.New("trunk branch "+mainBranch+" not found", "create the branch or set meta.main_branch / project.main_branch")
+	return "", i18n.E("err.trunk_missing", "next.create_trunk", mainBranch)
 }
 
 func CreateWorktree(repo, worktree, branch, base string) error {
@@ -38,7 +38,7 @@ func CreateWorktree(repo, worktree, branch, base string) error {
 		return nil
 	}
 	if _, err := home.Git(repo, "worktree", "add", worktree, branch); err != nil {
-		return errx.New("failed to create worktree: "+err.Error(), "run `git worktree list` and clean stale entries")
+		return i18n.E("err.worktree_create", "next.worktree_list", err.Error())
 	}
 	return nil
 }
@@ -57,10 +57,10 @@ func EnsureAgentWorktree(repo, worktree, branch, base string) error {
 	// Best-effort refresh of remote tips; ignore failure (offline / no remote).
 	_, _ = home.Git(repo, "fetch", "--all", "--prune")
 	if out, err := home.Git(worktree, "reset", "--hard", base); err != nil {
-		return errx.New("failed to reset agent worktree to "+base+": "+out, "inspect dirty state in "+worktree)
+		return i18n.EN("err.worktree_reset", []any{base, out}, "next.inspect_dirty", worktree)
 	}
 	if out, err := home.Git(worktree, "checkout", "-B", branch, base); err != nil {
-		return errx.New("failed to recreate branch "+branch+": "+out, "run `git worktree list` and clean stale branches")
+		return i18n.E("err.branch_recreate", "next.clean_branches", branch, out)
 	}
 	return nil
 }
@@ -96,15 +96,15 @@ func DetachWorktree(worktree string) error {
 		return nil
 	}
 	if out, err := home.Git(worktree, "checkout", "--detach"); err != nil {
-		return errx.New("failed to detach worktree: "+out, "cd "+worktree+" and checkout another ref before deleting the branch")
+		return i18n.EN("err.detach_failed", []any{out}, "next.checkout_other", worktree)
 	}
 	return nil
 }
 
 // CleanupMergedTask cleans up after a successful merge.
-// When keepWorktree is true (per-agent mode), the worktree directory is retained
-// (detached) so ignored deps survive; only the agent task branch is deleted.
-// When keepWorktree is false, the worktree is removed entirely.
+// When keepWorktree is true, the worktree directory is retained (detached) and
+// only the agent task branch is deleted.
+// When keepWorktree is false (default merge path), the worktree is removed entirely.
 func CleanupMergedTask(repo, worktreeRel, branch string, keepWorktree bool) {
 	wt := worktreeRel
 	if wt != "" && !filepath.IsAbs(wt) {
@@ -158,40 +158,93 @@ func ChangedFiles(cwd, mainBranch string) ([]string, error) {
 }
 
 func SquashMerge(repo, branch, mainBranch, message string) error {
-	if _, err := home.Git(repo, "checkout", mainBranch); err != nil {
-		return errx.Wrap("checkout main failed", "ensure main worktree is clean", err)
+	_, err := SquashMergeIsolated(repo, branch, mainBranch, message)
+	return err
+}
+
+// SquashMergeIsolated 在临时 detached worktree 上 squash 合入，再 update-ref 推进主干。
+// 主检出可保持脏状态：不 checkout、不要求 AssertWorkingTreeClean(repo)。
+// 返回合入后的主干 tip commit。
+func SquashMergeIsolated(repo, branch, mainBranch, message string) (string, error) {
+	// 始终基于本地主干 tip：update-ref 也推进同一 refs/heads/<main>。
+	oldTip, err := home.Git(repo, "rev-parse", "--verify", mainBranch)
+	if err != nil {
+		return "", i18n.EW("err.checkout_main", "next.clean_main", err)
 	}
-	if out, err := home.Git(repo, "merge", "--squash", branch); err != nil {
-		_, _ = home.Git(repo, "merge", "--abort")
-		return errx.New("squash merge conflict for "+branch+": "+out, "inspect conflict files; maw will create a conflict task")
+	tmp, err := os.MkdirTemp("", "maw-merge-*")
+	if err != nil {
+		return "", err
+	}
+	// worktree add 会创建目录；先去掉 MkdirTemp 占位，避免 "already exists"。
+	_ = os.RemoveAll(tmp)
+	defer func() {
+		RemoveWorktree(repo, tmp)
+		_ = os.RemoveAll(tmp)
+	}()
+	if out, err := home.Git(repo, "worktree", "add", "--detach", tmp, oldTip); err != nil {
+		return "", i18n.E("err.worktree_create", "next.worktree_list", out)
+	}
+	if out, err := home.Git(tmp, "merge", "--squash", branch); err != nil {
+		_, _ = home.Git(tmp, "merge", "--abort")
+		return "", i18n.E("err.squash_conflict", "next.inspect_conflict", branch, out)
 	}
 	cmd := exec.Command("git", "diff", "--cached", "--quiet")
-	cmd.Dir = repo
+	cmd.Dir = tmp
 	if err := cmd.Run(); err == nil {
-		// squash 不留 MERGE_HEAD；清掉可能的空暂存即可
-		_, _ = home.Git(repo, "reset", "--mixed", "HEAD")
-		return errx.New("squash merge produced no changes for "+branch, "ensure the task branch has commits vs main; empty merge is rejected")
+		_, _ = home.Git(tmp, "reset", "--mixed", "HEAD")
+		return "", i18n.E("err.squash_empty", "next.ensure_commits", branch)
 	}
 	c := exec.Command("git", "commit", "-m", message)
-	c.Dir = repo
+	c.Dir = tmp
 	c.Env = append(os.Environ(), MergeEnv+"=1")
 	out, err := c.CombinedOutput()
 	if err != nil {
-		return errx.New("merge commit failed: "+string(out), "inspect git status on main")
+		return "", i18n.E("err.merge_commit", "next.inspect_main", string(out))
 	}
-	return nil
+	newTip, err := home.Git(tmp, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	ref := "refs/heads/" + mainBranch
+	if out, err := home.Git(repo, "update-ref", ref, newTip, oldTip); err != nil {
+		return "", i18n.E("err.merge_commit", "next.inspect_main", out)
+	}
+	return strings.TrimSpace(newTip), nil
 }
 
-// AssertWorkingTreeClean fails if cwd has staged/unstaged changes to tracked files.
-// Untracked files are ignored. Maw meta (.gitignore 仅因 init 追加 .multiagent/.worktrees、
-// 以及 .multiagent/**) 不视为阻塞合入的脏状态。
-func AssertWorkingTreeClean(cwd string) error {
-	// 不用 home.Git：它对 CombinedOutput 做 TrimSpace，会吃掉 porcelain 首行 X 位空格。
+// BranchHasUniqueChanges 报告 worktree HEAD 相对主干是否有树差异（空 squash 预检）。
+func BranchHasUniqueChanges(cwd, mainBranch string) (bool, error) {
+	base, err := EnsureBranchBase(cwd, mainBranch)
+	if err != nil {
+		return false, err
+	}
+	cmd := exec.Command("git", "diff", "--quiet", base, "HEAD")
+	cmd.Dir = cwd
+	err = cmd.Run()
+	if err == nil {
+		return false, nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, err
+}
+
+// MergeIgnorablePath reports whether a tracked dirty path is maw session/meta noise
+// that must not block merge/submit.
+func MergeIgnorablePath(p string) bool {
+	p = strings.TrimSpace(strings.ReplaceAll(p, "\\", "/"))
+	return p == ".gitignore" || p == "TASK.md" || strings.HasPrefix(p, ".multiagent/") ||
+		strings.HasPrefix(p, ".maw/") || p == ".maw"
+}
+
+// DirtyTrackedPaths returns porcelain lines for tracked dirty files that are not ignorable.
+func DirtyTrackedPaths(cwd string) ([]string, error) {
 	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=no")
 	cmd.Dir = cwd
 	rawOut, err := cmd.Output()
 	if err != nil {
-		return errx.Wrap("git status failed", "inspect "+cwd, err)
+		return nil, i18n.EWN("err.git_status", nil, "next.inspect_cwd", err, cwd)
 	}
 	var dirty []string
 	for _, raw := range strings.Split(string(rawOut), "\n") {
@@ -205,10 +258,21 @@ func AssertWorkingTreeClean(cwd string) error {
 			p = p[i+4:]
 		}
 		p = strings.Trim(p, "\"")
-		if p == ".gitignore" || strings.HasPrefix(p, ".multiagent/") {
+		if MergeIgnorablePath(p) {
 			continue
 		}
 		dirty = append(dirty, strings.TrimSpace(ln))
+	}
+	return dirty, nil
+}
+
+// AssertWorkingTreeClean fails if cwd has staged/unstaged changes to tracked files.
+// Untracked files are ignored. Maw meta (.gitignore 仅因 init 追加 .multiagent/.worktrees、
+// 以及 .multiagent/**) 不视为阻塞合入的脏状态。
+func AssertWorkingTreeClean(cwd string) error {
+	dirty, err := DirtyTrackedPaths(cwd)
+	if err != nil {
+		return err
 	}
 	if len(dirty) == 0 {
 		return nil
@@ -217,10 +281,7 @@ func AssertWorkingTreeClean(cwd string) error {
 	if len(snippet) > 200 {
 		snippet = snippet[:200] + "…"
 	}
-	return errx.New(
-		"working tree dirty in "+cwd+": "+snippet,
-		"cd "+cwd+" && git add <write_scope files> && git commit -m \"…\" then retry (maw submit / maw merge); do not leave staged-only changes",
-	)
+	return i18n.EN("err.dirty_in", []any{cwd, snippet}, "next.commit_scope", cwd)
 }
 
 func RebaseOntoMain(worktree, mainBranch string) error {
@@ -233,7 +294,7 @@ func RebaseOntoMain(worktree, mainBranch string) error {
 	}
 	if out, err := home.Git(worktree, "rebase", base); err != nil {
 		_, _ = home.Git(worktree, "rebase", "--abort")
-		return errx.New("rebase failed: "+out, "resolve conflicts in a conflict task; do not merge manually")
+		return i18n.E("err.rebase_failed", "next.resolve_conflict", out)
 	}
 	return nil
 }
@@ -246,6 +307,16 @@ type GateResult struct {
 	EnvFailure bool   `json:"env_failure,omitempty"`
 }
 
+// IsDirtyTree reports whether an error is a working-tree-dirty failure
+// (recoverable by commit/stash), not a true merge conflict.
+func IsDirtyTree(msg string) bool {
+	low := strings.ToLower(msg)
+	return strings.Contains(low, "working tree dirty") ||
+		strings.Contains(low, "工作区不干净") ||
+		strings.Contains(low, "dirty_in") ||
+		strings.Contains(low, "err.dirty")
+}
+
 // IsEnvFailure reports whether a gate/merge error looks like local environment,
 // not task code (shim, missing tools, unpack failures, timeouts).
 func IsEnvFailure(msg string) bool {
@@ -255,9 +326,78 @@ func IsEnvFailure(msg string) bool {
 		"safe-delete", "cannot find module", "no such file or directory",
 		"gate timed out", "npm err!", "npx:", "permission denied",
 		"module not found", "unable to resolve", "tarball",
+		"operation not permitted", "eperm", "/bin/ps",
+		"验证运行环境", "失联", "node_stale", "manual-compat",
 	}
 	for _, n := range needles {
 		if strings.Contains(low, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsUnrelatedRepoGate 判断全仓闸门失败是否落在 write_scope 之外（疑似主干预置红灯）。
+// 启发式：输出里出现的包/路径前缀均不命中任何 write_scope glob 前缀。
+func IsUnrelatedRepoGate(msg string, writeScope []string) bool {
+	if !strings.Contains(strings.ToLower(msg), "gate failed") &&
+		!strings.Contains(msg, "门禁") && !strings.Contains(msg, "闸门") {
+		// 仍允许对 go test ./... 类输出做判定
+		if !strings.Contains(msg, "go test") && !strings.Contains(msg, "make check") {
+			return false
+		}
+	}
+	if len(writeScope) == 0 {
+		return false
+	}
+	paths := extractLikelyPaths(msg)
+	if len(paths) == 0 {
+		return false
+	}
+	for _, p := range paths {
+		if pathInWriteScope(p, writeScope) {
+			return false
+		}
+	}
+	return true
+}
+
+func extractLikelyPaths(msg string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, field := range strings.Fields(msg) {
+		field = strings.Trim(field, ":,\"'`")
+		if !strings.Contains(field, "/") {
+			continue
+		}
+		if strings.HasPrefix(field, "http") {
+			continue
+		}
+		// normalize go test package paths
+		p := strings.TrimPrefix(field, "./")
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+		if len(out) >= 32 {
+			break
+		}
+	}
+	return out
+}
+
+func pathInWriteScope(path string, writeScope []string) bool {
+	path = strings.TrimPrefix(strings.ReplaceAll(path, "\\", "/"), "./")
+	for _, scope := range writeScope {
+		s := strings.TrimSpace(strings.ReplaceAll(scope, "\\", "/"))
+		s = strings.TrimSuffix(s, "/**")
+		s = strings.TrimSuffix(s, "/*")
+		s = strings.TrimSuffix(s, "/")
+		if s == "" {
+			continue
+		}
+		if path == s || strings.HasPrefix(path, s+"/") || strings.Contains(path, "/"+s+"/") || strings.HasPrefix(s, path) {
 			return true
 		}
 	}
@@ -285,14 +425,13 @@ func RunGatesDetailed(commands []string, cwd string, timeoutSec int) ([]GateResu
 		if ctx.Err() == context.DeadlineExceeded {
 			gr.EnvFailure = true
 			results = append(results, gr)
-			errMsg := "gate timed out: " + cmdStr
-			return results, errx.New(errMsg, "raise gates.timeout_sec or fix tests")
+			return results, i18n.E("err.gate_timeout", "next.raise_timeout", cmdStr)
 		}
 		if err != nil {
 			msg := "gate failed: " + cmdStr + "\n" + string(out)
 			gr.EnvFailure = IsEnvFailure(msg)
 			results = append(results, gr)
-			return results, errx.New(msg, "fix failures then `maw submit` again")
+			return results, i18n.E("err.gate_failed", "next.fix_gates", cmdStr, string(out))
 		}
 		gr.OK = true
 		results = append(results, gr)

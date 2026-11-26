@@ -1,0 +1,132 @@
+/* Workbench 共享主题 token —— 唯一视觉源。
+ *
+ * 依据：docs/contracts/vnext/ui/WORKBENCH_UI_CONTRACT.md §2（颜色）、§3（形状与字级）。
+ * 取值与契约表逐条对齐；components/*.css 只允许 var(...)，不得出现新的色值字面量。
+ * 实现参照：internal/board/assets/legacy/board.css 的 :root（同值同结构，不另起第二套）。
+ *
+ * 模式优先级：显式 data-theme > 系统 prefers-color-scheme > 深色默认。
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* 契约 §2：颜色 token（深色） */
+  --bg: #141618;
+  --panel: #191c1f;
+  --card: #202427;
+  --hover: #272c30;
+  --line: #2d3338;
+  --line-strong: #414a51;
+  --text: #e6eaed;
+  --muted: #9ba5ad;
+  --faint: #7d8992;
+  --accent: #9cdbb0;
+  --warn: #e5bc78;
+  --danger: #ed9797;
+  --ok: #9cdbb0;
+  --offline: #68747c;
+  --scrim: #0007;
+
+  /* 既有实现的派生色，非契约新增语义 */
+  --accent-ink: #14271b;
+  --accent-soft: #243b2d;
+  --accent-hover: #b6e9c5;
+  --selection: #375a43;
+  --brand-border: #4b6353;
+  --card-hover: #252a2e;
+  --card-hover-border: #55616a;
+
+  /* 契约 §3：形状、字级、密度、动效 */
+  --radius: 6px;
+  --radius-tight: 4px;
+  --radius-key: 3px;
+  --font-title: 22px;
+  --font-label: 14px;
+  --font-small: 12px;
+  --space-tight: 8px;
+  --font-panel: 18px;
+  --font-body: 13px;
+  --font-meta: 12px;
+  --line-body: 1.5;
+  --line-card: 1.45;
+  --line-panel: 1.5;
+  --space-page: 28px;
+  --space-block: 16px;
+  --space-card: 12px;
+  --row-height: 36px;
+  --control-height: 32px;
+  --control-height-compact: 28px;
+  --breakpoint-wide: 1500px;
+  --breakpoint-mid: 1100px;
+  --breakpoint-narrow: 700px;
+
+  /* 契约 §11：动效 */
+  --ease: cubic-bezier(.2,.8,.2,1);
+  --dur-interaction: 150ms;
+  --dur-drawer: 220ms;
+  --dur-enter: 300ms;
+  --enter-shift: 5px;
+
+  /* 契约 §3：字体族 */
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f7f8f9;
+  --panel: #eef1f3;
+  --card: #ffffff;
+  --hover: #e4e9ec;
+  --line: #dce1e5;
+  --line-strong: #c1cbd2;
+  --text: #20282f;
+  --muted: #5b6871;
+  --faint: #6b7882;
+  --accent: #267044;
+  --warn: #8a601f;
+  --danger: #b53e45;
+  --ok: #267044;
+  --offline: #89959d;
+  --scrim: #17232e38;
+
+  --accent-ink: #ffffff;
+  --accent-soft: #e0eee4;
+  --accent-hover: #1f603d;
+  --selection: #cbe6d4;
+  --brand-border: #a1bfa9;
+  --card-hover: #f8faf9;
+  --card-hover-border: #9baaaf;
+}
+
+/* 默认跟随系统：未显式指定 data-theme 时按系统深浅切换。 */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+
+    --bg: #f7f8f9;
+    --panel: #eef1f3;
+    --card: #ffffff;
+    --hover: #e4e9ec;
+    --line: #dce1e5;
+    --line-strong: #c1cbd2;
+    --text: #20282f;
+    --muted: #5b6871;
+    --faint: #6b7882;
+    --accent: #267044;
+    --warn: #8a601f;
+    --danger: #b53e45;
+    --ok: #267044;
+    --offline: #89959d;
+    --scrim: #17232e38;
+
+    --accent-ink: #ffffff;
+    --accent-soft: #e0eee4;
+    --accent-hover: #1f603d;
+    --selection: #cbe6d4;
+    --brand-border: #a1bfa9;
+    --card-hover: #f8faf9;
+    --card-hover-border: #9baaaf;
+  }
+}

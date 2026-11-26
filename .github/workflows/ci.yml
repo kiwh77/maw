@@ -6,8 +6,23 @@ on:
   pull_request:
     branches: [main]
 
+# 任务划分与 docs/verification/vnext/release/platform-matrix.zh-CN.md 的「CI 任务划分」表一致：
+#   go-core / go-build / static-export / frontend-unit / frontend-browser / platform-matrix / desktop-prereq
+#
+# 纪律：
+# 1. 覆盖率地板保持 >= 35，不因为新增断言或换 runner 而下调，也不加 -run 白名单绕开失败用例。
+# 2. 已知红不掩盖。基线就红的用例（例：vn-981 键盘导航）照样跑，红就是红，不许 --grep-invert 或
+#    continue-on-error 把它藏起来。要变绿只能改代码或改断言，不能改「跑不跑」。
+# 3. 跨编译不等于原生证据。platform-matrix 只证明六个目标能编译；真正跑过受管进程并被观测到的
+#    只有 darwin。managed 支持范围由 tests/platform 的断言钉死。
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  go-core:
+    name: Go 核心与跨进程集成
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,10 +31,161 @@ jobs:
           go-version-file: go.mod
       - name: Test
         run: |
-          CGO_ENABLED=0 go test ./... -coverprofile=coverage.out
+          set -euo pipefail
+          CGO_ENABLED=0 go test ./... -count=1 -coverprofile=coverage.out
           total=$(go tool cover -func=coverage.out | awk '/^total:/{print $3}' | tr -d '%')
           echo "coverage=${total}%"
           # Raise toward 50% as Wave1 test backlog lands; floor prevents regressions.
           awk -v t="$total" 'BEGIN{exit !(t+0 >= 35)}'
+
+  go-build:
+    name: Go 可执行构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: Build
         run: CGO_ENABLED=0 go build -o maw ./cmd/maw
+
+  static-export:
+    name: 静态导出与页面装配
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Static export
+        run: |
+          set -euo pipefail
+          # 只挑静态导出这一族用例：assets 是否随包发布、快照是否可脱离写操作加载、
+          # /api/runtime 是否如实报告 static_export_managed=false。
+          CGO_ENABLED=0 go test ./internal/board -count=1 \
+            -run 'Assets|Static|Snapshot|PageHTML|Runtime' -v
+
+  frontend-unit:
+    name: 前端行为单测
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: node --test
+        run: |
+          set -euo pipefail
+          node --test internal/board/page.test.cjs
+          # 各视图与公共组件的纯渲染单测，逐个文件跑（保持失败时能看出是哪一个视图）。
+          for f in internal/board/assets/views/*/*.test.cjs \
+                   internal/board/assets/shell/*.test.cjs \
+                   internal/board/assets/components/*.test.cjs; do
+            [ -e "$f" ] || continue
+            node --test "$f"
+          done
+
+  frontend-browser:
+    name: 浏览器验收
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/browser/package-lock.json
+      - name: Install playwright
+        run: |
+          set -euo pipefail
+          npm --prefix tests/browser ci
+          npm --prefix tests/browser exec -- playwright install --with-deps chromium
+      - name: Playwright
+        run: |
+          set -euo pipefail
+          # 全量跑，不加 --grep / --grep-invert。基线就红的用例要暴露出来。
+          npm --prefix tests/browser test
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/browser/reports/results.json
+            tests/browser/reports/artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
+  platform-matrix:
+    name: 平台矩阵与发布前置
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Matrix assertions
+        run: CGO_ENABLED=0 go test ./tests/platform -count=1 -v
+      - name: Release check build
+        run: CGO_ENABLED=0 go build -o /tmp/maw-vnext-release-check ./cmd/maw
+      - name: Note cross-compile boundary
+        run: |
+          echo "::notice::tests/platform 的交叉编译用例只证明六个目标能构建；managed 支持范围仅 darwin（见平台矩阵文档）。"
+
+  pi-runtime:
+    name: Pi 运行时（三模式执行器）
+    strategy:
+      fail-fast: false
+      matrix:
+        # 两个平台都跑同一条冒烟：npm ci → 单测 → 无密钥 --probe。
+        # 实际支持范围以这里通过的矩阵为准；没进矩阵的平台不宣称支持。
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: runtimes/pi/package-lock.json
+      - name: Install pinned Pi SDK
+        run: npm --prefix runtimes/pi ci
+      - name: node --test
+        run: npm --prefix runtimes/pi test
+      - name: Probe without model keys
+        run: |
+          set -euo pipefail
+          out="$(node runtimes/pi/src/main.mjs --probe)"
+          echo "$out"
+          node -e '
+            const r = JSON.parse(process.argv[1]);
+            if (!r.ok) { console.error("probe ok=false"); process.exit(1); }
+            if (r.protocol.format !== "pi-stream-json" || r.protocol.version !== "1") {
+              console.error(`protocol mismatch: ${r.protocol.format}/${r.protocol.version}`);
+              process.exit(1);
+            }
+            console.log(`pi-runtime smoke on ${process.env.RUNNER_OS}: sdk=${r.sdk} node=${r.node}`);
+          ' "$out"
+
+  desktop-prereq:
+    name: 桌面构建前置（macOS）
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Desktop prerequisites
+        run: CGO_ENABLED=0 go test ./tests/platform -count=1 -run 'Desktop' -v
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo metadata
+        run: |
+          set -euo pipefail
+          cargo metadata --no-deps --format-version 1 \
+            --manifest-path clients/desktop/src-tauri/Cargo.toml > /dev/null

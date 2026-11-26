@@ -1,0 +1,40 @@
+{
+  "contract": "maw.task.instance/v1",
+  "project_id": "716c30878ba1b95f",
+  "expect_error": "E120",
+  "note": "两个活跃实例同时占用 VN-001：活跃别名必须唯一，重建编号要先让旧实例退役。",
+  "instances": [
+    {
+      "instance_id": "ti_dupalias1",
+      "display_id": "VN-001",
+      "state": "active",
+      "created_at": "2026-10-23T02:50:00Z",
+      "active_version": 1,
+      "versions": [
+        { "version_no": 1, "frozen_at": "2026-10-23T02:50:00Z", "title": "旧实例", "deps": [] }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-001",
+        "primary_key": "716c30878ba1b95f/VN-001",
+        "ambiguous": false
+      }
+    },
+    {
+      "instance_id": "ti_dupalias2",
+      "display_id": "VN-001",
+      "state": "active",
+      "created_at": "2026-10-23T03:00:00Z",
+      "active_version": 1,
+      "versions": [
+        { "version_no": 1, "frozen_at": "2026-10-23T03:00:00Z", "title": "新实例", "deps": [] }
+      ],
+      "legacy": {
+        "project_id": "716c30878ba1b95f",
+        "display_id": "VN-001",
+        "primary_key": "716c30878ba1b95f/VN-001",
+        "ambiguous": false
+      }
+    }
+  ]
+}

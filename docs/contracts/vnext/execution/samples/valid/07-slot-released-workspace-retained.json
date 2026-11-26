@@ -1,0 +1,42 @@
+{
+  "contract": "maw.runtime.state/v1",
+  "project_id": "716c30878ba1b95f",
+  "note": "两种资源分别释放：进程已确认停止，节点槽立即归还；产物尚未冻结，工作目录继续占用到验收结束。",
+  "auto_execution": { "enabled": false, "managed_execution_limit": 0 },
+  "runs": [
+    {
+      "run_id": "run_k001",
+      "task_instance": "ti_vn007k",
+      "task_version": 1,
+      "generation": 1,
+      "phase": "completed",
+      "reconciliation_state": "confirmed",
+      "process_stop_confirmed": true,
+      "delivery_frozen": false,
+      "started_at": "2026-10-23T06:20:01Z",
+      "finished_at": "2026-10-23T06:30:00Z",
+      "evidence": ["exit_code:0", "final_result:ok"],
+      "phase_history": [
+        { "phase": "reserved", "at": "2026-10-23T06:20:00Z" },
+        { "phase": "preparing", "at": "2026-10-23T06:20:00.500000Z" },
+        { "phase": "launching", "at": "2026-10-23T06:20:01Z" },
+        { "phase": "running", "at": "2026-10-23T06:20:03Z" },
+        { "phase": "completed", "at": "2026-10-23T06:30:00Z" }
+      ]
+    }
+  ],
+  "operations": [
+    { "operation_id": "op_k001", "kind": "dispatch", "target_run": "run_k001", "state": "done", "idempotency_key": "dispatch:ti_vn007k:1:1", "request_digest": "sha256:kkkk" },
+    { "operation_id": "op_k002", "kind": "verify", "target_run": "run_k001", "state": "pending", "idempotency_key": "verify:run_k001", "request_digest": "sha256:kkkl" }
+  ],
+  "leases": [
+    { "lease_id": "ls_k001", "kind": "node_slot", "resource_id": "local-slot-1", "holder_run": "run_k001", "generation": 1, "released_at": "2026-10-23T06:30:01Z", "release_generation": 1 },
+    { "lease_id": "ls_k002", "kind": "workspace", "resource_id": ".worktrees/codebuddy-goalagents-1", "holder_run": "run_k001", "generation": 1, "released_at": null }
+  ],
+  "events": [
+    { "event_id": "evt_0061", "cursor": 61, "schema_version": 1, "type": "run.phase", "run_id": "run_k001", "to_phase": "reserved", "occurred_at": "2026-10-23T06:20:00Z", "received_at": "2026-10-23T06:20:00Z", "quality": "observed" },
+    { "event_id": "evt_0062", "cursor": 62, "schema_version": 1, "type": "run.phase", "run_id": "run_k001", "to_phase": "running", "occurred_at": "2026-10-23T06:20:03Z", "received_at": "2026-10-23T06:20:03Z", "quality": "observed" },
+    { "event_id": "evt_0063", "cursor": 63, "schema_version": 1, "type": "run.phase", "run_id": "run_k001", "to_phase": "completed", "occurred_at": "2026-10-23T06:30:00Z", "received_at": "2026-10-23T06:30:00Z", "quality": "observed" },
+    { "event_id": "evt_0064", "cursor": 64, "schema_version": 1, "type": "lease.released", "lease_id": "ls_k001", "run_id": "run_k001", "occurred_at": "2026-10-23T06:30:01Z", "received_at": "2026-10-23T06:30:01Z", "quality": "observed" }
+  ]
+}

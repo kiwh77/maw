@@ -1,0 +1,28 @@
+{
+  "schema": "maw.evidence.workbuddy/v1",
+  "sample_id": "VN305-X01",
+  "slug": "auth-required",
+  "kind": "recorded",
+  "measured_this_round": false,
+  "expectation": "认证缺失时的可观测形态：进程退出码 0、stdout 为空、stderr 有错误文案；不产生任何模型回复",
+  "provenance": {
+    "document": "docs/CLI_SMOKE_TEST.zh-CN.md",
+    "lines": [15, 16, 48],
+    "quoted_at": "2026-10-23",
+    "summary": "两款 WorkBuddy 随包 CLI 2.161.0 在正常联网环境下做固定文本调用，均在约 3.0–3.6 秒后要求登录，无回复"
+  },
+  "quoted_stderr": "Authentication required. Please use /login command to sign in to your account",
+  "outcome": {
+    "exit_code": 0,
+    "stdout_bytes": 0,
+    "stderr_bytes": null,
+    "result_record_present": false,
+    "model_reply_present": false,
+    "duration_ms_approx": [3000, 3600]
+  },
+  "why_not_remeasured": "本轮只做只读最小调用（--version／--help）；固定文本调用会发模型任务，属于 Probe 的副作用边界之外。认证形态沿用已记录的实测结论，并标记为 recorded 而非 measured。",
+  "affects": [
+    "result.exit_zero_without_result",
+    "auth.missing_credentials_detectable"
+  ]
+}

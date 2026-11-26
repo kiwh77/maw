@@ -1,0 +1,62 @@
+/* 表格 —— 契约 §6。表头 12px/muted，单元格 13px/text，行高不低于 36px，不用斑马纹。 */
+
+.table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+.table th {
+  font-size: var(--font-meta, 12px);
+  line-height: 1.4;
+  font-family: var(--sans, sans-serif);
+  color: var(--muted);
+  text-align: left;
+  /* 表头与单元格共用同一水平内边距：只给 th 加会让表头文字和列内容错位。 */
+  padding: 8px var(--space-block, 16px);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.table td {
+  font-size: var(--font-body);
+  line-height: var(--line-body);
+  color: var(--text);
+  height: var(--row-height);
+  padding: 0 var(--space-block, 16px);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.table tbody tr:hover {
+  background: var(--hover);
+}
+
+/* 数字、时间、ID、路径用 mono 并右对齐；名称类保持左对齐并允许省略号截断。 */
+.table .num,
+.table .time,
+.table .id,
+.table .path {
+  font-family: var(--mono);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.table .name,
+.table .agent {
+  text-align: left;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 空结果不用空白表头占位，走 §8 空态。 */
+.table--empty thead {
+  display: none;
+}

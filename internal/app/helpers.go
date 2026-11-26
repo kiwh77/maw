@@ -7,11 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kiwh77/maw/internal/board"
 	"github.com/kiwh77/maw/internal/db"
-	"github.com/kiwh77/maw/internal/errx"
 	"github.com/kiwh77/maw/internal/home"
+	"github.com/kiwh77/maw/internal/i18n"
 	"github.com/kiwh77/maw/internal/identity"
 	"github.com/kiwh77/maw/internal/machine"
 	"github.com/kiwh77/maw/internal/schedule"
@@ -30,7 +31,22 @@ func refreshBoard(pc *projCtx) (string, error) {
 	return board.Write(pc.LocalHome, snap)
 }
 
-func bindAgent(tx *sql.Tx, projectID, who, role, status, taskID, worktree, branch string) error {
+// mergeAgentMeta copies existing meta and optionally sets log_path.
+// Empty logPath leaves any prior log_path untouched.
+func mergeAgentMeta(existing map[string]any, logPath string) map[string]any {
+	meta := map[string]any{}
+	if existing != nil {
+		for k, v := range existing {
+			meta[k] = v
+		}
+	}
+	if strings.TrimSpace(logPath) != "" {
+		meta["log_path"] = strings.TrimSpace(logPath)
+	}
+	return meta
+}
+
+func bindAgent(tx *sql.Tx, projectID, who, role, status, taskID, worktree, branch, logPath string) error {
 	if role == "" {
 		role = "worker"
 	}
@@ -39,10 +55,15 @@ func bindAgent(tx *sql.Tx, projectID, who, role, status, taskID, worktree, branc
 	if existing != nil && existing.RegisteredAt != "" {
 		regAt = existing.RegisteredAt
 	}
+	var prevMeta map[string]any
+	if existing != nil {
+		prevMeta = existing.Meta
+	}
 	return db.UpsertAgent(tx, &db.Agent{
 		ProjectID: projectID, ID: who, Role: role, Status: status,
 		TaskID: taskID, Worktree: worktree, Branch: branch,
-		RegisteredAt: regAt, LastSeen: db.UTCNow(), Meta: map[string]any{},
+		RegisteredAt: regAt, LastSeen: db.UTCNow(),
+		Meta: mergeAgentMeta(prevMeta, logPath),
 	})
 }
 
@@ -152,6 +173,7 @@ func writeTaskCardWithDeps(wt string, t *db.Task, agent string, all []*db.Task) 
 	fmt.Fprintf(&bld, "## 不要做（not_doing）\n%s\n\n", strings.Join(notLines, "\n"))
 	fmt.Fprintf(&bld, "## 协议\n负责人 `%s`；工程 `%s`。\n", agent, t.ProjectID)
 	bld.WriteString("里程碑 `maw progress -m \"...\"`；完成 `maw submit`；随后可 `maw merge --yes`。\n")
+	bld.WriteString("统计 `maw stats report --turns <轮次> --input-tokens <输入> --output-tokens <输出>`（拿不到 token 可省略 token 参数）；不写会让看板统计缺这段执行。\n")
 	return os.WriteFile(filepath.Join(wt, "TASK.md"), []byte(bld.String()), 0o644)
 }
 
@@ -222,11 +244,11 @@ func inferTaskID(cwd string) (string, error) {
 	}
 	b, err := os.ReadFile(filepath.Join(root, ".maw", "task.json"))
 	if err != nil {
-		return "", errx.New("无法从 worktree 推断任务", "先 cd 到 maw next 创建的目录，或传 --task")
+		return "", i18n.E("err.infer_task", "next.cd_or_task")
 	}
 	var t db.Task
 	if err := json.Unmarshal(b, &t); err != nil || t.ID == "" {
-		return "", errx.New("无效的 .maw/task.json", "重新执行 maw next")
+		return "", i18n.E("err.bad_task_json", "next.rerun_next")
 	}
 	return t.ID, nil
 }
@@ -253,8 +275,7 @@ func promoteReady(tx *sql.Tx, projectID string) error {
 					return err
 				}
 				t.Status = "ready"
-				t.Revision++
-				if err := db.UpsertTask(tx, t); err != nil {
+				if err := db.UpsertTaskCAS(tx, t, t.Revision); err != nil {
 					return err
 				}
 				_ = db.AppendEvent(tx, projectID, "orchestrator", "status_changed", t.ID, map[string]any{
@@ -269,8 +290,7 @@ func promoteReady(tx *sql.Tx, projectID string) error {
 					return err
 				}
 				t.Status = "backlog"
-				t.Revision++
-				if err := db.UpsertTask(tx, t); err != nil {
+				if err := db.UpsertTaskCAS(tx, t, t.Revision); err != nil {
 					return err
 				}
 				_ = db.AppendEvent(tx, projectID, "orchestrator", "status_changed", t.ID, map[string]any{
@@ -301,12 +321,16 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 	var tasks []*db.Task
 	var agents []*db.Agent
 	var projects []*db.Project
+	var iterations []*db.Iteration
+	var systemJobs []*db.SystemJob
 	var eventID int64
+	var lastEvent string
 	maxP := maxParallelFallback
 	if maxP <= 0 {
 		maxP = 4
 	}
-	err := db.WithTx(gdb, func(tx *sql.Tx) error {
+	// 看板查询是只读：不得隐式升级 schema。
+	err := withGlobalRead(gdb, func(tx *sql.Tx) error {
 		var e error
 		projects, e = db.ListProjects(tx)
 		if e != nil {
@@ -320,7 +344,23 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 		if e != nil {
 			return e
 		}
-		return tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM events`).Scan(&eventID)
+		iterations, e = db.ListIterations(tx, projectID)
+		if e != nil {
+			return e
+		}
+		// Router 介入情况要跟任务一起取：问题审查页要知道「这条阻塞有没有人管」，
+		// 而这只能由 system_jobs 与 blocked 任务对账得出。
+		systemJobs, e = db.ListSystemJobs(tx, projectID, "", 200)
+		if e != nil {
+			return e
+		}
+		// 数据水位取「最近一条事件发生时间」：它不是渲染时刻，停更时不会假装在更新。
+		if projectID == "" {
+			return tx.QueryRow(`SELECT COALESCE(MAX(id), 0), COALESCE(MAX(ts), '') FROM events`).
+				Scan(&eventID, &lastEvent)
+		}
+		return tx.QueryRow(`SELECT COALESCE(MAX(id), 0), COALESCE(MAX(ts), '') FROM events WHERE project_id = ?`, projectID).
+			Scan(&eventID, &lastEvent)
 	})
 	if err != nil {
 		return board.Snapshot{}, err
@@ -333,8 +373,22 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 		}
 	}
 	snap := board.BuildSnapshot(tasks, agents, maxP)
+	snap.Problems = append(snap.Problems, board.BuildRouterProblems(tasks, systemJobs, time.Now())...)
 	snap.EventID = eventID
+	// 没有任何事件时留空：让前端显示「尚无事件」，而不是编一个时间。
+	if ts, perr := time.Parse(time.RFC3339, strings.TrimSpace(lastEvent)); perr == nil {
+		snap.UpdatedAt = ts.Local().Format("2006-01-02 15:04:05")
+	} else {
+		snap.UpdatedAt = ""
+	}
 	snap.Projects = projects
+	if snap.Projects == nil {
+		snap.Projects = []*db.Project{}
+	}
+	snap.Iterations = iterations
+	if snap.Iterations == nil {
+		snap.Iterations = []*db.Iteration{}
+	}
 	snap.FilterProject = projectID
 	snap.FilterAgent = agent
 	snap.FilterStatus = status
@@ -343,7 +397,7 @@ func loadBoardSnapshot(gdb, projectID, agent, status string, maxParallelFallback
 
 func loadTaskDetail(gdb, projectID, taskID string) (board.TaskDetail, error) {
 	var out board.TaskDetail
-	err := db.WithTx(gdb, func(tx *sql.Tx) error {
+	err := withGlobalRead(gdb, func(tx *sql.Tx) error {
 		t, e := db.FindTask(tx, projectID, taskID)
 		if e != nil {
 			return e

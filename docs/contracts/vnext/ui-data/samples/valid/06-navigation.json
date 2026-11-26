@@ -1,0 +1,81 @@
+{
+  "contract": "maw.ui.data/v1",
+  "registry": {
+    "single_active": true,
+    "views": [
+      {
+        "id": "board",
+        "title_key": "view.board.title",
+        "order": 10,
+        "match": ["#/v/board"],
+        "has_mount": true,
+        "has_unmount": true
+      },
+      {
+        "id": "timeline",
+        "title_key": "view.timeline.title",
+        "order": 30,
+        "match": ["#/v/timeline"],
+        "has_mount": true,
+        "has_unmount": true
+      }
+    ],
+    "transitions": [
+      { "from": "board", "to": "timeline", "unmounted_first": true }
+    ]
+  },
+  "navigation": {
+    "roundtrip": true,
+    "invalid_params": "ignore",
+    "urls": [
+      {
+        "url": "#/v/timeline?project=p1&status=ready",
+        "change": "view",
+        "history": "push",
+        "resolved": {
+          "view_id": "timeline",
+          "project_id": "p1",
+          "filters": { "status": "ready" },
+          "legacy": false,
+          "error": false
+        }
+      },
+      {
+        "url": "#/v/board?project=p1&status=ready",
+        "change": "filter",
+        "history": "replace",
+        "resolved": {
+          "view_id": "board",
+          "project_id": "p1",
+          "filters": { "status": "ready" },
+          "legacy": false,
+          "error": false
+        }
+      },
+      {
+        "url": "#p1",
+        "change": "legacy",
+        "history": "replace",
+        "resolved": {
+          "view_id": "board",
+          "project_id": "p1",
+          "filters": {},
+          "legacy": true,
+          "error": false
+        }
+      },
+      {
+        "url": "#/v/ghost",
+        "change": "fallback",
+        "history": "replace",
+        "resolved": {
+          "view_id": "board",
+          "project_id": "",
+          "filters": {},
+          "legacy": false,
+          "error": false
+        }
+      }
+    ]
+  }
+}

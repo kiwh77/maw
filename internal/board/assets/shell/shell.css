@@ -1,0 +1,466 @@
+/* Workbench 挂载层样式（VN-704）。
+ *
+ * 与共享组件一起注入：board-web `injectStyles` 顺序为
+ * tokens.css → components.css → 本文件 → 视图局部 CSS。
+ * 不新增第二套 token 或色值字面量。
+ * 断点沿用契约 §13 的 1500 / 1100 / 700，不另造断点。
+ */
+
+/* ---------- 侧边导航：与 legacy 工程导航同一视觉语言 ---------- */
+
+.vnext-nav .section-label {
+  margin-top: 14px;
+}
+
+/* 置顶项：工作台＝无 view 参数的默认页，排在所有分组之前且不带分组标题。 */
+.vnext-nav .nav-item--pinned {
+  margin-bottom: 6px;
+}
+
+.vnext-nav .nav-item {
+  font: 12px/1.4 var(--sans);
+}
+
+.vnext-nav .nav-item .symbol {
+  width: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.vnext-nav .nav-item.active .symbol {
+  color: var(--accent);
+}
+
+.vnext-nav .nav-item .count {
+  margin-left: auto;
+  color: var(--muted);
+  font: 10px var(--mono);
+}
+
+/* ---------- 视图容器 ---------- */
+
+.vnext {
+  /* 内容留白由外层 .content 统一给；视图容器再加一层会让每页左右各多缩进一次。 */
+  padding: 0;
+  min-width: 0;
+  animation: surface-enter var(--dur-enter, 180ms) var(--ease, ease-out) both;
+}
+
+.vnext[hidden],
+.vnext-detail[hidden] {
+  display: none !important;
+}
+
+.vnext h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.vnext .nodes-head p,
+.vnext header p {
+  margin: 0 0 14px;
+}
+
+.vnext .table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+/* 行可打开详情：给出键盘焦点与悬停反馈，但不改变视图自身的表格语义。 */
+.vnext tbody tr.row-clickable {
+  cursor: pointer;
+}
+
+.vnext tbody tr.row-clickable:hover {
+  background: var(--hover);
+}
+
+.vnext tbody tr.row-clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 状态说明条：缺失/失败/过期由这里给出，视图内部不冒充成功。 */
+.vnext-status {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.vnext-status[data-state="error"] {
+  border-left-color: var(--danger);
+}
+
+/* 说明块：先选工程、回顾只读这类「不是失败但也不能当成功」的提示。 */
+.vnext-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.vnext-notice__title {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.vnext-notice[data-state="readonly"] {
+  border-left-color: var(--muted);
+}
+
+.vnext-notice[data-state="readonly"] .vnext-notice__title {
+  color: var(--muted);
+}
+
+/* 面包屑的范围位：静态导出与窄屏都只占一格，不额外折行。 */
+.breadcrumb #crumb-scope {
+  color: var(--muted);
+  font-weight: 500;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 只读表单：字段仍然可读可查，提交按钮不可用。 */
+.vnext form[data-readonly="1"] button[disabled] {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+/* ---------- 详情面板（内容区内全宽，替换列表） ---------- */
+
+.vnext-detail {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 16px 18px 24px;
+  animation: surface-enter var(--dur-enter, 180ms) var(--ease, ease-out) both;
+}
+
+.vnext-detail__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.vnext-detail__title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.vnext-detail__back {
+  margin-right: auto;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius);
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+.vnext-detail__back:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.vnext-detail__close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.vnext-detail__close:hover {
+  color: var(--text);
+}
+
+.vnext-detail__body {
+  min-width: 0;
+}
+
+/* ---------- 窄屏：导航保持可用，不产生横向溢出 ---------- */
+
+@media (max-width: 700px) {
+  .vnext h1 {
+    font-size: 18px;
+  }
+
+  .vnext-status {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .vnext-detail {
+    border-radius: 0;
+    border: 0;
+  }
+}
+
+/* Shared workbench composition. Page modules own content, this layer owns chrome. */
+.ui-icon { flex: none; vertical-align: middle; }
+.app { grid-template-columns: 216px minmax(0, 1fr); }
+.app.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
+.app .sidebar { padding: 24px 12px 16px; }
+.sidebar .brand { padding: 0 12px 24px; gap: 10px; }
+.brand-sub { font-size: 9px; letter-spacing: 1px; }
+.vnext-nav .nav-item { position: relative; min-height: 36px; gap: 10px; padding: 8px 12px; font-size: var(--font-meta); }
+.vnext-nav .nav-item.active { background: var(--accent-soft); }
+.vnext-nav .nav-item.active::before { content: ''; position: absolute; inset: 10px auto 10px 0; width: 2px; background: var(--accent); border-radius: var(--radius-tight); }
+.vnext-nav .section-label { margin: 20px 0 8px; padding: 0 12px; letter-spacing: .04em; }
+.agents-rail { max-height: 25%; padding-top: 12px; margin-top: 16px; }
+.agent-row { display: flex; align-items: center; gap: 8px; padding: 7px 9px; font-size: var(--font-meta); min-width: 0; }
+.agent-row__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-row__task { margin-left: auto; color: var(--muted); font: 10px var(--mono); white-space: nowrap; }
+.sidebar-foot { font: 11px var(--sans); color: var(--faint); }
+.sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 34px; width: 34px; padding: 0; background: transparent; border-color: transparent; }
+.sidebar-backdrop, .sidebar .sidebar-close { display: none; }
+.app .topbar { height: 54px; padding: 0 var(--space-page); gap: 16px; }
+.topbar .breadcrumb { gap: 10px; flex: 1; }
+.topbar-tools { gap: 8px; }
+.topbar .page-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.4px;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.topbar .project-select { flex: 1; max-width: 360px; }
+.project-select__label { display: none; }
+.topbar .project-select__control { width: 100%; min-width: 0; background: transparent; }
+#subtitle { font: 11px var(--mono); color: var(--faint); margin-right: 8px; }
+.app .content { padding: 20px var(--space-page) 0; }
+.page-heading { min-height: 34px; margin-bottom: 16px; }
+.page-heading h1 { font-size: var(--font-title); letter-spacing: -.4px; font-weight: 600; }
+.ui-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 80;
+  transform: translateX(-50%);
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  font: var(--font-meta)/1.45 var(--sans);
+  pointer-events: none;
+}
+
+/* One control family across native Vue and rendered view modules. */
+select, .quiet-button, .join-button, .search-box, .topo-x6-btn, .button {
+  height: var(--control-height); border-radius: var(--radius); border: 1px solid var(--line);
+  background: var(--card); color: var(--text); font: var(--font-meta)/1.4 var(--sans);
+  transition: background var(--dur-interaction) var(--ease), border-color var(--dur-interaction) var(--ease), color var(--dur-interaction) var(--ease);
+}
+select { padding: 0 28px 0 10px; }
+.quiet-button, .join-button, .topo-x6-btn, .button { padding: 0 10px; }
+.quiet-button, .join-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.quiet-button:hover, .join-button:hover, .topo-x6-btn:hover, .button:hover { background: var(--hover); border-color: var(--line-strong); }
+.join-button { color: var(--muted); font-weight: 500; white-space: nowrap; }
+select.theme-select { height: var(--control-height-compact); font-size: 11px; background: transparent; }
+.button--primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.button--primary:hover { background: var(--accent-hover); color: var(--accent-ink); border-color: var(--accent-hover); }
+.stats { grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 10px 0; margin-bottom: 12px; gap: 0; border-top: 0; }
+.stats .stat { display: flex; align-items: baseline; gap: 10px; padding: 0 20px; border-left: 1px solid var(--line); }
+.stats .stat:first-child { padding-left: 0; border-left: 0; }
+.stat-label { font: var(--font-meta)/1.4 var(--sans); margin: 0; white-space: nowrap; }
+.stat-value { font: 20px/1.2 var(--mono); letter-spacing: -.5px; }
+.toolbar { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding-bottom: 14px; }
+.toolbar-right { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0; }
+.board-meta-left { display: flex; align-items: center; gap: 12px; margin-right: auto; min-width: 0; }
+#board-count { font: 11px var(--sans); white-space: nowrap; color: var(--muted); }
+.view-toggle { display: inline-flex; flex-wrap: nowrap; gap: 2px; padding: 3px; background: var(--panel); border: 0; border-radius: var(--radius); }
+.view-toggle button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 10px; border: 0; border-radius: var(--radius-tight); font: var(--font-meta)/1.4 var(--sans); }
+.view-toggle button.active { background: var(--card); color: var(--accent); box-shadow: 0 1px 2px var(--line); }
+.search-box { width: 220px; padding: 0 10px; gap: 8px; }
+.search-box input { font: var(--font-meta)/1.4 var(--sans); }
+.search-box kbd { color: var(--faint); border-color: var(--line); }
+.filter-toggle.active { color: var(--accent); border-color: var(--brand-border); }
+.filter-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: var(--radius-tight); background: var(--accent-soft); font: 10px var(--mono); }
+.toolbar .filters { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+.filters select { max-width: 200px; }
+
+/* Task objects share typography, state vocabulary and interaction treatments. */
+.board { gap: 16px; }
+.col { flex: 1 0 232px; max-width: 360px; }
+.col h3 { border-top-width: 1px; padding: 12px 2px; font: 600 var(--font-body)/1.5 var(--sans); }
+.col[data-lane='active'] h3 { border-top-color: var(--warn); }
+.col h3 .count { background: transparent; font-size: 11px; }
+.lane-index { display: none; }
+.card { padding: 14px; margin-bottom: 10px; }
+.card.clickable:hover { transform: none; }
+.card .task-title { font: 500 var(--font-body)/1.55 var(--sans); margin: 0 0 12px; }
+.card .id, .card-project, .card-bottom, .priority { font-size: 11px; }
+.card-project { font-family: var(--sans); }
+.card-project::before { content: none; }
+.card .badge { font: 11px/1.4 var(--sans); }
+.card[data-status='blocked'], .card[data-status='conflict'] { border-left: 2px solid var(--danger); }
+.card[data-status='in_progress'], .card[data-status='claimed'] { border-left: 2px solid var(--warn); }
+.lane-empty { padding: 24px 10px; border: 0; font: var(--font-meta)/1.5 var(--sans); color: var(--faint); }
+.dep-chip { border-radius: var(--radius-tight); font-size: 10px; border-color: var(--line); }
+.task-reason, .task-waiting { font-size: 11px; }
+.hint-center { padding: 10px 0; color: var(--muted); }
+.topo-x6-legend { font: 11px/1.5 var(--sans); top: 14px; }
+.topo-x6-bar { top: 8px; }
+.topo-x6-btn { height: 28px; font-size: 11px; }
+.topo-x6-node .status { border: 0; padding: 0; font: 10px/1.4 var(--sans); }
+.topo-x6-node[data-status='backlog'], .topo-x6-node[data-status='ready'],
+.topo-x6-node[data-status='in_review'], .topo-x6-node[data-status='merging'] { border-left-color: var(--line-strong); }
+.topo-x6-node[data-status='in_progress'], .topo-x6-node[data-status='claimed'], .topo-x6-node[data-status='self_check'] {
+  border: 1px solid var(--line); border-left: 2px solid var(--warn); background: var(--card); box-shadow: none;
+}
+.topo-x6-node[data-status='done'], .topo-x6-node[data-status='cancelled'] { opacity: 1; filter: none; }
+.topo-x6-node[data-status='done'] .status { color: var(--ok); }
+.topo-x6-node[data-status='blocked'] .status, .topo-x6-node[data-status='conflict'] .status { color: var(--danger); }
+.topo-x6-node[data-status='in_progress'] .status, .topo-x6-node[data-status='claimed'] .status { color: var(--warn); }
+.topo-x6-node.active { border-color: var(--accent); }
+.vnext { flex: 1; min-height: 0; overflow: auto; padding-bottom: 24px; }
+.vnext .table-wrap { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+.table th { font-weight: 500; }
+.table td { padding-top: 10px; padding-bottom: 10px; }
+.table tbody tr:last-child td { border-bottom: 0; }
+.vnext-detail { border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 20px 0; background: transparent; }
+.drawer-head { background: var(--panel); }
+.drawer-head h2 { font-weight: 600; }
+.drawer-section h3 { font: 500 var(--font-meta)/1.5 var(--sans); }
+.dep-dir { font: var(--font-meta)/1.5 var(--sans); letter-spacing: 0; }
+.kv dd { font-family: var(--sans); }
+
+@media (min-width: 1500px) {
+  .app { grid-template-columns: 232px minmax(0, 1fr); }
+  .app .content { padding-top: 24px; }
+  .search-box { width: 260px; }
+  .col { flex-basis: 264px; }
+}
+@media (max-width: 1100px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .app .sidebar { display: flex; position: fixed; inset: 0 auto 0 0; width: 240px; z-index: 40; padding-top: 18px; }
+  .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 39; background: var(--scrim); }
+  .sidebar .brand { padding-bottom: 16px; padding-right: 32px; }
+  .sidebar .sidebar-close { display: inline-flex; position: absolute; top: 18px; right: 10px; width: 34px; padding: 0; }
+  .app .topbar { height: 48px; padding: 0 16px; gap: 8px; }
+  .topbar .breadcrumb { gap: 8px; }
+  .topbar .breadcrumb > .dim, .topbar .breadcrumb > .slash, .topbar #crumb-scope, .topbar #subtitle { display: none; }
+  .topbar-tools { gap: 6px; }
+  .topbar .page-title { font-size: 14px; }
+  .topbar .project-select { max-width: 420px; }
+  .app .content { padding: 12px 16px 0; }
+  .page-heading { margin-bottom: 8px; gap: 8px; }
+  .page-heading h1 { font-size: 20px; }
+  .stats { padding: 6px 0; margin-bottom: 10px; }
+  .stats .stat { padding: 0 10px; gap: 8px; }
+  .stat-value { font-size: 17px; }
+  .toolbar { gap: 8px; padding-bottom: 10px; }
+  .toolbar-right { gap: 8px; }
+  .board-meta-left { gap: 8px; }
+  .toolbar .search-box { flex: 1; min-width: 130px; width: 160px; }
+  .filters select { max-width: 180px; }
+  #board-count { display: none; }
+}
+@media (max-width: 700px) {
+  .app .topbar { padding: 0 10px; }
+  .app .content { padding: 10px 10px 0; }
+  .topbar .project-select { max-width: none; }
+  .topbar .page-title { font-size: 13px; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
+  .topbar select.theme-select { max-width: 76px; padding-left: 6px; padding-right: 20px; }
+  .page-heading h1 { font-size: 18px; }
+  .join-button { font-size: 11px; }
+  .stats .stat { flex-direction: column; gap: 2px; padding: 0 6px; }
+  .stats .stat-label { font-size: 10px; }
+  .stats .stat-value { font-size: 16px; }
+  .board-meta-left { flex-basis: 100%; }
+  .view-toggle { width: 100%; }
+  .view-toggle button { flex: 1; padding: 0 6px; font-size: 11px; gap: 4px; }
+  .view-toggle .ui-icon { width: 14px; height: 14px; }
+  .toolbar .search-box { min-width: 90px; }
+  .toolbar .filters select { flex: 1; min-width: 0; width: 70px; }
+  .col { flex-basis: 264px; }
+  .topo-x6-legend { max-width: calc(100% - 160px); gap: 4px; font-size: 10px; }
+}
+@media (pointer: coarse) {
+  .sidebar .nav-item { min-height: 44px; }
+  .sidebar-toggle, .sidebar-close { min-height: 40px; width: 40px; }
+}
+
+/* 工具栏「自动执行」开关：与「接入」并排，处在筛选左侧。
+   三态用圆点颜色区分：就绪=强调色、开启=绿色、未就绪=灰；未就绪仍可聚焦，
+   因为 title 里写着原因，键盘与读屏用户也能知道为什么点不动。 */
+.auto-exec { display: inline-flex; align-items: center; gap: 6px; }
+.auto-exec__node {
+  height: 30px;
+  /* 节点名（如「DeepSeek Harness（本机）」）比通用下拉更长：给到 220px，
+     再窄就只剩「DeepSeek Harness (」这种看不出是哪个节点的残句。 */
+  max-width: 220px;
+  font-size: var(--font-small, 12px);
+  color: var(--muted);
+}
+.auto-exec__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  font-size: var(--font-small, 12px);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.auto-exec__toggle:hover:not(:disabled) { background: var(--hover); border-color: var(--line-strong); color: var(--text); }
+.auto-exec__toggle:disabled { opacity: .62; cursor: not-allowed; }
+.auto-exec__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--muted) 35%, transparent);
+}
+.auto-exec[data-mode="on"] .auto-exec__toggle { color: var(--text); border-color: var(--line-strong); }
+.auto-exec[data-mode="on"] .auto-exec__dot { background: var(--ok, #35c07a); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok, #35c07a) 45%, transparent); }
+.auto-exec[data-mode="off"] .auto-exec__dot { background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.auto-exec[data-mode="blocked"] .auto-exec__toggle { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+
+.auto-exec-modal { width: min(460px, calc(100vw - 32px)); }
+.auto-exec-modal__foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.auto-exec-modal__ok { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+.auto-exec-modal__ok:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-ink); }
+
+@media (max-width: 1100px) {
+  .auto-exec__node { max-width: 140px; }
+  .auto-exec__toggle { font-size: 11px; }
+}

@@ -1,0 +1,27 @@
+{
+  "schema": "maw.evidence.trae/capability-matrix/v1",
+  "source": {
+    "task": "VN-306",
+    "evidence_dir": "docs/evidence/trae",
+    "platform": "darwin",
+    "generated_at": "2026-10-24T00:15:00Z",
+    "probe_scope": "分级与只读 --version/--help；不为验收安装 CLI；不登录、不发模型任务"
+  },
+  "version_binding": {
+    "valid_for_cli_versions": ["1.0.0"],
+    "invalidated_by": ["cli_version_change", "entry_class_change", "platform_change"],
+    "rule": "IDE chat 与独立 CLI 分表；CLI 的 observed 受管行仅在版本命中且认证就绪时成立，换版本降级为 unobserved"
+  },
+  "capabilities": [
+    {"id": "T01", "name": "entry.ide_chat_present", "state": "observed", "class": "ide_chat"},
+    {"id": "T02", "name": "managed.launch", "state": "unsupported", "class": "ide_chat"},
+    {"id": "T03", "name": "managed.background_result_recovery", "state": "unsupported", "class": "ide_chat"},
+    {"id": "T10", "name": "entry.cli_version_probe", "state": "observed", "class": "cli"},
+    {"id": "T11", "name": "entry.cli_help_probe", "state": "observed", "class": "cli"},
+    {"id": "T12", "name": "print.headless_mode", "state": "observed", "class": "cli"},
+    {"id": "T13", "name": "managed.launch", "state": "observed", "class": "cli", "requires": ["version=1.0.0", "auth_ready"]},
+    {"id": "T14", "name": "managed.background_result_recovery", "state": "observed", "class": "cli", "requires": ["version=1.0.0", "auth_ready"]},
+    {"id": "T15", "name": "auth.missing_credentials_detectable", "state": "observed", "class": "cli"},
+    {"id": "T17", "name": "cancel.graceful_stop", "state": "unknown", "class": "cli"}
+  ]
+}
