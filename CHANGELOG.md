@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ### Changed
 
+- **Docs: desktop shell status closed out**: README / ROADMAP / `clients/desktop` mark the Tauri MVP as **shipped on macOS** (hub spawn, board WebView, tray, SSE notifications). Tray notification detail and non-macOS builds stay planned.
 - **Submitted tasks wait for merge without agent_expired→blocked**: `merging`/`in_review` only mark the agent offline (`agent_expired_waiting_merge`).
 - **submit auto-rebases onto main tip** (fixes E313); add `maw sync`. Re-submit from `merging`/`in_review` allowed; must run inside the task worktree.
 - **merge no longer requires MAW_AGENT**; `--task` / `--abort` supported. prune keeps unmerged artifacts (`--force-unmerged` to delete).

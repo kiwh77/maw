@@ -25,7 +25,7 @@
 | 富事件流（`/api/feed`、SSE `event` 帧） | 已交付 |
 | vNext 工作台视图（13 个视图、工程与详情双栏、静态导出只读） | 已交付 |
 | 只读观测 API（`timeline` / `activity` / `sessions` / `analytics` / `notifications`、能力探测、SSE 流） | 已交付 |
-| Tauri 桌面壳 + 托盘通知 | [进行中](clients/desktop/README.md) |
+| Tauri 桌面壳 + 托盘通知 | [已交付 — 仅 macOS](clients/desktop/README.md) |
 
 ## 支持范围
 

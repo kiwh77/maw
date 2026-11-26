@@ -43,3 +43,9 @@ Build: `cargo tauri build`
 - `src-tauri/icons/` — bundle icons + tray
 - `src-tauri/` — Rust / Tauri shell
 - Front-end: no board UI of our own; navigates to the local hub URL once ready
+
+## Status
+
+**macOS MVP shipped** (VN-902): spawn local hub, reuse the board page, tray menu, system notifications via SSE / feed catch-up, navigation allowlist and token redaction. Icons and tray assets are wired.
+
+Still out of claim: native Linux / Windows builds; per-event-type copy / sounds and multi-display window memory (see ROADMAP “Tray notification detail”). Full `cargo tauri build` needs a local Tauri CLI; CI only runs desktop prerequisites, not a full bundle.

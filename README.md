@@ -28,7 +28,7 @@ Design: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: [docs/ROADMAP.md](docs/ROADMA
 | Managed single run (`maw managed start`) | Shipped — **macOS only** |
 | Automatic dispatch (`[managed] auto_enabled`) | Off by default, experimental, **macOS only** |
 | Managed model invocation | Not supported (no evidence yet) |
-| Tauri desktop shell + tray notifications | [In progress](clients/desktop/README.md) |
+| Tauri desktop shell + tray notifications | [Shipped — macOS only](clients/desktop/README.md) |
 | English / Chinese docs, board UI, CLI, protocol, skills | Shipped |
 
 ## Support scope
