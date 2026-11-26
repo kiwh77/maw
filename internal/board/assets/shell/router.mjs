@@ -86,7 +86,8 @@ export function parseRoute(search = "", hash = "", isKnownView = null) {
     project,
     agent: params.get(PARAM_AGENT) || "",
     status: params.get(PARAM_STATUS) || "",
-    iteration: params.get(PARAM_ITERATION) || "",
+    // iteration：参数缺席 = 不筛（null）；`?iteration=` = 筛未归属（""）。
+    iteration: params.has(PARAM_ITERATION) ? (params.get(PARAM_ITERATION) || "") : null,
     search: params.get(PARAM_SEARCH) || "",
     detail: DETAIL_VIEWS.indexOf(view) >= 0 ? (params.get(PARAM_DETAIL) || "") : "",
     fromHash: Boolean(anchor) && !params.get(PARAM_PROJECT),
@@ -105,6 +106,12 @@ export function serializeQuery(route = {}) {
   const view = route.view || DEFAULT_VIEW;
   if (view !== DEFAULT_VIEW) params.set(PARAM_VIEW, view);
   FILTER_KEYS.forEach(([param, field]) => {
+    if (field === "iteration") {
+      // null/undefined：不写；""：写空值（未归属）；其它：写原文。
+      if (route.iteration === null || route.iteration === undefined) return;
+      params.set(param, route.iteration);
+      return;
+    }
     const value = route[field] || "";
     if (value) params.set(param, value);
   });
@@ -126,12 +133,16 @@ export function serializeRoute(route = {}, pathname = "/") {
 }
 
 /** 路由等价判断：任一筛选、视图或详情不同即不相等。 */
+function normalizeIteration(value) {
+  return value === undefined ? null : value;
+}
+
 export function sameRoute(a = {}, b = {}) {
   return (a.view || DEFAULT_VIEW) === (b.view || DEFAULT_VIEW) &&
     (a.project || "") === (b.project || "") &&
     (a.agent || "") === (b.agent || "") &&
     (a.status || "") === (b.status || "") &&
-    (a.iteration || "") === (b.iteration || "") &&
+    normalizeIteration(a.iteration) === normalizeIteration(b.iteration) &&
     (a.search || "") === (b.search || "") &&
     (a.detail || "") === (b.detail || "");
 }
@@ -170,7 +181,7 @@ function parseDefaults(route = {}) {
     project: route.project || "",
     agent: route.agent || "",
     status: route.status || "",
-    iteration: route.iteration || "",
+    iteration: route.iteration === undefined ? null : route.iteration,
     search: route.search || "",
     detail: route.detail || "",
   };

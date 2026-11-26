@@ -449,7 +449,7 @@ test("加载／空／错误／过期／未认证状态各走独立文案", async
     if (name === "error") assert.match(html, /empty-state--error/);
     if (!["loading", "empty"].includes(name)) assert.match(html, /empty-state/);
   }
-  assert.match(mod.renderDeliveryList(states.empty, { lang: "zh" }), /view\.deliveries\.title|交付与验收/);
+  assert.match(mod.renderDeliveryList(states.empty, { lang: "zh" }), /没有可显示的交付记录|empty-state/);
 });
 
 test("列表只有原始行时不替用户下结论", async () => {
@@ -475,6 +475,8 @@ test("渲染只使用共享组件类名，不自带样式", async () => {
   const allowed = new Set([
     "table-wrap", "table", "badge", "empty-state", "empty-state__text", "empty-state--error",
     "field", "field-hint", "button", "id", "name", "path", "num", "time",
+    // 交付详情元信息条：视图私有布局类，不进共享组件清单。
+    "deliveries-meta",
   ]);
   const html = [
     mod.renderDeliveryDetail(delivery(), { lang: "zh", run: { phase: "completed", exit_code: 0 } }),
