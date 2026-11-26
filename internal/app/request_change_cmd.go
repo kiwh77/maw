@@ -119,7 +119,7 @@ func RequestChange(cwd string, opts RequestChangeOptions) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 扩 scope 后必须重写 worktree 任务卡，避免 pre-commit / Agent 仍读旧 .maw/task.json。
+	// 扩 scope 后必须重写 worktree 任务卡，避免 Agent 仍读旧 .maw/task.json。
 	var refreshed *db.Task
 	_ = db.WithTx(pc.GlobalDB, func(tx *sql.Tx) error {
 		refreshed, _ = db.GetTask(tx, pc.ID(), taskID)

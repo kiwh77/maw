@@ -756,17 +756,6 @@ func main() {
 	iterationCmd.AddCommand(iterationCloseCmd)
 	root.AddCommand(iterationCmd)
 
-	hookCmd := &cobra.Command{Use: "hook", Hidden: true}
-	hookCmd.AddCommand(&cobra.Command{
-		Use: "pre-commit",
-		Run: func(cmd *cobra.Command, args []string) { printRes(app.HookPreCommit(cwd)) },
-	})
-	hookCmd.AddCommand(&cobra.Command{
-		Use: "pre-push",
-		Run: func(cmd *cobra.Command, args []string) { printRes(app.HookPrePush(cwd, os.Stdin)) },
-	})
-	root.AddCommand(hookCmd)
-
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}

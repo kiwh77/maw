@@ -10,6 +10,7 @@
 
 - **Lead / System / Managed 调度层（破坏性）**：移除 `maw lead`、`maw system`、`maw managed`、`maw node`、隐藏 `__runner`；`board --serve` 不再启动 dispatch Leader / system Watcher；删除 `systemagent`、`engine/dispatch`、`runner`、`goal`、`httpapi/systemjobs` 与 Pi runtime。协议升至 **v9**（看板仅观测；旁路不得改 claimed）。人工主路径与 `[identity] leads` / `interrupt` / `task unblock` / `manual-compat` nodes 保留。
 - **看板调度相关 UI**：侧栏隐藏「节点」「受管策略」；统计页去掉自愈页签；工程编辑去掉自动派发／节点策略字段；移除节点编辑模态与 Router 问题类型词。
+- **Git hook 子系统**：删除已无入口的 `internal/hooks`、隐藏命令 `maw hook pre-commit|pre-push` 及相关 i18n（树外 attach 后 `init` 本就不装钩子）。
 
 ### Changed
 
