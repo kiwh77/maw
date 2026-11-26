@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
 ### Removed
 
 - **Lead / System / Managed 调度层（破坏性）**：移除 `maw lead`、`maw system`、`maw managed`、`maw node`、隐藏 `__runner`；`board --serve` 不再启动 dispatch Leader / system Watcher；删除 `systemagent`、`engine/dispatch`、`runner`、`goal`、`httpapi/systemjobs` 与 Pi runtime。协议升至 **v9**（看板仅观测；旁路不得改 claimed）。人工主路径与 `[identity] leads` / `interrupt` / `task unblock` / `manual-compat` nodes 保留。
@@ -15,6 +17,7 @@
 ### Changed
 
 - **文档：桌面壳状态收口**：README／ROADMAP／`clients/desktop` 将 Tauri MVP 标为 **macOS 已交付**（拉起中枢、看板 WebView、托盘、SSE 通知）。托盘通知细化与非 macOS 构建仍属规划。
+- **发布流水线**：CI／tag Release 去掉已删除的 Pi runtime 打包；只发 CLI 多平台压缩包。
 - **提交后等待合入不再因心跳过期变 blocked**：`merging`/`in_review` 过期只下线 Agent（`agent_expired_waiting_merge`），保留 Owner/branch。
 - **submit 自动 rebase 到主干 tip**：消灭并行合入后的 E313；并提供 `maw sync`。允许 `merging`/`in_review` 再交；必须在任务 worktree 内执行。
 - **merge 不强制 MAW_AGENT**；支持 `--task` / `--abort`。prune 保护未合入产物（需 `--force-unmerged` 才删）。

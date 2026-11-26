@@ -13,8 +13,7 @@ on:
 # 1. 覆盖率地板保持 >= 35，不因为新增断言或换 runner 而下调，也不加 -run 白名单绕开失败用例。
 # 2. 已知红不掩盖。基线就红的用例（例：vn-981 键盘导航）照样跑，红就是红，不许 --grep-invert 或
 #    continue-on-error 把它藏起来。要变绿只能改代码或改断言，不能改「跑不跑」。
-# 3. 跨编译不等于原生证据。platform-matrix 只证明六个目标能编译；真正跑过受管进程并被观测到的
-#    只有 darwin。managed 支持范围由 tests/platform 的断言钉死。
+# 3. 跨编译不等于原生证据。platform-matrix 只证明六个目标能编译；桌面壳仅 macOS 有构建/实测承诺。
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -136,42 +135,7 @@ jobs:
         run: CGO_ENABLED=0 go build -o /tmp/maw-vnext-release-check ./cmd/maw
       - name: Note cross-compile boundary
         run: |
-          echo "::notice::tests/platform 的交叉编译用例只证明六个目标能构建；managed 支持范围仅 darwin（见平台矩阵文档）。"
-
-  pi-runtime:
-    name: Pi 运行时（三模式执行器）
-    strategy:
-      fail-fast: false
-      matrix:
-        # 两个平台都跑同一条冒烟：npm ci → 单测 → 无密钥 --probe。
-        # 实际支持范围以这里通过的矩阵为准；没进矩阵的平台不宣称支持。
-        os: [ubuntu-latest, macos-14]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: runtimes/pi/package-lock.json
-      - name: Install pinned Pi SDK
-        run: npm --prefix runtimes/pi ci
-      - name: node --test
-        run: npm --prefix runtimes/pi test
-      - name: Probe without model keys
-        run: |
-          set -euo pipefail
-          out="$(node runtimes/pi/src/main.mjs --probe)"
-          echo "$out"
-          node -e '
-            const r = JSON.parse(process.argv[1]);
-            if (!r.ok) { console.error("probe ok=false"); process.exit(1); }
-            if (r.protocol.format !== "pi-stream-json" || r.protocol.version !== "1") {
-              console.error(`protocol mismatch: ${r.protocol.format}/${r.protocol.version}`);
-              process.exit(1);
-            }
-            console.log(`pi-runtime smoke on ${process.env.RUNNER_OS}: sdk=${r.sdk} node=${r.node}`);
-          ' "$out"
+          echo "::notice::tests/platform 的交叉编译用例只证明六个目标能构建；桌面壳仅 macOS 有构建/实测承诺（见平台矩阵文档）。"
 
   desktop-prereq:
     name: 桌面构建前置（macOS）
